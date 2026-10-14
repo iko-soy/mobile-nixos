@@ -644,6 +644,27 @@ The same driver logs the first three bytes of some TX/RX buffers through
 `pr_notice`; acquisition logs must remain private. `CONFIG_U_SERIAL_CONSOLE`
 is disabled in the retained configuration.
 
+The pinned link:{kernel-src}/drivers/usb/gadget/function/u_serial.c#L1409[serial allocation]
+registers `ttyGS` when the configfs ACM function is created, before UDC binding.
+Its link:{kernel-src}/drivers/usb/gadget/function/u_serial.c#L783[open path]
+permits opening without a connected USB peer, supporting raw setup before
+binding. `O_NONBLOCK` does not bound every driver operation. Explicit unbind
+requires a newline write to link:{kernel-src}/drivers/usb/gadget/configfs.c#L306[`UDC`];
+then close all owned TTY descriptors before removing the function, whose
+link:{kernel-src}/drivers/usb/gadget/function/u_serial.c#L1380[release path]
+waits for old opens to close. Unbind aborts outstanding USB requests: the
+link:{kernel-src}/drivers/usb/gadget/function/u_serial.c#L1023[reported TTY output queue]
+does not establish host receipt of an already submitted request.
+
+The separate link:usb/README.adoc[USB lifecycle fixture] exercises real
+configfs ACM and host `cdc_acm` with a software `dummy_hcd` controller inside a
+disposable Linux VM. It does not configure the phone, add USB to the production
+ramdisk or relax the production mount guards. The synthetic VM's controller and
+modern kernel cannot validate Titan MTU3 behavior or Mac recognition.
+Its five cases passed on Linux 6.18.38 on 2026-10-15, covering binary transfer,
+invalid/occupied controllers, an empty configuration and incomplete-stream
+disconnect, with explicit owned cleanup and unchanged generated disk hashes.
+
 An off-device link:transport/protocol.adoc[serial transfer prototype] now defines
 bounded nonce/sequence framing, SHA-256 verification and a two-way completion
 exchange. Its separate sender/receiver tests use synthetic sockets and PTYs.

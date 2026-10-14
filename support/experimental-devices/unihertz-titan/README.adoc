@@ -218,6 +218,22 @@ filesystem/payload verification, specific failure results and complete disk
 hashes before and after each guest. The emulated second serial port is a test
 transport; it does not establish Titan USB operation or a recovery route.
 
+== Disposable VM USB startup fixture
+
+`usb.vmTests` uses real Linux configfs ACM, `dummy_hcd` and host `cdc_acm` inside
+a networkless x86_64 VM. The separate link:usb/README.adoc[USB lifecycle fixture]
+checks raw gadget readiness before binding, host enumeration, binary transfers
+and explicit disconnect/cleanup with fixed synthetic descriptors. It uses no
+phone or physical USB passthrough and does not execute block acquisition.
+All five cases passed with Linux 6.18.38 on 2026-10-15; the Mac independently
+verified all downloaded fixture disks against their unchanged before/after hashes.
+
+The callback temporarily owns a visible configfs mount after the existing
+rescue guard's VM handoff. Production PID 1 and the source guard still require
+their original six mounts; the production AArch64 rescue ramdisk remains
+without USB startup. Combining USB with acquisition requires a separately
+reviewed mount policy and lifetime supervisor, followed by hardware validation.
+
 == Reference inputs
 
 Every downloaded build input has a fixed revision or content hash. The
