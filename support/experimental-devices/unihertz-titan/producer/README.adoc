@@ -1,0 +1,78 @@
+= Titan producer supervision prototype
+
+This Linux-only prototype exercises the source side of the
+link:../transport/protocol.adoc[TTR1 transport] using synthetic regular ext4
+image files. It is separate from rescue PID 1 and is not a phone acquisition
+service. It accepts no block-device source and performs no mount, repair, gadget
+setup or boot operation.
+
+== Source and pipeline contract
+
+The local launcher supplies three already-open, distinct descriptors numbered
+at least 3: a read-only regular source at offset zero, a write-only data FIFO and
+a write-only status FIFO. The two FIFOs must have different identities. The
+launcher closes its own copies of child pipe ends so EOF can be observed
+correctly. Peer requests cannot select any source, executable or command.
+
+Before spawning children, the supervisor checks the source's ext-family magic,
+clean state, absence of pending journal recovery or orphan cleanup, and filesystem
+geometry against the complete image size. These are selected preflight checks,
+not a complete filesystem validator. The source is bounded to 1 TiB. It retains
+the source descriptor and records its identity, size, timestamps and primary superblock
+for comparison after acquisition. These observations can detect changes; they
+do not exclude another writer, a mounted loop device or an atomicity failure.
+
+The production build has fixed `/bin/e2image` and `/bin/zstd` executable paths.
+Its pipeline is `e2image -ra /proc/self/fd/N -` followed by `zstd -q -c`, with a
+minimal environment and fixed arguments. Executable overrides exist only in
+separately compiled test variants. The production binary rejects those options.
+It is not yet packed into a ramdisk with its required tools.
+
+The supervisor concurrently drains both stderr streams and compressed stdout,
+and pumps output through a bounded queue to the data FIFO. This permits streaming
+without keeping the archive in RAM, and prevents a slow consumer from blocking
+diagnostic handling. The configured byte limit applies to compressed output.
+Each diagnostic stream is bounded independently. It accepts only the exact
+pinned e2image version banner and no zstd diagnostics. A read-error message with
+exit status zero is a failure.
+
+The supervisor sends `TPST` followed by a big-endian zero status only after:
+
+* Both pipeline processes exited normally with status zero.
+* Output reached EOF and every queued byte was delivered to the data FIFO.
+* Both diagnostic streams reached EOF and passed validation.
+* Both child process groups were cancelled and the direct children reaped.
+* The retained source's metadata and primary superblock still match.
+* The configured deadline has not expired.
+
+Any failure cancels the pipeline and prevents a zero status. The transport then
+leaves the host transfer incomplete. The supervisor does not claim that a
+successfully transferred archive is a consistent backup of a live filesystem.
+Protocol polling is bounded by a monotonic deadline. Cleanup signals both child
+process groups and waits up to one additional second to reap the direct children.
+Descendants that stay in those groups are signalled, but the supervisor does not
+reap them or contain processes that deliberately escape their group. The fixed
+helper programs are trusted. A synchronous filesystem operation or a child stuck
+in uninterruptible kernel I/O cannot be forcibly interrupted by that deadline
+alone; incomplete cleanup prevents success.
+
+== Build and test without a phone
+
+[source,sh]
+----
+nix-build support/experimental-devices/unihertz-titan -A producer.supervisor --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A producer.tests --no-out-link
+----
+
+The tests use generated ext4 files, private host output, pipes, sockets and test
+executables. The integration path crosses the supervisor, sender and receiver,
+then decompresses the saved archive sparsely and checks the restored filesystem
+and known payload. Failure fixtures exercise pipeline errors and cancellation.
+Native Linux imaging/compression tools are used in both test runs; the second
+run emulates the AArch64 supervisor and sender under qemu-user. The separate
+rescue tool fixture covers AArch64 e2image/Zstandard execution.
+
+Actual phone use still requires a reviewed block-source selector, complete
+partition identity and mount/holder checks, writer quiescence, a USB startup
+supervisor and an authorized, demonstrated boot/return route. This prototype
+does not close those recovery requirements.

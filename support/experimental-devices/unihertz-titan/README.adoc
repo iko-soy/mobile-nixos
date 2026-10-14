@@ -137,10 +137,11 @@ authentication, and a successful transfer does not establish source consistency.
 
 The sender accepts only already-open local read-only regular files or pipes;
 the host cannot request paths, commands or partitions. Streamed input additionally
-requires a separate local producer-status pipe. A future acquisition supervisor
-must validate every pipeline exit and diagnostic before reporting success there.
-It must account for e2image's possible read-error diagnostics with exit status
-zero. That supervisor and phone storage acquisition are not implemented here.
+requires a separate local producer-status pipe. The separate
+link:producer/README.adoc[producer prototype] exercises pipeline supervision
+against regular ext4 image files, including e2image read-error diagnostics with
+exit status zero. Phone block-source selection and acquisition remain
+unimplemented.
 
 Limits apply to transmitted bytes, so a future compressed sparse acquisition can
 stream without retaining userdata in RAM or reserving its entire logical size
@@ -158,9 +159,25 @@ PYTHONDONTWRITEBYTECODE=1 python3 support/experimental-devices/unihertz-titan/tr
 ----
 
 The receiver's explicit TTY interface is for later integration. Do not point it
-at the running phone: no ACM gadget, source supervisor or boot/return route has
-been established. Actual USB enumeration, peer readiness and acquisition
-quiescence remain separate requirements. Keep artifacts and diagnostics private.
+at the running phone: no ACM gadget, phone source supervisor or boot/return
+route has been established. Actual USB enumeration, peer readiness and
+acquisition quiescence remain separate requirements. Keep artifacts and diagnostics private.
+
+== Off-device imaging/compression supervisor
+
+`producer.supervisor` builds a separate static AArch64 pipeline supervisor with
+fixed `/bin/e2image` and `/bin/zstd` paths. It accepts already-open read-only
+regular filesystem images and separate write-only data/status pipes. It validates the
+primary superblock and source geometry, concurrently drains compressed output
+and both diagnostic streams, and checks child exits and source stability before
+emitting the transport's success status. It is not part of rescue PID 1.
+
+The link:producer/README.adoc[producer contract] records the complete checks and
+limitations. `producer.tests` exercises a generated filesystem through producer,
+sender, receiver, sparse decompression and read-only filesystem/payload checks.
+Separately compiled test variants allow synthetic failing executables; the
+production binary rejects those overrides. No phone block device, live userdata
+copy or recovery boot is part of these tests.
 
 == Reference inputs
 
@@ -528,3 +545,34 @@ UDC, `mtu3_phone` driver and existing ADB/RNDIS gadget functions; see the
 link:hardware-inventory.adoc#_direct_usb_gadget_observation[hardware record].
 No ACM gadget was enabled and no sender binary was installed or run on the phone.
 The original rescue ramdisk remains separate from this transport prototype.
+
+=== Follow-up: off-device imaging/compression supervision
+
+The producer builds as static musl executables for x86_64 and AArch64 with
+strict compiler warnings. The production AArch64 executable is 84096 bytes,
+with SHA-256
+`e25e75dfcbdb03418100968c5c8cc0e78df0c01980bc4d5b421f81028eb6c36b`.
+A same-builder `nix-build --check -A producer.supervisor` reproduced the complete
+output. The private Mac copy matches that hash; ELF inspection found no
+interpreter or shared-library dependency.
+
+All 11 producer test methods pass natively on Linux and with the AArch64
+supervisor and sender under qemu-user. These are two executions of the same
+suite. Successful pipelines use separately compiled test variants to select
+executables; the production binary is checked for rejecting those overrides.
+Imaging/compression helpers are native Linux executables in both runs. The
+separate rescue tool fixture covers AArch64 e2image/Zstandard execution.
+
+The integration test streams a synthetic ext4 image through the producer and
+transport, restores it sparsely, runs `e2fsck -fn`, and verifies its known payload.
+Failure cases cover zero-exit read-error diagnostics, child failure, diagnostic
+and output bounds, consumer disconnect/backpressure, deadlines and descendant
+cancellation, source changes, descriptor isolation, and pending journal/orphan
+cleanup. Status must remain absent while a child is still running after output
+EOF. The reviewed local source hashes match the builder checkout used for these
+tests. The existing 104-test/packaging target retains its previously validated
+derivation identity.
+
+This stage performed no phone operations. The producer remains separate from
+rescue PID 1, accepts no block devices, and does not establish a consistent
+userdata/calibration backup, USB gadget startup or a boot/return procedure.

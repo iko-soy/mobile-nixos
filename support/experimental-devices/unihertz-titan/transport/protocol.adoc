@@ -62,8 +62,10 @@ and EOF on that descriptor before sending END. Any nonzero status, extra bytes,
 missing status, input failure or timeout prevents END. The future local producer
 supervisor must provide zero only after every pipeline process succeeded and all
 bounded diagnostics were checked. In particular e2image can report read failures
-while returning zero. This prototype does not yet provide that supervisor and
-must not treat ordinary pipe EOF as backup success.
+while returning zero. The separate
+link:../producer/README.adoc[producer prototype] exercises supervision against
+regular ext4 files; phone block-source acquisition remains unimplemented.
+Ordinary pipe EOF must not be treated as backup success.
 
 Each endpoint has an absolute monotonic deadline covering data and handshake,
 bounded buffers, short-I/O/EINTR/EAGAIN handling and a maximum frame size. The
