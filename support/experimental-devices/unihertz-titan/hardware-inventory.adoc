@@ -4,12 +4,15 @@
 This is the M0 collection procedure for the experimental Unihertz Titan port.
 It applies to the original Titan running Ubuntu Touch. The owner has supplied
 a runtime summary and inventory excerpts, recorded below. These identify this
-phone's internal eMMC and partition capacities. Exact build provenance,
-boot-image contents and recovery procedure still need confirmation.
+phone's internal eMMC and partition capacities. A later direct USB session and
+verified installed-image preservation are recorded separately below from the
+original supplied excerpts. Exact build provenance and a demonstrated recovery
+procedure remain outstanding.
 
 The collector has automated host-side tests. The owner's excerpts are partial
-hardware evidence; the complete probe report and raw inventory have not been
-reviewed here. It does not establish a boot result for the experimental image.
+hardware evidence; the original complete probe report was unavailable. The later
+direct collection has reviewed probe status, with one permission-denied interface.
+Neither establishes a boot result for the experimental image.
 
 [[runtime-baseline]]
 == Owner-reported runtime baseline: 2026-10-14
@@ -216,12 +219,51 @@ limited support/functionality below the recommendation. They also list
 of 255 tools on 4.14 is plausible without resolving the known configuration gaps
 or validating a NixOS package set.
 
-Next, obtain probe statuses and identify matching private restore artifacts and
-a verified recovery procedure. The owner reports no saved boot image or recovery
-materials and has a macOS computer available for USB preparation. M0 and M1
+At that stage probe statuses, saved images and recovery materials were missing.
+The subsequent Mac session below supplies direct status and private image copies;
+a verified recovery procedure is still outstanding. M0 and M1
 hardware boot validation remain open; no generated image has been booted on this
 phone. See link:recovery-preparation.adoc[recovery preparation and candidate artifacts]
 for the subsequent source research and local handoff.
+
+== Direct normal-mode USB follow-up: 2026-10-14
+
+The Mac reached the owner's running Titan over authorized ADB as `phablet`.
+Direct reads reconfirmed eMMC and the boot/recovery/dtbo label mappings, block
+types and capacities above. Raw reads require the existing sudo password;
+partition permissions were not changed. The owner ran the bounded reader with
+sudo from a local Terminal; boot/recovery/dtbo copies now have exact byte counts
+and matching Mac readback / independent phone hashes. Boot exactly matches the
+documented CI candidate; recovery differs. The private acquisition procedure and
+remaining recovery gates are in link:recovery-preparation.adoc[the recovery record].
+
+The active PID 1 is `systemd`; its D-Bus `Version` property reports
+`255.4-1ubuntu8.17`, matching the installed client. Both cgroup v2 root files still
+report only `memory`. This closes the manager-version measurement, not systemd
+261 compatibility. The direct `/proc/config.gz` collection again hashes to
+`1113327761998175c8cc78dbce10ac23c7fed8a8418f1072e553e8c0acc4286b`
+after decompression.
+
+Mount and loop evidence now identifies `/nix` as userdata's `system-data/nix`,
+`/home` as `user-data`, and Android data as `android-data`. `loop0` uses
+`/userdata/ubuntu.img`; `loop1` uses
+`/var/lib/lxc/android/android-rootfs.img`. NVCFG, NVDATA and both protect
+partitions are mounted read-write. These facts constrain a consistent backup;
+live raw copies are not automatically usable restores.
+
+The readable OTA configuration names device `Titan`, server
+`system-image.ubports.com` and channel `24.04-1.x/arm64/android9plus/daily`.
+An exact installed OTA image/build number remains unconfirmed.
+
+The first Mac inventory exposed a real transport bug: `adb exec-out` mishandled
+shell quoting on this Ubuntu Touch daemon, and failures were returned as status
+zero. Those files are retained privately as failed evidence and must not be used
+as a baseline. The collector now checks binary stdout and separate stderr with
+`adb shell -T`, and obtains each remote status through a validated nonce trailer
+because this daemon also loses shell-v2 exit codes. No PTY is used for binary data.
+The corrected collection includes explicit probe status; `/proc/iomem` remains
+permission-denied under `phablet`, so its memory probe requires review. No root
+memory-map claim is made.
 
 == Collect directly over SSH
 
@@ -373,7 +415,7 @@ Existing destinations and paths inside Git checkouts are rejected. ADB transport
 identifiers are used to select the phone but are not intentionally recorded in
 the report. Do not paste the output of `adb devices` into a public issue.
 
-It reads a fixed set of interfaces using a local shell, SSH or `adb exec-out`.
+It reads a fixed set of interfaces using a local shell, SSH or `adb shell -T`.
 It does not run `adb root`, `sudo`, `su`, reboot, recovery, unlock, flash, mount
 or remount commands;
 it does not install software or copy raw partitions. Starting ADB can start its
@@ -383,6 +425,8 @@ privileges. Each probe has a 20-second timeout, configurable with `--timeout`.
 The ordinary collection includes:
 
 * Kernel version and `/proc/config.gz`, when readable.
+* Active system-manager version, mountinfo, loop backing files, userdata capacity
+  and OTA channel configuration files. Missing fields remain unknown.
 * Ubuntu Touch release, device-tree model/compatibility, and a small Android
   property allowlist covering model, build and reported verified-boot state.
 * Partition names and block sizes, storage device types and SCSI driver names,
@@ -429,7 +473,9 @@ If a specific missing interface matters, inspect `report.json` and the matching
 `.stderr` file locally first. The report includes the exact fixed commands and
 their return codes, but omits the ADB selector and SSH destination. Some shell probes inspect several
 optional paths, so an exit code of zero does not mean every interface was present.
-An overall zero exit status means collection completed, not that M0 passed.
+An overall zero exit status means no probes need review, not that M0 passed.
+Exit status one preserves an incomplete collection and identifies unavailable,
+empty or diagnostic-bearing probes in `report.json`.
 
 For the next round, provide only reviewed excerpts of `storage.txt`,
 `partitions.txt`, `android-properties.txt`, `device-tree.txt` and the relevant
@@ -476,16 +522,16 @@ by itself proves the bootloader state or a usable restore procedure.
 |===
 |Field |Current evidence / required confirmation
 |Device |Original Unihertz Titan, owner-confirmed; supplied summary reports model/device `Titan`.
-|Running OS |Owner reports Ubuntu Touch `24.04.5 LTS`; OTA channel/image identifier still needed.
+|Running OS |Ubuntu Touch `24.04.5 LTS`; direct OTA configuration reports `24.04-1.x/arm64/android9plus/daily`, device `Titan`; exact installed image number still needed.
 |Storage variant |eMMC confirmed by supplied MMC type and internal partition/mount mappings; see baseline above.
 |Kernel/configuration |`4.14.141+`; uploaded configuration hash matches the recorded reference build. Exact source and kernel binary match remain unverified.
 |Underlying Android/vendor firmware |Reported Android 10 system/vendor fingerprints recorded above; matching restore source and hashes still needed.
 |Bootloader state |Android properties report `flash.locked=0` and `orange`; independent recovery/bootloader capability check outstanding.
 |Partition map/capacity |Supplied mappings and sizes recorded above; boot and recovery each 33554432 bytes.
-|DTB/DTBO layout |8 MiB `dtbo` partition observed; contents and installed boot-image DTB layout unverified.
-|Known-working boot image |Owner reports no saved image; preservation of the running installation remains outstanding.
+|DTB/DTBO layout |Installed boot/recovery have a 112135-byte DT table. The 8 MiB dtbo partition contains a 47545-byte table matching installed recovery's recovery-DTBO section; full partition preserved.
+|Known-working boot image |Private installed boot copy verified; its whole-image hash matches job 16473049944. Installed recovery and dtbo also preserved; no restore or new-image boot tested.
 |Device calibration/radio backup |No backup supplied or verified; this helper does not preserve partition contents.
-|Recovery host/tools |macOS computer available; platform-tools versions, USB connection and low-level restore tooling unverified.
+|Recovery host/tools |Mac Platform-Tools `37.0.1-15733141`; normal-mode ADB confirmed. Bootloader connectivity and low-level restore remain unverified.
 |Enter recovery/bootloader |Unknown; record exact verified procedure for this phone.
 |Temporary boot support |Unknown; do not assume `fastboot boot` or kexec is available.
 |Restore method and artifacts |Owner reports no recovery materials; research candidate sources before selecting exact commands/targets.

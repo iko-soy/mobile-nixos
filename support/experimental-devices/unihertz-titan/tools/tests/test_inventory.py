@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import stat
 import subprocess
@@ -63,11 +64,30 @@ class OutputTests(unittest.TestCase):
     def test_default_output_respects_state_directory(self):
         with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"XDG_STATE_HOME": temporary}):
             output = inventory.prepare_output(None)
-            self.assertEqual(output.parent, Path(temporary) / "mobile-nixos/titan-inventory")
+            self.assertEqual(output.parent, Path(temporary).resolve() / "mobile-nixos/titan-inventory")
             self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_usb_probe_handles_legacy_attribute_and_configfs_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            legacy = base / "android_usb/android0"
+            legacy.mkdir(parents=True)
+            (legacy / "functions").write_text("adb\n")
+            functions = base / "usb_gadget/g1/functions"
+            (functions / "ffs.adb").mkdir(parents=True)
+            (functions / "acm.GS0").mkdir()
+            script = inventory.PROBES["usb.txt"]
+            for source, fixture in (("/sys/class/android_usb", "android_usb"),
+                                    ("/sys/class/udc", "udc"),
+                                    ("/sys/kernel/config/usb_gadget", "usb_gadget")):
+                script = script.replace(source, shlex.quote(str(base / fixture)))
+            stdout, stderr, code, timed_out = inventory.run_local_probe(script, 2)
+        self.assertEqual((stderr, code, timed_out), (b"", 0, False))
+        self.assertIn(b"functions=adb\n", stdout)
+        self.assertIn(b"functions=\nacm.GS0\nffs.adb\n", stdout)
+
     def test_storage_classification_needs_driver_or_device_type(self):
         cases = [
             (b"mmcblk0.type=MMC\n", "eMMC"),
@@ -92,15 +112,82 @@ class EvidenceTests(unittest.TestCase):
 
 class AdbBoundaryTests(unittest.TestCase):
     def test_remote_script_quoting_and_no_host_shell(self):
-        script = "printf '%s\\n' 'a b'; cat /proc/version"
-        with patch.object(inventory.subprocess, "run") as run:
-            run.return_value = subprocess.CompletedProcess([], 0, b"result", b"")
+        script = "printf '%s\\n' 'a b; $(not-executed)'; printf '\\000\\015\\012\\377'; printf denied >&2; exit 7"
+        host_run = subprocess.run
+
+        def mock_adb(command, **kwargs):
+            # Execute the shell service's single command as a real shell would,
+            # then emulate Ubuntu Touch adbd dropping the remote exit status.
+            remote = host_run(["sh", "-c", command[-1]], **kwargs)
+            return subprocess.CompletedProcess(command, 0, remote.stdout, remote.stderr)
+
+        with patch.object(inventory.subprocess, "run", side_effect=mock_adb) as run:
             result = inventory.run_probe("adb", "phone; host-injection", script, 4)
         command = run.call_args.args[0]
-        self.assertEqual(command[:6], ["adb", "-s", "phone; host-injection", "exec-out", "sh", "-c"])
-        self.assertEqual(shlex.split(" ".join(command[4:])), ["sh", "-c", script])
+        self.assertEqual(command[:6], ["adb", "-s", "phone; host-injection", "shell", "-T", "-n"])
+        self.assertEqual(len(command), 7)
         self.assertNotIn("shell", run.call_args.kwargs)
-        self.assertEqual(result, (b"result", b"", 0, False))
+        self.assertEqual(result, (b"a b; $(not-executed)\n\x00\r\n\xff", b"denied", 7, False))
+
+    def test_missing_or_invalid_status_trailer_cannot_report_success(self):
+        for stderr in (b"", b"shell error", b"\n__TITAN_INVENTORY_STATUS_test:999\n"):
+            with self.subTest(stderr=stderr), patch.object(inventory.secrets, "token_hex", return_value="test"):
+                with patch.object(inventory.subprocess, "run") as run:
+                    run.return_value = subprocess.CompletedProcess([], 0, b"false evidence", stderr)
+                    stdout, error, code, timed_out = inventory.run_probe("adb", "phone", "false", 1)
+                self.assertEqual(stdout, b"false evidence")
+                self.assertIsNone(code)
+                self.assertFalse(timed_out)
+                self.assertIn(b"trailer missing or invalid", error)
+
+    def test_transport_failure_cannot_be_hidden_by_successful_remote_status(self):
+        with patch.object(inventory.secrets, "token_hex", return_value="test"):
+            with patch.object(inventory.subprocess, "run") as run:
+                run.return_value = subprocess.CompletedProcess(
+                    [], 1, b"partial", b"warning\n__TITAN_INVENTORY_STATUS_test:0\n",
+                )
+                stdout, error, code, timed_out = inventory.run_probe("adb", "phone", "true", 1)
+        self.assertEqual((stdout, code, timed_out), (b"partial", 1, False))
+        self.assertTrue(error.startswith(b"warning"))
+        self.assertIn(b"transport failed", error)
+
+    def test_transport_requires_shell_v2_and_correct_binary_stderr_and_status(self):
+        with patch.object(inventory, "run_command", return_value=(b"cmd\n", b"", 0, False)):
+            with patch.object(inventory, "run_probe") as probe:
+                with self.assertRaisesRegex(ValueError, "shell_v2"):
+                    inventory.check_adb_transport("adb", "phone", 1)
+                probe.assert_not_called()
+        failures = [
+            (b"\x00\r\r\n\xff", b"titan-inventory-check\n", 7, False),
+            (b"\x00\r\n\xff", b"", 7, False),
+            (b"\x00\r\n\xff", b"titan-inventory-check\n", 0, False),
+            (b"\x00\r\n\xff", b"titan-inventory-check\n", 7, True),
+        ]
+        for result in failures:
+            with self.subTest(result=result):
+                with patch.object(inventory, "run_command", return_value=(b"shell_v2\n", b"", 0, False)):
+                    with patch.object(inventory, "run_probe", return_value=result):
+                        with self.assertRaisesRegex(ValueError, "check failed"):
+                            inventory.check_adb_transport("adb", "phone", 1)
+
+    def test_preflight_failure_does_not_create_output_or_disclose_serial(self):
+        old_umask = os.umask(0o077)
+        try:
+            with tempfile.TemporaryDirectory() as temporary, patch.object(inventory.subprocess, "run") as run:
+                run.side_effect = [
+                    subprocess.CompletedProcess([], 0, b"List of devices attached\nsecret-id\tdevice\n", b""),
+                    subprocess.CompletedProcess([], 0, b"cmd\n", b""),
+                ]
+                output = Path(temporary) / "inventory"
+                terminal = io.StringIO()
+                with contextlib.redirect_stderr(terminal), self.assertRaises(SystemExit) as error:
+                    inventory.main(["--output", str(output)])
+                self.assertEqual(error.exception.code, 1)
+                self.assertFalse(output.exists())
+                self.assertEqual(run.call_count, 2)
+                self.assertNotIn("secret-id", terminal.getvalue())
+        finally:
+            os.umask(old_umask)
 
     def test_timeout_retains_partial_output(self):
         error = subprocess.TimeoutExpired(["adb"], 1, output=b"partial", stderr=b"denied")
@@ -115,14 +202,23 @@ class AdbBoundaryTests(unittest.TestCase):
             calls.append(command)
             if command == ["adb", "devices"]:
                 return subprocess.CompletedProcess(command, 0, b"List of devices attached\nsecret-id\tdevice\n", b"")
-            self.assertEqual(command[:6], ["adb", "-s", "secret-id", "exec-out", "sh", "-c"])
-            script = shlex.split(command[6])[0]
-            self.assertIn(script, inventory.PROBES.values())
+            if command == ["adb", "-s", "secret-id", "features"]:
+                return subprocess.CompletedProcess(command, 0, b"shell_v2\n", b"")
+            self.assertEqual(command[:6], ["adb", "-s", "secret-id", "shell", "-T", "-n"])
+            script = shlex.split(command[6])[2].removesuffix(";")
+            self.assertIn(script, [inventory.ADB_CHECK_SCRIPT, *inventory.PROBES.values()])
+            marker = re.search(r"(__TITAN_INVENTORY_STATUS_[a-f0-9]+:)", command[6])[1].encode()
+
+            def framed(code, stdout, stderr):
+                return subprocess.CompletedProcess(command, 0, stdout, stderr + b"\n" + marker + str(code).encode() + b"\n")
+
+            if script == inventory.ADB_CHECK_SCRIPT:
+                return framed(7, b"\x00\r\n\xff", b"titan-inventory-check\n")
             if script == inventory.PROBES["config.gz"]:
-                return subprocess.CompletedProcess(command, 1, b"", b"Permission denied")
+                return framed(1, b"", b"Permission denied")
             if script == inventory.PROBES["kernel.txt"]:
-                return subprocess.CompletedProcess(command, 0, b"4.14.141\naarch64\n", b"")
-            return subprocess.CompletedProcess(command, 0, b"available\n", b"")
+                return framed(0, b"4.14.141\naarch64\n", b"")
+            return framed(0, b"available\n", b"")
 
         old_umask = os.umask(0o077)
         try:
@@ -130,12 +226,15 @@ class AdbBoundaryTests(unittest.TestCase):
                 output = Path(temporary) / "inventory"
                 terminal = io.StringIO()
                 with contextlib.redirect_stdout(terminal):
-                    self.assertEqual(inventory.main(["--output", str(output)]), 0)
-                self.assertEqual(len(calls), 1 + len(inventory.PROBES))
+                    self.assertEqual(inventory.main(["--output", str(output)]), 1)
+                self.assertEqual(len(calls), 3 + len(inventory.PROBES))
                 self.assertFalse((output / "dmesg.txt").exists())
                 self.assertFalse((output / "cmdline.txt").exists())
                 report = json.loads((output / "report.json").read_text())
                 self.assertEqual(report["probes"]["config.gz"]["exit_code"], 1)
+                self.assertFalse(report["complete"])
+                self.assertEqual(report["probes_needing_review"], 1)
+                self.assertEqual((output / "config.gz.stderr").read_bytes(), b"Permission denied")
                 self.assertNotIn("secret-id", terminal.getvalue())
                 for path in output.iterdir():
                     self.assertNotIn(b"secret-id", path.read_bytes())
@@ -324,7 +423,7 @@ class LocalBoundaryTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temporary, patch.object(inventory.subprocess, "run", side_effect=mock_local):
                 output = Path(temporary) / "inventory"
                 with contextlib.redirect_stdout(io.StringIO()):
-                    self.assertEqual(inventory.main(["--local", "--output", str(output)]), 0)
+                    self.assertEqual(inventory.main(["--local", "--output", str(output)]), 1)
                 self.assertEqual(len(calls), len(inventory.PROBES))
                 self.assertFalse((output / "dmesg.txt").exists())
                 self.assertFalse((output / "cmdline.txt").exists())

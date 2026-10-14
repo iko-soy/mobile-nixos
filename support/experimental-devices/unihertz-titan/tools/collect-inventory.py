@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -19,6 +20,7 @@ import tempfile
 PROBES = {
     "kernel.txt": "uname -r; uname -m; cat /proc/version",
     "os-release.txt": "cat /etc/os-release",
+    "active-system-manager.txt": "cat /proc/1/comm; systemctl --system show --property=Version --value",
     "device-tree.txt": r"""
 for field in model compatible; do
     printf '%s=' "$field"
@@ -88,6 +90,22 @@ for host in /sys/class/scsi_host/host*; do
 done
 """,
     "mounts.txt": "cat /proc/mounts; cat /proc/filesystems",
+    "mountinfo.txt": "cat /proc/self/mountinfo",
+    "loop-backing-files.txt": r"""
+for block in /sys/class/block/loop*; do
+    [ -d "$block" ] || continue
+    printf '\nblock=%s\n' "${block##*/}"
+    for field in loop/backing_file ro; do
+        if [ -r "$block/$field" ]; then
+            printf '%s=' "$field"
+            cat "$block/$field"
+        fi
+    done
+done
+""",
+    "userdata-space.txt": "df -Pk /userdata",
+    "system-image-channel.txt": "cat /etc/system-image/channel.ini",
+    "system-image-channel-config.txt": "cat /etc/system-image/config.d/01_channel.ini",
     "memory.txt": "cat /proc/meminfo; cat /proc/iomem",
     # Input Phys/Uniq fields can contain Bluetooth addresses or USB serials.
     "input.txt": "sed '/^[PU]: /d' /proc/bus/input/devices",
@@ -109,7 +127,13 @@ for device in /sys/class/android_usb/android* /sys/class/udc/* \
     [ -d "$device" ] || continue
     printf '\ndevice=%s\n' "$device"
     for field in state functions idVendor idProduct UDC current_speed maximum_speed; do
-        if [ -r "$device/$field" ]; then
+        if [ "$field" = functions ] && [ -d "$device/$field" ]; then
+            printf '%s=\n' "$field"
+            for function in "$device/$field"/*; do
+                [ -e "$function" ] || continue
+                printf '%s\n' "${function##*/}"
+            done
+        elif [ -f "$device/$field" ] && [ -r "$device/$field" ]; then
             printf '%s=' "$field"
             cat "$device/$field"
         fi
@@ -143,6 +167,11 @@ PRIVATE_PROBES = {
     "cmdline.txt": "cat /proc/cmdline",
     "dmesg.txt": "dmesg",
 }
+
+# Exercise binary output, separate stderr, and a nonzero remote status before
+# collecting through ADB. Some Ubuntu Touch adbd versions advertise shell_v2 but
+# report zero for failed commands, so a feature check alone is insufficient.
+ADB_CHECK_SCRIPT = r"printf '\000\015\012\377'; printf 'titan-inventory-check\n' >&2; exit 7"
 
 
 def parse_devices(output):
@@ -206,10 +235,37 @@ def prepare_output(requested):
 
 
 def run_probe(adb, serial, script, timeout):
-    # ADB joins command arguments into a remote shell command. Quote the complete
-    # static script for `sh -c`; subprocess itself never invokes a host shell.
-    command = [adb, "-s", serial, "exec-out", "sh", "-c", shlex.quote(script)]
-    return run_command(command, timeout)
+    # shell_v2 keeps binary stdout and stderr separate. Pass one complete shell
+    # command; exec-out has different quoting and cannot report remote status.
+    # Also frame the status explicitly: the Titan's Ubuntu Touch adbd reports
+    # zero even for `exit 7`, despite advertising shell_v2.
+    marker = "__TITAN_INVENTORY_STATUS_" + secrets.token_hex(16) + ":"
+    wrapper = (
+        "sh -c " + shlex.quote(script)
+        + "; status=$?; printf '\\n" + marker + "%s\\n' \"$status\" >&2; exit \"$status\""
+    )
+    command = [adb, "-s", serial, "shell", "-T", "-n", wrapper]
+    stdout, stderr, code, timed_out = run_command(command, timeout)
+    if timed_out:
+        return stdout, stderr, code, True
+    match = re.search(rb"\n" + marker.encode() + rb"([0-9]{1,3})\n\Z", stderr)
+    if match is None or int(match[1]) > 255:
+        return stdout, stderr + b"\nADB remote exit-status trailer missing or invalid.\n", None, False
+    remote_code = int(match[1])
+    stderr = stderr[:match.start()]
+    if code not in (0, remote_code):
+        return stdout, stderr + b"\nADB transport failed after receiving remote status.\n", code, False
+    return stdout, stderr, remote_code, False
+
+
+def check_adb_transport(adb, serial, timeout):
+    stdout, _, code, timed_out = run_command([adb, "-s", serial, "features"], timeout)
+    if code != 0 or timed_out or b"shell_v2" not in stdout.splitlines():
+        raise ValueError("ADB shell_v2 is required to preserve binary stdout and separate stderr.")
+    if run_probe(adb, serial, ADB_CHECK_SCRIPT, timeout) != (
+        b"\x00\r\n\xff", b"titan-inventory-check\n", 7, False,
+    ):
+        raise ValueError("ADB binary-output, stderr, or remote-status check failed; no inventory was collected.")
 
 
 def validate_ssh_host(host):
@@ -343,6 +399,7 @@ def main(argv=None):
             if result.returncode:
                 raise ValueError("adb devices failed; run that command locally to diagnose it.")
             serial = select_device(parse_devices(result.stdout.decode("utf-8", errors="replace")), args.serial)
+            check_adb_transport(args.adb, serial, args.timeout)
             collect = lambda script: run_probe(args.adb, serial, script, args.timeout)
         output = prepare_output(args.output)
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
@@ -381,11 +438,13 @@ def main(argv=None):
         else:
             print(f"  {name}: collected")
     summary = summarize(outputs)
+    report["complete"] = incomplete == 0
+    report["probes_needing_review"] = incomplete
     write_private(output / "report.json", (json.dumps(report, indent=2) + "\n").encode())
     write_private(output / "summary.json", (json.dumps(summary, indent=2) + "\n").encode())
     print(f"Collection finished; {incomplete} probe(s) need review. Start with {output / 'summary.json'}.")
     print("A completed collection does not confirm working hardware, an unlocked bootloader, or recovery.")
-    return 0
+    return 1 if incomplete else 0
 
 
 if __name__ == "__main__":

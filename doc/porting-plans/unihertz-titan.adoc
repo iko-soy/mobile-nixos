@@ -34,6 +34,17 @@ link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/e
 for provenance, limitations and the next measurements. This is not a hardware
 boot result for the reference build or NixOS.
 
+A subsequent local Mac session established normal-mode USB ADB access,
+revalidated partition geometry and queried active systemd `255.4-1ubuntu8.17`.
+Private boot/recovery/dtbo copies now have verified sizes and matching Mac/phone
+hashes. Installed boot equals the documented CI candidate; installed recovery
+differs and is preserved separately. The downloaded recovery candidate starts writable userdata setup
+and contains enabled LVM migration machinery; it must not be treated as a
+passive offline-backup environment. The recovery record now separates consistent
+data preservation, bootloader-only entry/exit, a later authorized boot rollback,
+and the still-unverified OEM emergency path. These advances do not close M0 or
+authorize boot experiments.
+
 toc::[]
 
 == Objective and recommended approach

@@ -15,7 +15,9 @@ runCommand "unihertz-titan-${purpose}-boot-image" {
     # not been established. Do not claim an aggregate license or redistribution
     # permission, and do not schedule publication of these experimental images.
     hydraPlatforms = [];
-    platforms = [ "x86_64-linux" ];
+    # The fixture only packs data with native Python/GNU tools. The real kernel
+    # still requires the pinned x86_64 Linux Android compilers.
+    platforms = if fixture then lib.platforms.unix else [ "x86_64-linux" ];
   };
 } ''
   set -o pipefail

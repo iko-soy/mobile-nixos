@@ -21,8 +21,8 @@ hardware works under NixOS.
   Android Clang r353983c and the matching Android GCC 4.9 cross toolchains.
 * A reproduction of the Ubuntu Touch reference boot-image recipe, using the
   pinned Ubuntu Touch initramfs, adaptation overlay and prebuilt Titan DT table.
-* Host-side inventory, kernel configuration comparison and boot-image inspection
-  tools, with automated tests.
+* Host-side inventory, kernel configuration comparison, boot-image inspection
+  and bounded private boot/recovery/dtbo acquisition tools, with automated tests.
 
 The reference image retains Ubuntu Touch's command line and userspace contract.
 It is not a NixOS initramfs or root filesystem. Current Mobile NixOS uses a
@@ -32,9 +32,11 @@ builder and existing devices are unchanged.
 
 == Build and inspect
 
-Use an x86_64 Linux Nix builder. The original Android compiler prebuilts are
-x86_64 host executables; this expression is not a native build on the phone.
-It uses the repository's existing Nixpkgs pin through `pkgs.nix`.
+Use an x86_64 Linux Nix builder for the kernel and reference image. The original
+Android compiler prebuilts are x86_64 host executables; this expression is not a
+native kernel build on the phone or Mac. The `tests` target uses a deliberately
+nonbootable kernel fixture and native packaging tools, so it also supports macOS.
+All targets use the repository's existing Nixpkgs pin through `pkgs.nix`.
 
 [source,sh]
 ----
@@ -192,22 +194,31 @@ compatibility test or a substitute for hardware evidence.
 The link:hardware-inventory.adoc#runtime-baseline[owner-reported runtime baseline]
 records the sanitized findings. Internal partition mappings confirm eMMC, with
 boot (`mmcblk0p28`) and recovery (`mmcblk0p2`) each measuring 33554432 bytes.
-The supplied configuration matches the reference build's recorded hash; matching
-kernel sources and image contents remain unverified. A mounted cgroup2 hierarchy,
+The supplied configuration matches the reference build's recorded hash. The later
+private installed-boot copy matches the documented CI candidate, while exact
+binary-to-source reproducibility remains unverified. A mounted cgroup2 hierarchy,
 `mtkfb` framebuffer and input-device enumeration provide concrete starting points
 for the next compatibility and driver checks.
 
-The installed Ubuntu Touch systemd tools report `255.4-1ubuntu8.17`. At the
+The installed Ubuntu Touch systemd tools and subsequently queried active system
+manager report `255.4-1ubuntu8.17`. At the
 observed cgroup v2 root, `memory` is the only advertised controller and is enabled
 for children; the other `/proc/cgroups` entries do not establish v2 availability.
 See the link:hardware-inventory.adoc#runtime-cgroups[cgroup evidence] before
-designing resource-control or delegation assumptions. The active system-manager
-version and compatibility with pinned systemd 261 remain separate checks.
+designing resource-control or delegation assumptions. Compatibility with pinned
+systemd 261 remains unresolved.
 
-The owner has no saved boot image or recovery materials. The
+Private preservation has started over the Mac's normal-mode USB connection. The
 link:recovery-preparation.adoc[recovery preparation record] identifies inspected
 Ubuntu Touch CI candidates, their hashes, stock-firmware research limits and
-read-only preparation using the owner's Mac. None is a tested restore path yet.
+read-only preparation using the owner's Mac. Private boot/recovery/dtbo copies
+are verified by exact sizes, saved-file hashes and independent phone hashes.
+Installed boot exactly matches the documented CI candidate; installed recovery
+is different and has been preserved separately. Data/calibration backup and a
+second copy on separate storage remain outstanding.
+The downloaded recovery candidate automatically mounts userdata writable and
+contains enabled migration machinery; it is unsuitable for passive offline
+preservation. None of these findings establishes a tested restore path.
 
 Follow link:hardware-inventory.adoc[the inventory procedure] for the running
 Ubuntu Touch installation. Direct SSH is sufficient for the initial read-only
@@ -216,7 +227,7 @@ phone's boot path; an SSH connection cannot provide access after a failed boot.
 
 M0 remains open until firmware/restore provenance, outstanding hardware details
 and a restoration procedure are recorded. M1 hardware validation remains open
-until a generated image is compared with the known-working installation and tested using the
+until a generated image is compared with the preserved known-working boot image and tested using the
 verified recovery procedure. No flash or partition-writing helper is included.
 
 After those gates, record the downstream-versus-native route decision before
@@ -285,3 +296,26 @@ allowlist to 50. All 49 Python tests passed again on the host and in the pinned
 Nix `tests` target, including its nonbootable packing fixture. The raw inventory
 and configuration are not committed; no phone writes or hardware boot test were
 performed.
+
+=== Follow-up: Mac preservation and transport validation
+
+All 73 Python tests pass on macOS and in the pinned Nix `tests` target, including
+the nonbootable packaging fixture built natively on aarch64-darwin. The real
+kernel/reference-image targets retain their x86_64 Linux restriction; no new
+kernel build was attempted on the Mac. The four Titan AsciiDoc records render
+with Asciidoctor 2.0.26 at warning-as-failure level, and the changed Nix expression
+parses. This is a standalone document render, not a repeat of the full Linux
+documentation build.
+
+Normal-mode ADB exposed and now covers real transport quoting and lost-exit-status
+failures. The final private inventory has 19 clean probes out of 20; the memory
+probe retains `/proc/iomem: Permission denied`. The owner entered the phone's sudo
+credential locally to acquire boot/recovery/dtbo. Exact sizes, local file readback
+and independent phone hashes agree. Installed images were structurally inspected
+and compared with downloaded candidates; the recovery record distinguishes the
+installed Android/MediaTek recovery from the writable UBports candidate.
+
+No phone software/configuration was changed, no partition was written, and no
+reboot, recovery entry or generated-image hardware boot was performed. Consistent
+userdata/calibration preservation, a second backup copy and demonstrated recovery
+remain separate outstanding work.
