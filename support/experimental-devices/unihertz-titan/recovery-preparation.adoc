@@ -302,8 +302,56 @@ leave their write protection intact. This helper does not acquire them.
 The Mac had approximately 32 GiB free during this session, insufficient for an
 uncompressed userdata partition copy (about 111.7 GiB) or whole eMMC user-area
 copy (about 116.5 GiB), before retaining another copy or working space. Userdata
-reported about 7.9 GiB allocated through `df`; that is not a reliable bound for
-a compressed raw image. Select adequately sized private storage first.
+reported about 7.9 GiB allocated through `df`. The 120 GB requirement applies to
+a fully allocated raw partition copy; it is not a minimum for a filesystem-aware
+sparse backup. The owner's mostly empty phone makes the sparse approach below
+the preferred next investigation. A compressed byte-for-byte raw copy alone has
+no comparable bound, because free blocks may retain nonzero old contents.
+
+==== Sparse userdata backup feasibility
+
+A follow-up rechecked `df`: 8262604 KiB used, 106356912 KiB available on userdata.
+The phone already has e2image 1.47.0 and Zstandard 1.5.5. No phone software was
+installed. The Mac has e2fsprogs and Zstandard, and a same-size synthetic sparse
+file (119878418432 logical bytes) occupied only 32768 bytes on its local
+filesystem. This checks hole support, not the backup size of actual phone data.
+
+The link:https://github.com/tytso/e2fsprogs/blob/v1.47.0/misc/e2image.8.in[matching e2image manual]
+documents `-r -a` for copying filesystem metadata and file data while omitting
+unused blocks. The `-a` is essential: the default image contains metadata only.
+This is a filesystem backup, not a byte-for-byte or forensic partition copy;
+partition geometry and any data outside the filesystem need separate accounting.
+Do not replace the exact boot/recovery/dtbo backups with this method.
+
+Raw output can stream to stdout; QCOW2 creation requires a seekable output and
+cannot use this pipe. The
+link:https://github.com/tytso/e2fsprogs/blob/v1.47.0/misc/e2image.c#L658[raw stdout implementation]
+emits zero bytes for skipped blocks, so compress on the phone before transport.
+Save the compressed stream privately on the Mac, then decompress with sparse
+output support when inspecting a working copy. This avoids a fully allocated
+120 GB temporary file and avoids staging a backup on the phone's source
+filesystem. Transferring a sparse file without preserving holes can expand it.
+
+An entirely local 256 MiB ext4 fixture exercised `e2image -ra SOURCE -`, streamed
+Zstandard compression, and `zstd -d --sparse` into a new ordinary image file.
+The compressed output was 1064951 bytes; the restored image retained its
+268435456-byte logical size while allocating 27148288 bytes. A read-only
+`e2fsck -fn` passed. Extracted payload bytes matched, mode `0640` survived,
+two hardlinks retained one inode, and the symlink survived. These synthetic
+numbers are not a phone-backup size estimate or a Titan restore test.
+
+With about 7.9 GiB currently used, a sparse/compressed filesystem backup is
+plausibly within the Mac's roughly 30 GiB free space. Measure metadata/allocated
+blocks and enforce output/free-space limits before acquisition; budget for both
+the archive and any sparse verification copy. Do not promise an exact final size
+from `df` alone.
+
+The remaining gate is consistency. `e2image` normally refuses a source mounted
+read-write; `-f` would bypass that protection and must not be used for this
+preservation plan. Userdata is still mounted writable, so no actual userdata
+image was acquired. A separately approved quiescent/read-only environment is
+needed before running the proposed pipeline. Sparse allocation solves the host
+space problem without solving concurrent filesystem or calibration writes.
 
 A consistent full backup requires a separately authorized maintenance procedure:
 stop all writers, including Android/modem services where relevant, and acquire
