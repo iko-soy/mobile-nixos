@@ -220,6 +220,35 @@ For the next round, provide only reviewed excerpts of `storage.txt`,
 kernel configuration. Do not post `config.gz` if it contains locally added
 secrets or credentials. Log review must happen before publishing any excerpts.
 
+== Compare the running kernel configuration
+
+After collecting a readable `config.gz`, compare it locally with the `config`
+from the pinned reference kernel output. Neither input needs to be copied into
+Git. The comparison accepts plain Kconfig output or gzip-compressed output for
+either input:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/compare-kernel-config.py \
+  --reference /absolute/path/to/reference-kernel/config \
+  --runtime /absolute/private/inventory/config.gz
+----
+
+The tool hashes the decompressed configuration bytes, so the reference hash is
+comparable with the build record in the README. It compares all parsed settings
+but prints values only for a fixed list of boolean/tristate settings relevant to
+the first userspace audit. Arbitrary configuration strings, source paths and
+input filenames are not included in the report. Keep the output private and
+review it before sharing.
+
+An absent symbol is reported as unknown, separately from an explicit disabled
+setting. A module setting does not establish that the matching module is
+installed or loaded. Malformed, duplicate, empty or unreadable configurations
+fail without printing their contents. Equal settings do not prove identical
+kernels, sufficient backports, working syscalls, systemd compatibility or a
+bootable image. Use the comparison to identify the next source/runtime checks;
+it does not close M0, M1 or M2.
+
 == Hardware and recovery record
 
 Fill this record using evidence from this exact phone. Keep unique identifiers,

@@ -17,7 +17,8 @@ image boots or that any hardware works under NixOS.
   Android Clang r353983c and the matching Android GCC 4.9 cross toolchains.
 * A reproduction of the Ubuntu Touch reference boot-image recipe, using the
   pinned Ubuntu Touch initramfs, adaptation overlay and prebuilt Titan DT table.
-* Host-side inventory and boot-image inspection tools, with automated tests.
+* Host-side inventory, kernel configuration comparison and boot-image inspection
+  tools, with automated tests.
 
 The reference image retains Ubuntu Touch's command line and userspace contract.
 It is not a NixOS initramfs or root filesystem. Current Mobile NixOS uses a
@@ -168,6 +169,14 @@ Fixing flags does not resolve the separate Linux 4.14 versus systemd 261's
 supported Linux 5.10 baseline. Audit actual backports and select a compatible
 userspace or a newer kernel before attempting M2.
 
+Use `tools/compare-kernel-config.py` to compare a collected configuration with
+this reference output; see the
+link:hardware-inventory.adoc#_compare_the_running_kernel_configuration[inventory procedure].
+The comparison keeps missing symbols distinct from disabled settings, hashes
+uncompressed configuration contents and limits printed values to a fixed list
+of boolean/tristate settings. It is a host-side audit aid, not a systemd
+compatibility test or a substitute for hardware evidence.
+
 == Hardware evidence and next gates
 
 Follow link:hardware-inventory.adoc[the inventory procedure] for the running
@@ -225,3 +234,13 @@ The Nix `tests` build passed all 36 Python tests and the separate nonbootable
 packing fixture. All 249 tracked Nix files parsed, and the complete documentation
 build passed. No physical device was connected for these checks, no boot image
 was flashed, and a second independent kernel build has not been performed.
+
+=== Follow-up: configuration comparison
+
+The host-side configuration comparison has ten additional tests for gzip/plain
+input, decompressed hashes, missing/disabled/module distinctions, malformed
+inputs, size limits and omission of private values and paths. All 49 Python
+tests passed both on the host and in the Nix `tests` build, together with its
+nonbootable packing fixture. This follow-up has not collected a Titan baseline
+or compared an actual running configuration; hardware and recovery gates remain
+open.
