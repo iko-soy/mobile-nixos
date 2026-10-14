@@ -237,6 +237,26 @@ not all zero: an AVB footer references 512 bytes of unsigned vbmeta with flags
 `0` and algorithm `0`. The backup preserves the full 8388608 bytes. No DTBO execution or
 bootloader-selection behavior is inferred from structural parsing.
 
+=== Preserved live OS image files
+
+Two backing files from the running installation were also copied to private Mac
+storage. For each file, source SHA-256 reads before and after acquisition match
+the received stream and saved-file readback. Both saved images passed host
+`e2fsck -f -n` with exit status `0`. Directories remain `0700` and files `0600`.
+
+[cols="1,1,4",options="header"]
+|===
+|OS image |Bytes |SHA-256
+|ubuntu.img |3758096384 |`b06f970cb461f4bd0a229b2bb3b84977a21c7e1f46db34a3923e3d03102028d4`
+|android-rootfs.img |537280512 |`527c53fd8e27957fe4046cd8588d689dec338e8abb6531af4602c2f235ca0944`
+|===
+
+These are hash-stable copies of live OS image files. The checks establish
+agreement over acquisition and filesystem validation of the saved files; they
+do not establish an atomic snapshot with writable userdata or calibration state.
+Home, Nix, Android data and other writable state still require consistent
+preservation. Neither image has been restored or boot-tested from its copy.
+
 === Bounded partition acquisition
 
 `tools/acquire-partitions.py` is a read-only helper for this measured eMMC layout.
@@ -341,10 +361,11 @@ two hardlinks retained one inode, and the symlink survived. These synthetic
 numbers are not a phone-backup size estimate or a Titan restore test.
 
 With about 7.9 GiB currently used, a sparse/compressed filesystem backup is
-plausibly within the Mac's roughly 30 GiB free space. Measure metadata/allocated
-blocks and enforce output/free-space limits before acquisition; budget for both
-the archive and any sparse verification copy. Do not promise an exact final size
-from `df` alone.
+plausible. A later check found approximately 58 GiB free on the Mac after saving
+the two OS image files, so the earlier free-space figures are only snapshots.
+Measure metadata/allocated blocks and enforce output/free-space limits before
+acquisition; budget for both the archive and any sparse verification copy. Do
+not promise an exact final size from `df` alone.
 
 The remaining gate is consistency. `e2image` normally refuses a source mounted
 read-write; `-f` would bypass that protection and must not be used for this
@@ -352,6 +373,62 @@ preservation plan. Userdata is still mounted writable, so no actual userdata
 image was acquired. A separately approved quiescent/read-only environment is
 needed before running the proposed pipeline. Sparse allocation solves the host
 space problem without solving concurrent filesystem or calibration writes.
+
+==== Host verification of an acquired sparse archive
+
+`tools/verify-sparse-backup.py` checks an existing Zstandard-compressed raw ext4
+archive on the Mac. It does not acquire data, contact the phone or establish
+source quiescence. Record the source filesystem's exact logical byte count
+separately from partition capacity; any partition tail needs separate accounting.
+Preserve the acquisition commands, statuses and stderr with the archive. The
+inspected e2image implementation can report a block read error and continue;
+producer read errors must reject the acquisition even if it exits zero. A later
+filesystem check cannot prove every original file-data block was read correctly.
+
+The verifier requires explicit logical-size, allocation and free-space limits.
+It tests sparse behavior on the destination with at most 32 MiB of temporary
+scratch space, reserves another 4 MiB for bounded logs/manifests, and rejects a
+destination that allocates the probe densely. It then presizes the output,
+decodes with byte/time limits, skips zero blocks, checks physical allocation,
+and compares decoded and saved-file SHA-256 hashes. Small images below 32 MiB
+require a budget covering their full logical size: this Mac allocated some
+small zero gaps densely despite supporting larger sparse files.
+
+Only exact-size images with matching ext4 geometry, clean state and a successful
+read-only `e2fsck -fn` become `filesystem.img`. Dirty, recovery-required, short,
+oversized or failed images are rejected. The helper never mounts or repairs an
+image; failures retain a private manifest and available diagnostics, while
+removing its own partial image. An existing image or output directory is never
+overwritten.
+
+For an already acquired archive, set `FILESYSTEM_BYTES` from its independently
+recorded geometry. This example allows 16 GiB for the verification image and
+keeps an 8 GiB free-space reserve; choose limits using current free space and
+the archive's measured allocation, not these illustrative values alone:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/verify-sparse-backup.py \
+  /absolute/private/userdata.ext4.zst \
+  --expected-bytes "$FILESYSTEM_BYTES" \
+  --max-allocated-bytes 17179869184 --min-free-bytes 8589934592 \
+  --e2fsck /opt/homebrew/opt/e2fsprogs/sbin/e2fsck \
+  --output /absolute/private/new-userdata-verification
+----
+
+A real local 32 MiB ext4/e2image fixture passed decoding, hash readback,
+filesystem checking and file-content comparison, using under 8 MiB of physical
+image allocation. A deliberately dirty clone was rejected without publication.
+These checks exercise the host verifier; no Titan userdata archive or restore
+was produced. The same integration can be repeated without accessing hardware:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/tests/test_sparse_backup.py \
+  --integration --output /absolute/private/new-synthetic-fixture
+----
+
+==== Consistency and retention requirements
 
 A consistent full backup requires a separately authorized maintenance procedure:
 stop all writers, including Android/modem services where relevant, and acquire
@@ -367,6 +444,57 @@ its journal even with `ro`; use read-only block backing plus `ro,noload` when
 examining a copy, and run any repair only on a disposable copy. See
 link:https://docs.kernel.org/admin-guide/ext4.html[the ext4 documentation] and
 link:https://docs.kernel.org/driver-api/mmc/mmc-dev-parts.html[eMMC boot partitions].
+
+=== Rescue initramfs design remains untested
+
+Host inspection of the installed boot ramdisk found two concatenated newc
+archives: 374 base entries followed by seven overlay entries. Its compressed
+size is 6902948 bytes, with SHA-256
+`110ce0a10775b01ece8072c2937e36c1627e693ec02a907a32a0217f7fc0bab3`.
+The combined decompressed archives occupy 15188480 bytes. Inspection must
+continue past the first `TRAILER!!!` to account for the overlay.
+
+The effective `/bin/busybox` is the overlay's static ARM32 1.31.0 binary,
+SHA-256 `141adb1b625a6f44c4b114f76b4387b4ea4f7ab802b88eb40e0d2f6adcccb1c3`.
+Its matching source/configuration remains unresolved. There is no `adbd`, SSH
+server, `e2image`, kernel module or `modules.load` in this ramdisk. Its emergency
+`scripts/panic/telnet` configures RNDIS, starts DHCP and unauthenticated telnet,
+and reboots if no USB network interface appears. Normal `scripts/halium`
+startup mounts userdata, runs `e2fsck -y`, may resize it, and mounts it writable
+with discard. These startup paths are unsuitable for passive preservation.
+
+The embedded kernel configuration again matches the recorded runtime hash.
+eMMC, ext4, devtmpfs, MTU3, configfs, FunctionFS, RNDIS, ACM and serial gadget
+support are built in; ECM and NCM are disabled. This supports investigating a
+separate ramdisk with the preserved kernel and DTB, without a kernel rebuild.
+It does not establish USB operation or bootloader acceptance of that new image.
+
+Review these requirements during build-only development and before proposing a
+hardware trial:
+
+* [ ] Build a small independent PID 1, BusyBox, `e2image` and compressor from
+  reviewed sources for Linux/AArch64. Mount only virtual/RAM filesystems and
+  leave storage filesystems unmounted. Exclude Ubuntu Touch startup scripts,
+  automatic filesystem repair, LVM activation, Android/modem services and
+  automatic reboot behavior.
+* [ ] Select and validate a USB transport. The repository's
+  link:../../../overlay/adbd/default.nix[source-pinned adbd] is an optional
+  FunctionFS design input, with dynamic libhybris, OpenSSL and zlib dependencies
+  and patches that run it as root. Audit authentication and runtime writes;
+  mount FunctionFS and wait for daemon endpoint readiness before binding the
+  gadget. See link:https://docs.kernel.org/usb/functionfs.html[FunctionFS] and
+  link:https://docs.kernel.org/usb/gadget_configfs.html[configfs gadget setup].
+  ACM is another configured candidate. Mac recognition and reliable acquisition
+  transport remain untested; do not assume RNDIS host support.
+* [ ] Review MTK watchdog, power/charging and failure behavior independently of
+  the normal OS. The kernel enables the MTK watchdog and has
+  `CONFIG_PANIC_TIMEOUT=1`. Account for all required userspace dependencies and
+  source/licensing provenance before publishing a binary; keep private payloads
+  outside Git and retain their hashes.
+* [ ] Establish an explicitly authorized boot and exit route, including
+  bootloader identity, temporary-boot support if used, and return to the existing
+  system. Neither temporary boot nor rollback is demonstrated. A build-only
+  rescue artifact cannot close the recovery gate.
 
 === Recovery procedure to review before any mode change
 

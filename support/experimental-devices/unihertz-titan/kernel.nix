@@ -16,8 +16,8 @@ let
     dontStrip = true;
     dontFixup = true;
 
-    # Stable values for generated version information. Bit reproducibility still
-    # needs a second independent build before it can be claimed.
+    # Stable version information. Same-builder repeats pass, but independent
+    # cloud/Linux hashes differ; see README for the unresolved comparison.
     KBUILD_BUILD_USER = "nix";
     KBUILD_BUILD_HOST = "titan-build";
     KBUILD_BUILD_VERSION = "1";

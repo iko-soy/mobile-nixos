@@ -265,6 +265,78 @@ The corrected collection includes explicit probe status; `/proc/iomem` remains
 permission-denied under `phablet`, so its memory probe requires review. No root
 memory-map claim is made.
 
+=== Direct kernel API measurements
+
+`tools/probe-kernel-apis.py` ran through normal-mode ADB using the phone's
+existing Python, without root, installed scripts, filesystem writes or service
+changes. It validates the Linux AArch64 ABI before issuing fixed raw syscalls.
+The probe process reported `Seccomp=0` and `NoNewPrivs=0`. Its private report
+records errors and returned metadata; successful collection is not a successful
+compatibility test.
+
+[cols="2,4",options="header"]
+|===
+|Probe |Observed result on 2026-10-14
+|`statx` on `/`, `/proc`, `/sys`
+|All calls succeeded, but none returned `STATX_MNT_ID` or supported
+`STATX_ATTR_MOUNT_ROOT`. Masks were respectively `0xfdf`, `0x7ff`, `0x7ff`;
+`/` also omitted the basic-stat atime bit. Attribute masks were `0x874`, `0`, `0`.
+|`pidfd_open` for the probe's own PID
+|`ENOSYS`. The dependent signal-0 check was not run.
+|`close_range(1, 0, 0)`
+|`ENOSYS`, rather than the expected `EINVAL` for reversed bounds. This probe
+cannot close a descriptor on an implementation following the syscall contract.
+|`name_to_handle_at` on `/`
+|`ENOSYS`, consistent with the measured disabled `CONFIG_FHANDLE`.
+|`openat2` on `/` with `O_PATH` and `O_CLOEXEC`
+|`ENOSYS`.
+|===
+
+In general `ENOSYS` can also be injected by a process filter. Here seccomp was
+disabled, and the
+link:https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe/include/uapi/asm-generic/unistd.h[pinned kernel syscall table]
+agrees with the absent newer entrypoints. These measurements substantiate the
+M2 compatibility gap rather than inferring it solely from the kernel version.
+
+The pinned systemd 261 has concrete dependencies on the missing interfaces:
+
+* Its link:https://github.com/systemd/systemd/blob/v261/src/basic/chase.c#L42[full component-by-component path traversal]
+  requires mount IDs through
+  link:https://github.com/systemd/systemd/blob/v261/src/basic/stat-util.c#L398[`xstatx_full`],
+  which rejects missing mandatory metadata; the
+  link:https://github.com/systemd/systemd/blob/v261/src/basic/mountpoint-util.c#L242[mount-point check]
+  requires the mount-root attribute. A successful basic `statx` call is insufficient.
+* link:https://github.com/systemd/systemd/blob/v261/src/libsystemd/sd-event/sd-event.c#L1647[Child event registration]
+  calls `pidfd_open` and propagates failure. The
+  link:https://github.com/systemd/systemd/blob/v261/src/basic/pidref.c#L107[PID reference helper]
+  only tolerates resource-exhaustion failures here, not `ENOSYS`.
+* link:https://github.com/systemd/systemd/blob/v261/src/basic/fd-util.c#L302[Descriptor cleanup]
+  propagates `close_range` errors; the
+  link:https://github.com/systemd/systemd/blob/v261/src/core/exec-invoke.c#L6266[service execution path]
+  treats failed descriptor cleanup as `EXIT_FDS`.
+* `openat2` has an explicit fallback in the inspected path-traversal code.
+  Its absence alone is not evidence of the same hard dependency. Likewise,
+  disabled file handles do not prove that every udev operation fails.
+
+Thus the unmodified kernel and current userspace need compatibility work before
+an M2 boot attempt. This is source analysis plus direct API evidence, not an
+observed systemd 261 boot failure. Enabling configuration options alone cannot
+add absent syscall implementations. Select and test a coherent older userspace,
+reviewed kernel backports, or the native-kernel route; the successful Ubuntu
+Touch systemd 255 installation does not select a NixOS baseline automatically.
+
+To repeat only these read-only measurements from the Mac:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/probe-kernel-apis.py \
+  --output /absolute/private/new-kernel-api-report
+----
+
+The output directory must be new and outside Git. The explicit `--local` mode
+instead probes the invoking Linux AArch64 machine and saves its report there;
+it is not needed for normal-mode USB inspection.
+
 == Collect directly over SSH
 
 An SSH connection to the running Ubuntu Touch system is sufficient; no USB

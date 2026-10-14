@@ -21,14 +21,18 @@ hardware works under NixOS.
   Android Clang r353983c and the matching Android GCC 4.9 cross toolchains.
 * A reproduction of the Ubuntu Touch reference boot-image recipe, using the
   pinned Ubuntu Touch initramfs, adaptation overlay and prebuilt Titan DT table.
-* Host-side inventory, kernel configuration comparison, boot-image inspection
-  and bounded private boot/recovery/dtbo acquisition tools, with automated tests.
+* Host-side inventory, kernel configuration comparison, read-only kernel API
+  probes, boot-image inspection and bounded private boot/recovery/dtbo
+  acquisition tools, plus a host-only sparse ext4 archive verifier, with
+  automated tests.
 
 The reference image retains Ubuntu Touch's command line and userspace contract.
 It is not a NixOS initramfs or root filesystem. Current Mobile NixOS uses a
 systemd baseline requiring a newer kernel; choosing a compatible stage 1 and
-stage 2 remains a separate feasibility decision. The generic Android image
-builder and existing devices are unchanged.
+stage 2 remains a separate feasibility decision. Direct USB probes now confirm
+missing pidfd/close-range interfaces and statx mount metadata used by systemd
+261; see link:hardware-inventory.adoc#_direct_kernel_api_measurements[the API audit].
+The generic Android image builder and existing devices are unchanged.
 
 == Build and inspect
 
@@ -248,9 +252,10 @@ build limitations should be recorded with each implementation revision.
 
 == Validation record: 2026-10-14
 
-The pinned kernel compiled successfully on x86_64 Linux using the packaged
-Android compilers. Kernel build adjustments are limited to script interpreters,
-`/bin/pwd`, native host-tool C flags and module-index generation with Nix's kmod.
+In the initial cloud session, the pinned kernel compiled successfully on x86_64
+Linux using the packaged Android compilers. Kernel build adjustments are limited
+to script interpreters, `/bin/pwd`, native host-tool C flags and module-index
+generation with Nix's kmod.
 The reference target configuration and driver sources were preserved. The build
 produced Linux 4.14.141, a 27197452-byte `Image`, a 9532189-byte `Image.gz`, and
 the `tcp_htcp` and `tcp_westwood` modules.
@@ -263,7 +268,7 @@ and a final AVB footer with 2752 bytes of GSI vbmeta. That vbmeta reports flags
 `2` (verification disabled); these checks do not establish bootloader acceptance
 or cryptographic verification.
 
-Observed SHA-256 values:
+SHA-256 values recorded for that cloud build:
 
 [source,text]
 ----
@@ -273,8 +278,9 @@ Observed SHA-256 values:
 
 The Nix `tests` build passed all 36 Python tests and the separate nonbootable
 packing fixture. All 249 tracked Nix files parsed, and the complete documentation
-build passed. No physical device was connected for these checks, no boot image
-was flashed, and a second independent kernel build has not been performed.
+build passed. No physical device was connected for these checks and no boot image
+was flashed. A second independent kernel build had not yet been performed at
+that stage; the later result is recorded below.
 
 === Follow-up: configuration comparison
 
@@ -319,3 +325,62 @@ No phone software/configuration was changed, no partition was written, and no
 reboot, recovery entry or generated-image hardware boot was performed. Consistent
 userdata/calibration preservation, a second backup copy and demonstrated recovery
 remain separate outstanding work.
+
+=== Follow-up: sparse verification and measured API gaps
+
+Two readable live OS image files were preserved privately with matching source
+hashes before/after transfer, saved-file readback and successful read-only ext4
+checks. They do not form a complete userdata snapshot. The recovery record
+documents these copies and the separate startup path needed for offline
+preservation.
+
+The host-only sparse archive verifier passed a real local ext4/e2image fixture,
+including file-content comparison and rejection of a deliberately dirty image.
+It checks the destination's sparse behavior and enforces logical-byte,
+allocation, free-space, diagnostic and time limits. This remains preparation for
+a future consistent acquisition; no userdata or calibration backup is claimed.
+
+The read-only API probe ran successfully through normal-mode ADB, including with
+the pinned Nix Python as its Mac wrapper. It confirms the missing interfaces
+recorded in the hardware inventory. The wrapper loads ctypes only on the Linux
+AArch64 probe target, after architecture validation.
+
+The pinned Darwin Python initially aborted merely importing ctypes, independently
+of the Titan calls. Its libffi trampoline library needs the
+link:https://github.com/NixOS/nixpkgs/commit/31ac410db37503704af446f2cad40811fabe0b04[upstream macOS 27 linker fix].
+The standalone test target applies that exact fix to its Darwin test interpreter
+only. All ABI tests remain enabled; Linux packages and the kernel/reference-image
+inputs are unchanged. All 104 tests and the nonbootable packaging fixture pass
+in the pinned Nix target on both aarch64-darwin and x86_64-linux. The host suite
+also passes all 104 tests.
+
+=== Follow-up: independent x86_64 Linux reference build
+
+The pinned kernel and reference boot image built successfully on a separate
+x86_64 Linux builder. Privately downloaded outputs were hashed again on the Mac:
+
+[source,text]
+----
+34a45c8ac5e1e7574deaf97e8fbc536e062cc7a50cca7e0af906d77c818d2570  Image
+cd370ef6438dc4e76ddc4477ed1392675cb034b6f737f682f755cfec445d5f0b  Image.gz
+1113327761998175c8cc78dbce10ac23c7fed8a8418f1072e553e8c0acc4286b  config
+88c0ca7d23b6ae0cdce02943cd27e19aecba9a4e4b02fed04f52b08cff8e3708  boot.img
+----
+
+The decompressed `Image` is 27197452 bytes and `Image.gz` is 9532189 bytes.
+The embedded configuration equals the saved configuration, whose hash exactly
+matches the recorded runtime/reference configuration. The 33554432-byte boot
+image passes the Titan geometry profile and contains exactly this `Image.gz`.
+These results establish a successful independent build, not a hardware boot.
+
+The compressed kernel and boot-image hashes differ from the initial cloud
+record. The earlier binaries are unavailable for bytewise comparison, so the
+cause remains unresolved. The new gzip header has timestamp zero, and its
+kernel banner contains the fixed `nix@titan-build` identity, build number `1`
+and `Sun Sep 13 21:19:17 UTC 2026` timestamp. Those observations alone do not
+explain the mismatch. A controlled Nix `--check --keep-failed` repeat of the
+same current `kernel.unindexed` derivation passed, reproducing its complete
+output on this builder. A separate controlled repeat of `referenceBootImage`
+with the unchanged kernel also reproduced its complete packaging output.
+Cross-environment bit reproducibility remains unresolved; preserve both build
+records and their distinct hashes.

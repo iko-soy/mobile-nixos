@@ -246,6 +246,14 @@ record a hardware boot result before calling the artifact usable.
 
 == M2: resolve kernel/userspace compatibility and boot a minimal system
 
+The 2026-10-14 normal-mode USB probes now demonstrate missing APIs, not just a
+version mismatch: `pidfd_open`, `close_range` and `name_to_handle_at` return
+`ENOSYS`, and `statx` lacks mount IDs and mount-root attributes. The inspected
+systemd 261 uses these interfaces in process, path and service handling.
+See link:../../support/experimental-devices/unihertz-titan/hardware-inventory.adoc#_direct_kernel_api_measurements[measurements and source analysis].
+The unmodified current userspace/kernel combination is not ready for an M2 boot
+attempt. No systemd 261 or generated-image hardware boot was performed.
+
 . Start with a small diagnostic initramfs. Establish persistent or retrievable
   logs through an available UART, pstore/ramoops, USB or recovery mechanism.
   Verify kernel execution, storage detection and USB before debugging a desktop.
