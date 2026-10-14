@@ -1,0 +1,590 @@
+= Unihertz Titan port implementation plan
+include::_support/common.inc[]
+:ut-repo: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/unihertz-titan
+:ut-rev: 811aaa59fa3f21748c7b4142412633d9734d4928
+:ut-src: {ut-repo}/-/blob/{ut-rev}
+:kernel-repo: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771
+:kernel-rev: fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe
+:kernel-src: {kernel-repo}/-/blob/{kernel-rev}
+:mobile-rev: 2c132754323fc1915e8d21dcfc0ef68ab084c6fb
+:mobile-src: https://github.com/mobile-nixos/mobile-nixos/blob/{mobile-rev}
+:pm-src: https://gitlab.postmarketos.org/postmarketOS/pmaports/-/blob/main/device/testing/linux-postmarketos-mediatek-mt6771
+
+Research snapshot: 2026-10-14.
+
+This plan concerns the *original Unihertz Titan*, including its eMMC and UFS
+variants. Titan Pocket, Titan Slim, Titan 2 and Titan 2 Elite are separate targets.
+The plan was prepared with OpenAI Codex assistance for this fork. It records
+source inspection and proposed work; no Titan image has been built or booted as
+part of this investigation. It does not declare device support or upstream
+acceptance. Upstream contribution rules remain applicable to any later submission.
+
+toc::[]
+
+== Objective and recommended approach
+
+Establish whether the Titan can run a maintainable Mobile NixOS system, then
+implement support in increments whose behavior can be demonstrated on hardware.
+Use the working Ubuntu Touch adaptation as a source of hardware knowledge and as
+an optional short-term boot experiment.
+
+Two implementation routes need separate decisions:
+
+* *Native route:* bring up a modern upstream-based kernel with standard Linux
+  interfaces. This is the route consistent with current Mobile NixOS support
+  policy. Related MT6771 work provides a starting point, but original-Titan
+  support has not been verified.
+* *Halium route:* reuse the reconstructed Android kernel and Android hardware
+  services beneath NixOS. This could reuse more of Ubuntu Touch's working hardware
+  adaptation, but requires a compatible userspace and substantial integration.
+  Maintain it as an experimental external port or fork; it is not an upstream
+  Mobile NixOS support path under current policy.
+
+The first commitment should be a timeboxed feasibility investigation, ending in
+a written route decision. After M0, choose either a downstream feasibility pass
+through M1/M2 or an early D1 decision leading to N0/N1. The native path reuses
+M1's image-format investigation without requiring the old kernel to run NixOS.
+A successful downstream boot is useful evidence, but does not justify
+automatically committing to the entire Halium stack.
+
+[cols="1,3",options="header"]
+|===
+|Milestone |Meaning of success
+|Boot prototype
+|Repeatable boot, useful logs, storage access and a USB-accessible shell.
+|Interactive development system
+|NixOS stage 2, working Nix store and builds, keyboard/touchscreen, basic display,
+and a documented update/recovery procedure.
+|Portable Linux system
+|Usable graphics, networking, audio and verified charging, thermal and suspend
+behavior. Unsupported phone functions are explicitly listed.
+|Phone-capable system
+|Separately verified mobile data, SMS, incoming/outgoing calls, call audio and
+carrier-dependent IMS/VoLTE behavior. This is not implied by modem registration.
+|Upstream candidate
+|A maintainable native-kernel implementation, hardware evidence, documented
+limitations and compliance with the project's contribution requirements.
+|===
+
+== Evidence and constraints
+
+[cols="1,2,3",options="header"]
+|===
+|Component |Observed baseline |Consequence
+|Mobile NixOS
+|Development commit `{mobile-rev}`; Nixpkgs pin `0bb7ec54c848`.
+|Use this baseline to reproduce the investigation. Recheck it before coding and
+record any changes to the package set.
+|Ubuntu Touch device adaptation
+|Commit `{ut-rev}`; aarch64, Ubuntu Touch `24.04-1.x`, Halium 10.
+|Pin the adaptation and all build-tool dependencies; the existing script follows
+additional remote sources and downloads a MediaTek oFono package.
+|Titan kernel
+|Commit `{kernel-rev}`, branch `halium-10.0`, Linux 4.14.141;
+`titan_defconfig halium.config`, Clang build.
+|Reconstructed device support is available. This is not a complete official OEM
+source release or a modern upstream kernel.
+|Userspace baseline
+|The inspected Mobile NixOS pin selects systemd 261, whose minimum supported
+kernel is 5.10 and recommended baseline is 5.14.
+|Audit actual backported interfaces. A kernel version check alone cannot prove
+all functionality absent, but an unmodified 4.14/current-NixOS combination is
+not a supported baseline.
+|Early userspace
+|Mobile NixOS stage 1 uses `pkgs.systemdMinimal` for udev.
+|Replacing only stage-2 PID 1 cannot resolve all compatibility problems.
+|Upstream policy
+|Vendor-kernel/Android-stack devices were removed in 2023; policy reaffirmed in
+2025.
+|Keep the Halium route external. Native hardware support is required for the
+current upstream direction.
+|===
+
+Sources: link:{mobile-src}/npins/sources.json[Mobile NixOS package pin],
+link:https://github.com/NixOS/nixpkgs/blob/0bb7ec54c848/pkgs/os-specific/linux/systemd/default.nix[pinned systemd package],
+link:https://github.com/systemd/systemd/blob/v261/README[systemd requirements],
+link:{mobile-src}/modules/initrd.nix[stage-1 udev],
+link:https://github.com/mobile-nixos/mobile-nixos/issues/643[upstream support policy],
+link:{ut-src}/deviceinfo[Titan build settings],
+link:{kernel-src}/Makefile[kernel version].
+
+The link:{ut-src}/README.md[Ubuntu Touch README] reports working basic cellular
+connectivity, sound, Wi-Fi, Bluetooth and front/rear still photography. Video
+recording and fingerprint recognition are listed as broken. Treat these as
+reported Ubuntu Touch capabilities, not NixOS results.
+
+The kernel includes reconstructed Titan display, keyboard, touch and camera
+drivers. Its MediaTek framebuffer, Mali, connectivity and modem APIs do not by
+themselves provide DRM/KMS, Mesa, BlueZ or ModemManager integration. The
+link:{kernel-src}/arch/arm64/configs/halium.config[Halium configuration fragment]
+already enables features such as namespaces, VT and devtmpfs; inspect the final
+merged configuration before attributing a failure to a missing kernel option.
+
+== Work ownership, inputs and evidence
+
+One person may cover several roles, but each milestone needs a named owner:
+
+* *Hardware tester:* owns the Titan, recovery procedure, observations and logs.
+* *Kernel developer:* owns source selection, configuration, DTs and driver work.
+* *Nix integrator:* owns reproducible builds, modules, packaging and boot images.
+* *Reviewer/maintainer:* checks evidence, route decisions and release scope.
+
+Required inputs:
+
+* An unlocked original Titan with its storage variant identified, a reliable USB
+  cable and a host capable of fastboot/ADB recovery. Confirm which temporary boot
+  and recovery operations the actual bootloader supports; do not assume
+  `fastboot boot` or kexec works.
+* Known-working stock Android 10 and Ubuntu Touch baselines, exact firmware build
+  identifiers, and a tested route back to a bootable system.
+* Preserved device-specific calibration and radio data, including relevant
+  NVRAM/NVDATA/persist partitions when present. Keep private backups and identifiers
+  out of Git and published build artifacts.
+* An aarch64 builder or a proven cross-compilation environment, enough disk for
+  kernel/Nix builds, and access to pinned sources and required firmware.
+* A source and firmware inventory with hashes, origin and redistribution terms.
+  Use extraction instructions for files that cannot be redistributed.
+
+For every test, record device variant, firmware, source revisions, configuration
+hash, image hashes, command, expected behavior, observed behavior and relevant
+logs. Keep separate eMMC and UFS results. A source file, successful evaluation or
+build is not evidence that a hardware feature works.
+
+== M0: establish the hardware and build baseline
+
+. Record bootloader state, stock firmware version, partition names/sizes,
+  filesystem types, DTB/DTBO layout, RAM map and available recovery operations.
+. Boot the known-working Ubuntu Touch installation and capture kernel version,
+  final kernel configuration where available, dmesg, input enumeration, display
+  geometry, USB configuration and relevant power/network/audio devices.
+. Identify the panel, keyboard controller, touchscreen, keyboard touchpad, PMIC,
+  charger, fuel gauge, audio codec/amplifier and storage variant from runtime
+  evidence and source. Record uncertain identifications as hypotheses.
+. Preserve the matching boot image, DTB, required firmware and restore materials.
+  Demonstrate restoration on the test device before replacing its boot path.
+. Pin the UBports kernel, device adaptation, generic adaptation tools, compiler
+  and auxiliary downloads. Locate source for shipped helper binaries such as
+  `uinput-titan`, or record a replacement/rebuild task.
+
+*Deliverables:* inventory, sanitized baseline logs, source manifest and tested
+restore instructions.
+
+*Exit criterion:* the tester can identify the exact hardware/firmware combination,
+recover it, and reproduce the reference build inputs. Missing hardware or an
+untested recovery path limits subsequent work to build-only investigation.
+
+== M1: reproduce the kernel and boot-image contract
+
+. Build the pinned reconstructed kernel with the same compiler and configuration
+  as the working adaptation before attempting toolchain upgrades. Inspect the
+  final `.config`, resulting kernel, modules, DTB and build logs.
+. Package those inputs in Nix using fixed revisions and hashes. Record any
+  nondeterministic output and eliminate unnecessary network access during builds.
+. Inspect a known-working boot image and implement the necessary packing options.
+  The current Titan recipe specifies the following contract:
+
+[cols="2,2",options="header"]
+|===
+|Field |Observed value
+|Header version |2
+|Page size |2048 bytes
+|Base address |`0x40000000`
+|Kernel offset |`0x00080000`
+|Ramdisk offset |`0x15000000`
+|Second-stage offset |`0x00f00000`
+|Tags and DTB offsets |`0x14000000`
+|Boot/recovery partition sizes |33554432 bytes each
+|Device tree |Separate prebuilt `unihertz-titan.dtb`
+|Verified-boot metadata |Recipe requests appended vbmeta
+|===
+
+These are recipe values, to be checked against actual generated images and the
+device. The current Mobile NixOS
+link:{mobile-src}/modules/system-types/android/bootimg.nix[boot-image builder]
+does not expose header-v2/separate-DTB/vbmeta handling. Extend it with explicit,
+backward-compatible options or keep an experimental builder local to the port.
+Do not substitute legacy `--dt` or appended-DTB behavior without testing.
+
+. Replace Ubuntu Touch-specific root/initramfs parameters with the chosen boot
+  design. In particular, `systempart`, `halium_lvm_vg`, `init` and security
+  parameters need explicit decisions; do not blindly copy the command line.
+. Add size checks and unpack/inspect checks for the generated image. Preserve
+  kernel/module/DTB/initramfs compatibility as one versioned artifact set.
+
+*Deliverables:* kernel derivation, inspected boot-image artifact, input/hash
+manifest, image-size check and comparison with the reference image.
+
+*Exit criterion:* the image format is demonstrably correct and fits the measured
+partition. A kernel build alone does not pass this milestone's boot validation;
+record a hardware boot result before calling the artifact usable.
+
+== M2: resolve kernel/userspace compatibility and boot a minimal system
+
+. Start with a small diagnostic initramfs. Establish persistent or retrievable
+  logs through an available UART, pstore/ramoops, USB or recovery mechanism.
+  Verify kernel execution, storage detection and USB before debugging a desktop.
+. Audit the systemd 261 requirements against the actual 4.14 kernel, including
+  backports. Probe required syscalls/mount semantics, cgroups, namespaces,
+  seccomp and required filesystem/device support.
+. Exercise stage-1 udev coldplug, device creation, stable partition symlinks and
+  input discovery. Modern `systemdMinimal` is part of this gate.
+. Select one coherent userspace strategy and record it: current packages with
+  demonstrated kernel compatibility/backports; a pinned older compatible
+  NixOS/Mobile NixOS combination; or a switch to the native-kernel route.
+  Keep systemd, systemdMinimal/udev, libsystemd and dependent service assumptions
+  consistent. Do not silently weaken service isolation to hide incompatibility.
+. Choose a minimal root filesystem location using the measured partition map,
+  capacity and stable identifiers. Implement its stage-1 mount and hand-off,
+  including Nix store population, before attempting stage 2. An image on userdata
+  needs explicit mount support; Ubuntu Touch's discovery logic is not inherited.
+. Build a minimal Mobile NixOS image and reach its specialized stage 2 using
+  `examples/hello`. Then use a separate minimal normal NixOS configuration to
+  test PID 1, login, networking, the Nix daemon and the store.
+. Verify a sandboxed Nix build, store registration and persistence, garbage
+  collection, required cgroup controllers, firewall setup and shutdown/reboot.
+  Save failures with enough logs to distinguish missing kernel APIs from
+  configuration errors.
+
+An older package set may be useful for a boot experiment, but needs an explicit
+maintenance/security assessment before any daily-use recommendation. Do not
+describe it as support for current NixOS.
+
+*Deliverables:* boot logs, kernel API/configuration audit, chosen package pins,
+minimal system configuration and documented failures/workarounds.
+
+*Exit criterion:* repeatable boot to a USB-accessible shell, readable storage,
+working early udev and successful stage-2 tests on the declared baseline. If the
+compatibility work is unbounded, stop the downstream experiment and evaluate N0.
+
+== M3: build an interactive development system
+
+. Refine M2's root filesystem layout for the interactive system. Validate the
+  chosen dedicated-partition or userdata-image design on each claimed variant,
+  including stage-1 discovery and mount behavior after recovery.
+. Verify Nix store capacity, writable state, mount options and filesystem feature
+  compatibility with the selected kernel. Document the data migration effects.
+. Bring up the display with the simplest available backend. Label framebuffer
+  output separately from working DRM/KMS and hardware acceleration.
+. Reuse the Titan XKB layout and input identification rules; package or replace
+  the scrolling helper. Test letter/number/symbol entry, modifiers, repeat,
+  navigation keys, touch coordinates, keyboard touchpad and input after resume.
+. Provide USB networking/SSH or an equivalent development channel, with an
+  explicit credential setup rather than a shared default password.
+. Document separate updates for the root filesystem and Android boot image.
+  Test recovery from an interrupted update and from a known-bad candidate.
+
+Mobile NixOS currently does not install/manage Android boot components through
+ordinary generation switching. `nixos-rebuild switch` and a stage-2 rollback
+must not be presented as updating or restoring `boot.img`. Maintain matching
+kernel, modules, DTB and stage-1 artifacts, plus a separately recoverable known-good
+boot image. Do not assume stage-0/kexec support on Titan.
+
+*Deliverables:* interactive image, input configuration, installation/update guide
+and recorded recovery test.
+
+*Exit criterion:* repeatable cold boots, stable storage, usable input/display and
+an update/recovery process that the hardware tester has exercised.
+
+== Decision D1: select the sustained implementation route
+
+At the end of the feasibility timebox, record:
+
+* What actually booted, on which variant, with which kernel and userspace.
+* Remaining compatibility work and the maintenance cost of the chosen baseline.
+* Whether the goal is a local experiment, a portable Linux device, a phone or
+  eventual upstream support.
+* Available developer/tester capacity and the next bounded milestone.
+
+Choose N0--N3 for the native route, or H0--H2 for an explicitly maintained Halium
+fork. An inconclusive result is acceptable if it identifies the next test. Do not
+start both full implementations by default. M0 and hardware-format knowledge can
+be reused by either route; a full downstream desktop is not a prerequisite for N0.
+
+== Native route: modern kernel and standard Linux interfaces
+
+=== N0: select and audit the MT6771 starting point
+
+The inspected link:{pm-src}/APKBUILD[postmarketOS testing recipe] builds a modern
+upstream kernel with touchscreen and Gigaset GS4 patches. Its
+link:{pm-src}/0002-add-mt6771-gigaset-gs4.patch[board/SoC adaptation] reuses
+MT8183 definitions, removes CPU idle/frequency properties because those functions
+are broken, and uses a bootloader framebuffer with the IOMMU disabled. It does
+not establish original-Titan support, Titan UFS support or functional radio,
+audio and power management.
+
+An older link:https://github.com/affenull2345/linux/blob/mt6771/arch/arm64/boot/dts/mediatek/mt6771-planet-cosmocom.dts[Cosmo Communicator device tree]
+also offers MT6771 and AW9523 references. Node presence is not hardware test
+evidence. The inspected modern sources contained no verified original-Titan
+board port.
+
+. Pin a specific modern kernel and donor patches; record their revisions/hashes
+  rather than retaining the moving research links above as build inputs.
+. Produce a driver/DT gap table for Titan against the donor: clocks, interrupts,
+  PMIC/regulators, pinctrl, USB, eMMC/UFS, panel, touch/input and power.
+. Map downstream hardware facts to modern bindings. Treat register sequences and
+  DTB contents as references; downstream drivers/DTBs cannot simply be copied
+  into a different kernel ABI and binding model.
+
+*Exit criterion:* a bounded first-boot scope, reproducible patch set and explicit
+list of unsupported peripherals.
+
+=== N1: original-Titan board bring-up
+
+. Create a Titan DTS with verified memory/reserved-memory layout, timers,
+  interrupts, clocks, pinctrl, PMIC and regulator dependencies.
+. Reuse the proven boot-image container where appropriate, replacing the kernel
+  and DT with the modern implementation. Boot a minimal diagnostic initramfs.
+. Establish reliable logs and demonstrate stable CPU/RAM operation. Bring up USB
+  diagnostics and storage. Test eMMC and UFS independently, including reads,
+  writes to designated test space, repeated boots and filesystem integrity.
+. Boot modern NixOS headlessly through the diagnostic channel as soon as core
+  boot and storage permit, then repeat M2's userspace checks. Bring up a temporary
+  framebuffer and keyboard/touchscreen independently; repeat M3's update checks.
+
+*Exit criterion:* modern-kernel NixOS boots reproducibly on each claimed variant
+with storage, diagnostics and basic input. Keep any untested variant unsupported.
+
+=== N2: native graphics, networking, audio and power
+
+These work packages may proceed in parallel after N1, with separate test results:
+
+* *Graphics:* Titan panel initialization/backlight, display routing, DRM/KMS,
+  IOMMU and GPU power/clock integration; then Mesa rendering and compositor tests.
+  Mali family support in Mesa is not proof of this board's integration.
+* *Wi-Fi/Bluetooth:* identify usable modern drivers and firmware-loading paths,
+  calibration requirements and rfkill behavior; test standard Linux networking
+  and Bluetooth services, reconnection and resume.
+* *Audio:* codec/amplifier and ALSA routing, mixer/UCM configuration, microphones,
+  speaker/headset paths and volume behavior. Validate call routing separately.
+* *Power:* charger/fuel gauge and thermal protection, CPU frequency/idle,
+  suspend/resume, wake sources and battery drain. Temporary donor workarounds
+  must be tracked and cannot be treated as production power management.
+
+*Exit criterion:* a declared portable-Linux feature set with measured reliability
+and power behavior. Record missing features rather than claiming complete support.
+
+=== N3: phone features and upstream preparation
+
+. Investigate a native modem transport/control path and its firmware requirements.
+  Do not assume the downstream MediaTek CCCI/RIL implementation is compatible
+  with ModemManager or that modem registration proves call support.
+. Validate mobile data, SMS, incoming/outgoing voice, microphone/earpiece routing,
+  SIM PIN and applicable dual-SIM behavior. Evaluate IMS/VoLTE with the actual
+  carrier; basic cellular connectivity does not establish it.
+. Treat cameras, video recording, sensors, GPS, fingerprint and other peripherals
+  as independently scoped work. Preserve their unknown/broken status until tested.
+. Prepare maintainable kernel patches, firmware packaging, device documentation
+  and a support matrix. Separate reusable kernel/Nixpkgs improvements from the
+  Titan device definition and follow each project's contribution policy.
+
+*Exit criterion:* a reviewable native port with tested claims and stated limits.
+No requirement to finish every peripheral before proposing an honestly scoped
+port, but upstream acceptance is a separate decision.
+
+== Halium route: experimental NixOS hardware adaptation
+
+=== H0: Android container and hardware-service foundation
+
+. Pin a compatible Halium 10 Android system image and matching vendor/firmware
+  sources. Define their layout, mounts, immutable inputs and writable state.
+. Integrate LXC, Binder devices, Android properties, device permissions,
+  service ordering and vendor partition access. Scope compatibility exceptions
+  to demonstrated needs rather than copying historical workarounds wholesale.
+. Define the host/container mount namespaces, writable Android paths and Unix
+  socket locations explicitly; reconcile Android's expected filesystem layout
+  with the immutable Nix store. Ensure firmware is available before driver probe,
+  and assign USB gadget ownership to avoid competing host/Android configuration.
+. Port the hardware startup sequence. The current
+  link:{ut-src}/overlay/system/usr/libexec/lxc-android-config/device-hacks[Wi-Fi helper]
+  waits for Android NVRAM initialization and enables the MediaTek adapter.
+. Verify container restart, host shutdown and behavior when a vendor service
+  fails. Avoid duplicate ownership of a device by Android and host services.
+
+*Exit criterion:* deterministic container startup and separately demonstrated
+hardware service availability, with retained diagnostic access when it fails.
+
+=== H1: graphics, input and audio bridges
+
+. Package a compatible libhybris, Android headers and required companion libraries.
+  Mobile NixOS contains a 2019 libhybris derivation using API-23 headers; that is
+  not an integrated Android-10 hardware adaptation.
+. Choose and prove a compositor backend that can use the Android graphics stack.
+  Installing a desktop or the Nixpkgs Lomiri packages does not establish this.
+  Validate rendering, presentation, touch/input, screen blanking and recovery.
+. Build compatible Android audio bridge modules and configuration. The repository
+  contains Ubuntu/PulseAudio-version-specific binaries and loader paths; rebuild
+  or replace them instead of assuming ABI compatibility with NixOS.
+. Integrate the keyboard and scrolling helper using M3's tests, including behavior
+  after session restarts and suspend.
+
+*Exit criterion:* a stable interactive session and verified output/input audio
+paths on the chosen kernel/userspace baseline.
+
+=== H2: radio services, remaining hardware and maintenance
+
+. Package and integrate the oFono Binder stack and MediaTek extension corresponding
+  to the working adaptation. Its
+  link:{ut-src}/overlay/system/etc/ofono/binder.d/mtk.conf[modem configuration]
+  and link:{ut-src}/build.sh[build script] are references, not portable NixOS
+  package definitions. Preserve source/version compatibility explicitly.
+. Verify mobile data, SMS, calls, call audio, SIM handling and carrier-dependent
+  IMS/VoLTE separately. Test Wi-Fi/Bluetooth interaction and reconnection.
+. Integrate remaining firmware/service dependencies for sensors, cameras and GPS
+  only as required by the chosen scope. Preserve existing known limitations.
+. Run the same charging, thermal, suspend and update tests as the native route.
+. Assign ongoing ownership for the old kernel, coherent Nixpkgs pin, Android
+  binaries and integration patches. Document how updates will be assessed.
+
+*Exit criterion:* an explicitly experimental release with accurate feature and
+maintenance statements. This route does not meet the current upstream vendor-stack
+policy by completing these tasks.
+
+== Proposed repository changes
+
+The paths below describe future work, not files supplied by this planning change.
+Keep experimental configuration outside the automatically enumerated `devices/`
+tree until build and support status are intentional.
+
+[cols="2,3",options="header"]
+|===
+|Area |Proposed change
+|External device module
+|Use an explicit device path while experimenting; define identity, aarch64,
+measured hardware properties, kernel, USB, rootfs and boot settings.
+|`devices/unihertz-titan/`
+|Add the native upstream-candidate device definition, README, kernel packaging
+and firmware extraction/packaging once the corresponding gates pass.
+|`modules/hardware-mediatek.nix`
+|Add MT6771 to the SoC definitions and shared MediaTek logic, or keep equivalent
+settings local during experimentation. Do not select MT8183 merely to bypass
+missing MT6771 registration.
+|`modules/system-types/android/`
+|Add explicit header-v2, DTB and metadata handling as demonstrated necessary;
+preserve existing device output behavior and test image parsing/size limits.
+|Kernel options
+|Use `mobile.boot.stage-1.kernel.package` and appropriate module/configuration
+settings. Inspect the actual `.config`; successful module evaluation is
+insufficient because custom-kernel requirements are relaxed in the current code.
+|Firmware and hardware services
+|Package redistributable firmware or provide extraction instructions. Keep
+Halium-specific modules and package overlays external to the upstream candidate.
+|Documentation
+|Publish variant-specific installation, recovery, update and feature-status
+instructions only after they are exercised on hardware.
+|===
+
+The historical link:https://github.com/mobile-nixos/mobile-nixos/tree/d22c60e8d4d21f0197c1cac88c34dcc366b7a16c/devices/asus-x018d[Asus X018D MediaTek port]
+is useful for packaging structure. It is not a compatible current package set or
+a hardware match. Use the commit reference rather than assuming the old `master`
+branch still exists.
+
+== Validation and release gates
+
+=== Build-time checks
+
+* Evaluate the candidate device and build the kernel, boot image and rootfs from
+  the committed pins. Preserve build logs and a machine-readable input manifest.
+* Check the final kernel configuration, DT schema where applicable, module list
+  and firmware availability, including module `vermagic` and load ordering.
+  Once the module list is known, make missing required modules fail validation;
+  the current default allows missing initrd modules.
+* Unpack the boot image and check header fields, DT placement, metadata and size.
+  A new generic image-builder option needs meaningful regression checks for
+  existing supported formats/devices as well as Titan.
+* Parse/evaluate affected Nix code, normalize the kernel configuration and build
+  documentation. Validate the documentation-only change separately from future
+  device functionality.
+
+The following are *prospective commands*, after a device module exists at the
+illustrative path. They have not been run against a Titan implementation:
+
+[source,sh]
+----
+nix-instantiate examples/hello --arg device ./devices/unihertz-titan -A config.system.build.toplevel
+nix-build examples/hello --arg device ./devices/unihertz-titan -A outputs.default
+nix-build examples/hello --arg device ./devices/unihertz-titan -A outputs.android-bootimg
+bin/kernel-normalize-config --only-check ./devices/unihertz-titan
+bash .ci/parse-all.sh
+bash .ci/quick-eval.sh
+nix-build doc --no-out-link
+----
+
+`examples/hello` is a specialized stage-2 proof, not a normal login system or
+proof that the Nix daemon and phone functions work. Build and test a minimal
+normal NixOS configuration separately. Cross-compilation details and target
+output selection need validation with the selected package baseline.
+For an external experiment, substitute its explicit path in the candidate
+evaluation/build commands. `parse-all.sh` checks tracked Nix files and
+`quick-eval.sh` enumerates the repository's device tree; neither substitutes for
+explicitly evaluating an external candidate.
+
+=== Hardware acceptance matrix
+
+All NixOS results below start as *untested*. Store pass/fail/unknown, logs and
+artifact hashes per variant and software baseline. Suggested repetitions are
+initial acceptance targets, to be refined from observed failures.
+
+[cols="2,3",options="header"]
+|===
+|Area |Required evidence
+|Boot/recovery
+|At least ten consecutive cold boots and a demonstrated restore to the reference
+system; retained diagnostics for a deliberately rejected test image.
+|Storage
+|Correct eMMC/UFS enumeration, designated test-file read/write/checksum across
+reboots, filesystem integrity and no unexpected corruption in logs.
+|Early userspace
+|udev coldplug, stable partition discovery, input devices and rootfs mount succeed.
+|Normal NixOS
+|PID 1, login, services, Nix daemon, sandboxed build and store persistence work.
+|Display/input
+|Correct geometry, touch alignment, key/modifier map, scrolling, screen blanking
+and input after session restart; distinguish framebuffer from acceleration.
+|Connectivity
+|USB networking, Wi-Fi reconnect and Bluetooth pairing/reconnect as claimed;
+test resume and simultaneous use where relevant.
+|Audio
+|Speaker, earpiece, microphone, headset and volume routing as applicable; call
+audio tested independently from media playback.
+|Power
+|Plausible battery readings, charging/discharging behavior, thermal controls,
+idle drain measurements and at least twenty suspend/resume cycles.
+|Cellular
+|SIM/PIN, registration, data, SMS, incoming/outgoing calls and audio; separately
+record dual-SIM and carrier/IMS/VoLTE results. Do not place emergency test calls.
+|Other peripherals
+|Separate evidence for cameras/photos/video, GPS, sensors and fingerprint;
+absence of results remains unknown or unsupported.
+|Updates
+|Known-good rootfs and boot artifact recovery, interrupted-update behavior and
+kernel/module/DTB/initramfs consistency across the supported update path.
+|===
+
+== Schedule, decision points and completion criteria
+
+* *Initial feasibility timebox: five to ten engineer-days*, with a device and an
+  experienced embedded-Linux/Nix developer available. Complete M0, then either
+  attempt M1/M2 or select the native route at D1 and begin N0/N1, including M1's
+  image-format inspection. Record the route decision and outstanding evidence
+  even if boot has not succeeded. The deliverable is evidence and a bounded next
+  step, not a guaranteed working phone.
+* *Interactive prototype:* estimate after the compatibility and boot gates.
+  M3 depends on actual storage/input/display behavior; do not assign a firm date
+  from source inspection alone.
+* *Functional Halium fork:* plan for multiple weeks to months of package/service
+  integration and hardware testing after a viable baseline is established.
+* *Native phone support:* treat as a kernel-development project with open-ended
+  peripheral work. Estimate individual work packages after N0/N1, especially
+  UFS, power management, modem integration and cameras.
+
+Work that can run in parallel includes source/license inventory and build-tool
+packaging during hardware inventory; input-layout packaging during boot work;
+and independently owned graphics, audio, connectivity and power packages after
+core native bring-up. Keep route selection, flashing, boot diagnosis and shared
+device testing coordinated.
+
+The plan is implemented only when the selected target level has reproducible
+artifacts, hardware results, tested installation/update/recovery instructions,
+documented unsupported features and an owner for maintenance. Publishing this
+plan, compiling a kernel or displaying a splash screen does not satisfy those
+criteria.
