@@ -2,6 +2,7 @@
 :ut-src: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/unihertz-titan/-/blob/811aaa59fa3f21748c7b4142412633d9734d4928
 :job: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/unihertz-titan/-/jobs/16473049944
 :artifacts: https://gitlab.com/api/v4/projects/25471544/jobs/16473049944/artifacts/out
+:kernel-src: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe
 
 Research date: 2026-10-14. This concerns the owner's original eMMC Titan running
 Ubuntu Touch, with a macOS computer available. At the start of preservation the
@@ -445,7 +446,7 @@ examining a copy, and run any repair only on a disposable copy. See
 link:https://docs.kernel.org/admin-guide/ext4.html[the ext4 documentation] and
 link:https://docs.kernel.org/driver-api/mmc/mmc-dev-parts.html[eMMC boot partitions].
 
-=== Rescue initramfs design remains untested
+=== Rescue initramfs remains untested on hardware
 
 Host inspection of the installed boot ramdisk found two concatenated newc
 archives: 374 base entries followed by seven overlay entries. Its compressed
@@ -472,11 +473,12 @@ It does not establish USB operation or bootloader acceptance of that new image.
 Review these requirements during build-only development and before proposing a
 hardware trial:
 
-* [ ] Build a small independent PID 1, BusyBox, `e2image` and compressor from
+* [x] Build a small independent PID 1, BusyBox, `e2image` and compressor from
   reviewed sources for Linux/AArch64. Mount only virtual/RAM filesystems and
   leave storage filesystems unmounted. Exclude Ubuntu Touch startup scripts,
   automatic filesystem repair, LVM activation, Android/modem services and
-  automatic reboot behavior.
+  automatic reboot behavior. The standalone artifact and synthetic tool/VM
+  checks now pass; Titan execution remains untested.
 * [ ] Select and validate a USB transport. The repository's
   link:../../../overlay/adbd/default.nix[source-pinned adbd] is an optional
   FunctionFS design input, with dynamic libhybris, OpenSSL and zlib dependencies
@@ -495,6 +497,111 @@ hardware trial:
   bootloader identity, temporary-boot support if used, and return to the existing
   system. Neither temporary boot nor rollback is demonstrated. A build-only
   rescue artifact cannot close the recovery gate.
+
+==== Build-only storage guard
+
+The independent ramdisk prototype and its host-only build commands are described
+in link:README.adoc#_build_only_rescue_userspace[the prototype README]. Its initial
+version deliberately provides no acquisition transport. It leaves storage
+filesystems unmounted and requires successful read-only block guards before
+reporting readiness, then repeats the checks. Current visibility is not proof
+of complete storage discovery or protection against kernel/firmware writers.
+
+The pinned link:{kernel-src}/block/ioctl.c#L435[`BLKROSET` dispatcher] invokes the
+block driver before applying `set_device_ro`. The
+link:{kernel-src}/drivers/mmc/core/block.c#L1104[MMC handler] accepts a nonzero
+read-only request immediately, before its write-protect-status paths; the generic
+dispatcher then sets the volatile kernel flag. The
+link:{kernel-src}/drivers/block/loop.c#L1618[loop open path] also permits existing
+unbound loop nodes and falls through to the generic read-only ioctl. These
+source checks support the prototype's chosen operations without issuing eMMC
+hardware write-protection commands. Any actual node/identity/ioctl failure still
+stops the prototype; no loop or RPMB exemption is made.
+
+An independent second storage destination is currently unavailable. The private
+Mac copies remain the only retained backup set; successful host or VM tests do
+not close that retention requirement.
+
+==== Pinned watchdog and ACM source audit
+
+The pinned kernel archive was inspected on the Linux builder without executing
+its contents. These are source-level constraints, not a rescue boot result.
+The configured vendor watchdog does not use Linux `WATCHDOG_CORE`. Its
+link:{kernel-src}/drivers/watchdog/mediatek/wdt/common/wdt_v2/mtk_wdt_v2.c#L1249[probe]
+sets a 30-second timeout and normally enables the watchdog; the device-tree
+`apwdt_en` property can override that default. The
+link:{kernel-src}/drivers/watchdog/mediatek/wdk/wd_common_drv.c#L308[kernel kicker]
+starts automatically with a 20-second interval and per-CPU `wdtk-*` threads.
+The inspected path therefore does not require an Android userspace daemon just
+to supply these kicks. Do not replace this with generic `/dev/watchdog`
+assumptions or silently disable the watchdog.
+
+The separate
+link:{kernel-src}/drivers/misc/mediatek/aee/aed/monitor_hang.c#L1665[AEE hang detector]
+starts with detection disabled; its `BOOT_UP_HANG` definition is commented out.
+The normal countdown requires enabled detection and an Android `system_server`,
+unless userspace explicitly sets its reboot flag. A standalone PID 1 should
+not invoke those Android monitor ioctls. This audit does not establish all
+kernel/firmware write paths, charging behavior or failure behavior; the retained
+configuration still has `CONFIG_PANIC_TIMEOUT=1`.
+
+ACM can avoid an `adbd` dependency: the configured
+link:{kernel-src}/drivers/usb/gadget/function/f_acm.c#L855[configfs ACM function]
+allocates a kernel serial port. The active MTU3 phone implementation still needs
+its link:{kernel-src}/drivers/usb/mtu3/mtu3_plat_v2.c#L454[regulator, clocks, PHY and extcon dependencies]
+and link:{kernel-src}/drivers/usb/mtu3/mtu3_dr_v2.c#L403[USB role events].
+Successful probe, gadget binding and Mac recognition without Android startup
+remain untested. The serial driver initializes `tty_std_termios`, so a binary
+transport must set raw termios on both ends and keep diagnostics separate.
+Its link:{kernel-src}/drivers/usb/gadget/function/u_serial.c#L925[close path]
+waits at most 15 seconds before discarding queued bytes: require explicit
+length/hash framing and a host completion acknowledgement before closing.
+The same driver logs the first three bytes of some TX/RX buffers through
+`pr_notice`; acquisition logs must remain private. `CONFIG_U_SERIAL_CONSOLE`
+is disabled in the retained configuration.
+
+No independent physical bootloader entry/exit or temporary-boot capability was
+established. The link:https://www.unihertz.com/pages/faqs[manufacturer FAQ]
+describes Power plus Volume Up as recovery entry. The
+link:https://github.com/SolidEva/Unihertz-Titan-lineageos-microg/blob/9e03b1a73ff054e9b47970228f14d1e42225985a/README.md#unihertz-titan-key-combos[historical Titan guide]
+also enters recovery before selecting its bootloader option, and describes the
+combination as unreliable. That is not a passive route through the installed
+recovery. Distinguish bootloader fastboot from
+link:https://source.android.com/docs/core/architecture/bootloader/fastbootd[userspace fastbootd],
+which boots recovery and can update boot-control state. A separately authorized
+entry, recognition and return trial remains necessary before proposing any
+rescue-image boot.
+
+==== Modem and calibration consistency source audit
+
+The retained configuration builds ECCCI/CLDMA support. Its
+link:{kernel-src}/drivers/misc/mediatek/eccci/fsm/ccci_fsm.c#L705[FSM initialization]
+starts the command state as `CCCI_FSM_GATED` with an empty command queue.
+The inspected normal
+link:{kernel-src}/drivers/misc/mediatek/eccci/fsm/ccci_fsm_ioctl.c#L478[start request]
+requires a userspace ioctl from a process whose name begins `ccci_mdinit`;
+the modem probe does not call that start path. The filesystem channel is a
+link:{kernel-src}/drivers/misc/mediatek/eccci/port/port_cfg.c#L136[`ccci_fs` character port].
+Omitting Android/modem userspace avoids these startup and filesystem-service
+paths, but does not prove calibration quiescence: bootloader firmware loading,
+pre-init modem state and other kernel/firmware writers remain unverified.
+
+For a later authorized offline trial, the pure
+link:{kernel-src}/drivers/misc/mediatek/ccci_util/ccci_util_lib_sys.c#L111[sysfs status read]
+is `/sys/kernel/ccci/boot`; read it without writing the attribute. Its
+link:{kernel-src}/drivers/misc/mediatek/eccci/ccci_core.c#L50[callback]
+reports the link:{kernel-src}/drivers/misc/mediatek/include/mt-plat/mtk_ccci_common.h#L442[`MD_STATE` enumeration]:
+0 invalid, 1 gated, 2/3 waiting for handshake 1/2, 4 ready, 5 exception,
+6 reset and 7 waiting to stop. This is distinct from the internal FSM command
+state: a newly allocated controller's reported state can still be 0.
+Neither 0 nor 1 proves hardware power-off. Do not open CCCI monitor character
+nodes for passive state inspection: their
+link:{kernel-src}/drivers/misc/mediatek/eccci/fsm/ccci_fsm_monitor.c#L43[close handler]
+calls `force_md_stop`, even after a read-only open. Before calibration acquisition,
+also verify absent userspace writers, unmounted targets and holders, preserved
+partition identities, and stable pre/post acquisition hashes. Hash agreement
+supports stability over the reads; it does not establish an atomic snapshot or
+exclude firmware writes.
 
 === Recovery procedure to review before any mode change
 

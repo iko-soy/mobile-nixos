@@ -21,6 +21,9 @@ hardware works under NixOS.
   Android Clang r353983c and the matching Android GCC 4.9 cross toolchains.
 * A reproduction of the Ubuntu Touch reference boot-image recipe, using the
   pinned Ubuntu Touch initramfs, adaptation overlay and prebuilt Titan DT table.
+* A separate source-built AArch64 rescue ramdisk with a small independent
+  PID 1 and static backup tools. It has no acquisition transport or phone boot
+  validation; see the build-only rescue section below.
 * Host-side inventory, kernel configuration comparison, read-only kernel API
   probes, boot-image inspection and bounded private boot/recovery/dtbo
   acquisition tools, plus a host-only sparse ext4 archive verifier, with
@@ -70,6 +73,52 @@ python3 support/experimental-devices/unihertz-titan/tools/inspect-boot-image.py 
 and AVB footer. Generic inspection without this flag can inspect intermediate
 unsigned images. The inspector checks bounds and metadata consistency; it does
 not verify cryptographic signatures, the bootloader's trust policy or bootability.
+
+== Build-only rescue userspace
+
+`rescue.ramdisk` builds `initramfs.cpio.gz` and an inspectable `root/` tree on an
+x86_64 Linux builder. Its AArch64 executables use static musl: an independent
+MIT-licensed PID 1, a minimal BusyBox 1.37.0, e2image 1.47.4 and Zstandard 1.5.7.
+Sources and patches come from the existing Nixpkgs pin. The build rejects ELF
+interpreter or shared-library dependencies and records payload/archive hashes.
+No Ubuntu Touch ramdisk binary, systemd, firmware or Nix store is packed.
+
+PID 1 mounts devtmpfs, read-only proc/sysfs and bounded RAM-backed `/run` and
+`/tmp`. It checks that these and the RAM root are the complete mount set. For
+every visible block node it matches sysfs/device numbers, sets `BLKROSET`, and
+verifies `BLKROGET`. It waits up to ten seconds for non-loop/non-RAM storage,
+then checks mounts and block protection every second. A failure prints a marker
+and waits indefinitely. It starts no shell, USB/network service, Android/modem
+service, filesystem repair, acquisition, or automatic reboot.
+
+`TITAN_RESCUE_READY` means the currently visible devices passed those guards.
+It does not prove complete Titan storage discovery, stop firmware/kernel writes,
+or establish a consistent calibration snapshot. Devices can arrive between
+scans. The production ramdisk contains no VM callback or shutdown path.
+
+[source,sh]
+----
+nix-build support/experimental-devices/unihertz-titan -A rescue.ramdisk --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A rescue.toolTests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A rescue.vmTests --no-out-link
+----
+
+The tool checks execute the AArch64 binaries under qemu-user against a synthetic
+ext4 image, stream it through e2image/Zstandard, and check the restored filesystem
+and payload. This uses the builder's kernel. The VM checks compile the same
+PID 1 core for x86_64 with a separate test callback and boot the pinned Linux
+6.18.38 kernel under networkless QEMU TCG. A VM-only bootstrap loads its virtio
+modules before execing PID 1. The three cases cover read-only protection of a
+writable host fixture, an incorrect sentinel, and missing storage; negative
+cases must remain running until the host terminates them. Disk hashes must
+remain unchanged. These tests do not exercise the Titan's 4.14 kernel or hardware.
+
+This output is a ramdisk, not a flashable Android boot image or a demonstrated
+recovery environment. USB transport, exact storage identity/completeness,
+watchdog/charging behavior and an authorized boot/return route still need
+validation. See link:recovery-preparation.adoc[the recovery record]. Keep built
+payloads and raw diagnostics outside Git; no phone mode change is part of these
+commands.
 
 == Reference inputs
 
@@ -384,3 +433,33 @@ output on this builder. A separate controlled repeat of `referenceBootImage`
 with the unchanged kernel also reproduced its complete packaging output.
 Cross-environment bit reproducibility remains unresolved; preserve both build
 records and their distinct hashes.
+
+=== Follow-up: independent rescue userspace
+
+The standalone ramdisk built successfully on the x86_64 Linux builder. Its
+compressed size is 1129267 bytes (2662912 bytes uncompressed), with SHA-256
+`12f521a0dcf8d9d1c88ba74ab375441db4b9e803121c8d7f0b6ac53da0994261`.
+A same-builder `nix-build --check -A rescue.ramdisk` reproduced the complete
+output using the unchanged compiled executables. The private Mac copy matches
+the archive and all four payload hashes; its newc inventory contains only the
+four expected AArch64 executables and empty directories. This is not a
+cross-environment or toolchain rebuild reproducibility claim.
+
+The qemu-user AArch64 tool fixture passed: PID 1 refused ordinary process
+execution, BusyBox copied and verified a payload, and e2image/Zstandard streamed
+and restored a synthetic ext4 filesystem. The restored filesystem passed
+`e2fsck -fn` and its recovered payload matched. Only the expected e2image version
+diagnostic was accepted. These checks use the builder's kernel.
+
+The independent PID 1 builds as static musl executables for AArch64 and x86_64
+with `-Wall -Wextra -Werror`. The three networkless QEMU VM cases passed using
+the same core: visible storage was protected, a wrong sentinel failed, and
+missing storage failed after the discovery window. Both synthetic disk hashes
+were unchanged; negative cases stayed running until host termination.
+These are Linux 6.18.38 VM results, not Titan 4.14 or recovery boot results.
+
+The pinned vendor-source review corroborates the MMC/loop read-only ioctl path
+and documents watchdog and USB ACM constraints. A second independent backup
+destination remains unavailable. Normal-mode ADB remains available; only its
+connection state was checked in this follow-up. No phone configuration change,
+reboot, flash or generated-image hardware boot was performed.
