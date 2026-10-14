@@ -224,13 +224,16 @@ def validate_ssh_host(host):
     return host
 
 
-def run_ssh_probe(host, port, script, timeout):
+def run_ssh_probe(host, port, script, timeout, config=None):
     validate_ssh_host(host)
     command = [
         "ssh", "-n", "-T", "-o", "BatchMode=yes",
         "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10",
-        "-p", str(port), "--", host, "sh -c " + shlex.quote(script),
     ]
+    if config is not None:
+        # Keep the path as one argv value; OpenSSH reads it, never a host shell.
+        command.extend(["-F", config])
+    command.extend(["-p", str(port), "--", host, "sh -c " + shlex.quote(script)])
     return run_command(command, timeout)
 
 
@@ -301,6 +304,7 @@ def main(argv=None):
     transport.add_argument("--ssh", metavar="USER@HOST", help="collect over SSH instead of ADB")
     transport.add_argument("--local", action="store_true", help="collect on this machine; run on the Titan itself")
     parser.add_argument("--ssh-port", type=int, help="SSH port (default: 22; requires --ssh)")
+    parser.add_argument("--ssh-config", metavar="PATH", help="private OpenSSH configuration file (requires --ssh)")
     parser.add_argument("--adb", default="adb", help="ADB executable (default: adb)")
     parser.add_argument("--output", help="new private output directory outside any Git checkout")
     parser.add_argument("--timeout", type=float, default=20, help="seconds per command (default: 20)")
@@ -313,6 +317,8 @@ def main(argv=None):
         parser.error("--timeout must be finite and greater than zero")
     if args.ssh_port is not None and (args.ssh is None or not 1 <= args.ssh_port <= 65535):
         parser.error("--ssh-port requires --ssh and a port from 1 to 65535")
+    if args.ssh_config is not None and (args.ssh is None or not args.ssh_config):
+        parser.error("--ssh-config requires --ssh and a nonempty path")
 
     # Protect newly created parent directories and files as well as the leaf.
     os.umask(0o077)
@@ -321,7 +327,9 @@ def main(argv=None):
             collect = lambda script: run_local_probe(script, args.timeout)
         elif args.ssh is not None:
             validate_ssh_host(args.ssh)
-            collect = lambda script: run_ssh_probe(args.ssh, args.ssh_port or 22, script, args.timeout)
+            collect = lambda script: run_ssh_probe(
+                args.ssh, args.ssh_port or 22, script, args.timeout, args.ssh_config,
+            )
             _, _, code, timed_out = collect("true")
             if code != 0 or timed_out:
                 raise ValueError(

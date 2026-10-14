@@ -27,7 +27,11 @@ python3 support/experimental-devices/unihertz-titan/tools/collect-inventory.py \
 ----
 
 For a nonstandard port, add `--ssh-port 2222`. SSH configuration and an available
-agent can supply the identity key. The helper requires an already trusted host
+agent can supply the identity key. Use `--ssh-config /absolute/private/ssh_config`
+to select a dedicated OpenSSH configuration with `ssh -F`, without changing the
+default SSH configuration. This option requires `--ssh`; the helper still uses
+port 22 unless `--ssh-port` is supplied, even if the configuration has a `Port`
+setting. The helper requires an already trusted host
 key (`StrictHostKeyChecking=yes`) and uses batch authentication with no terminal;
 it cannot prompt for a password, decrypt a key interactively or accept a new host
 key. It runs the same fixed probes as ADB, without privilege elevation. The SSH
@@ -37,6 +41,69 @@ machine running the helper, outside Git, with the private permissions below.
 SSH reachability, authentication and hardware collection have not yet been
 verified against this Titan. A private LAN address requires an existing network
 route or VPN from the collecting environment.
+
+=== SSH through an authorized TCP forward
+
+In a managed cloud environment, use its supported TCP forwarding workflow.
+Confirm both VPN configuration and a TCP grant for the phone's address; HTTP
+access permission alone does not grant raw TCP access. Establish a loopback
+listener forwarding to the phone's port 22 through that workflow. A listening
+port does not establish connectivity or authenticate the remote phone.
+
+Keep the SSH identity, configuration, candidate host key and trusted-host file
+in a private directory outside Git. For example, with an authorized forward on
+`127.0.0.1:2222`, collect only the ED25519 server public key before authentication:
+
+[source,sh]
+----
+umask 077
+ssh-keyscan -T 10 -t ed25519 -p 2222 127.0.0.1 > /absolute/private/hostkey.candidate
+ssh-keygen -lf /absolute/private/hostkey.candidate
+----
+
+Compare the fingerprint with one verified directly on the phone or through an
+independent trusted channel. Stop on a mismatch or missing key. A key scan by
+itself does not establish trust. Only after a match, put the verified key in
+`/absolute/private/known_hosts` under the alias `titan-inventory`, in the format
+`titan-inventory ssh-ed25519 BASE64_PUBLIC_HOST_KEY`.
+
+A dedicated `/absolute/private/ssh_config` can then contain:
+
+[source,text]
+----
+Host titan-inventory
+    HostName 127.0.0.1
+    User phablet
+    HostKeyAlias titan-inventory
+    HostKeyAlgorithms ssh-ed25519
+    UserKnownHostsFile /absolute/private/known_hosts
+    GlobalKnownHostsFile /dev/null
+    IdentityFile /absolute/private/id_ed25519
+    IdentitiesOnly yes
+    BatchMode yes
+    StrictHostKeyChecking yes
+    ForwardAgent no
+    ClearAllForwardings yes
+----
+
+Use a configuration you control: OpenSSH configuration can execute local
+commands. Keep the private directory mode `0700` and its files mode `0600`.
+Check authentication with the verified key, then collect without changing the
+phone's SSH configuration:
+
+[source,sh]
+----
+ssh -F /absolute/private/ssh_config -p 2222 -n -T titan-inventory true
+python3 support/experimental-devices/unihertz-titan/tools/collect-inventory.py \
+  --ssh titan-inventory --ssh-port 2222 \
+  --ssh-config /absolute/private/ssh_config \
+  --output /absolute/private/new-inventory
+----
+
+The collector does not intentionally record the SSH configuration path or
+destination, but private OpenSSH error output may still include them. Review
+stderr as well as probe output. Stop the local forward after collection; recreate
+it and recheck the active grants after an environment replacement.
 
 == Alternative: collect on the Titan itself
 

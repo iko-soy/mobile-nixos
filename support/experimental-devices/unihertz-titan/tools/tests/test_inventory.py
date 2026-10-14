@@ -166,7 +166,36 @@ class SshBoundaryTests(unittest.TestCase):
         self.assertEqual(command[command.index("-p") + 1], "2222")
         self.assertEqual(command[-3:-1], ["--", "phablet@titan"])
         self.assertEqual(shlex.split(command[-1]), ["sh", "-c", script])
+        self.assertNotIn("-F", command)
         self.assertNotIn("shell", run.call_args.kwargs)
+
+    def test_ssh_config_path_is_one_argument_and_preserves_authentication_options(self):
+        config = "/private directory/ssh config; $(not-a-command) 'quoted'"
+        with patch.object(inventory.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, b"result", b"")
+            inventory.run_ssh_probe("titan-forward", 2222, "true", 4, config)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("-F") + 1], config)
+        self.assertEqual(command.count(config), 1)
+        self.assertLess(command.index("-F"), command.index("--"))
+        self.assertIn("BatchMode=yes", command)
+        self.assertIn("StrictHostKeyChecking=yes", command)
+        self.assertEqual(command[command.index("-p") + 1], "2222")
+        self.assertEqual(command[-3:], ["--", "titan-forward", "sh -c true"])
+        self.assertNotIn("shell", run.call_args.kwargs)
+
+    def test_ssh_config_requires_ssh_and_nonempty_path_before_any_command(self):
+        for arguments in (["--ssh-config", "/private/config"],
+                          ["--local", "--ssh-config", "/private/config"],
+                          ["--serial", "phone", "--ssh-config", "/private/config"],
+                          ["--ssh", "titan", "--ssh-config", ""],
+                          ["--ssh", "titan", "--ssh-config", "/private/config", "--ssh-port", "0"],
+                          ["--ssh", "titan", "--ssh-config", "/private/config", "--ssh-port", "65536"]):
+            with self.subTest(arguments=arguments), patch.object(inventory.subprocess, "run") as run:
+                with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                    inventory.main(arguments)
+                self.assertEqual(error.exception.code, 2)
+                run.assert_not_called()
 
     def test_invalid_destination_is_rejected_before_invocation(self):
         with patch.object(inventory.subprocess, "run") as run, self.assertRaises(ValueError):
@@ -197,13 +226,41 @@ class SshBoundaryTests(unittest.TestCase):
         finally:
             os.umask(old_umask)
 
+    def test_config_preflight_failure_does_not_disclose_transport_details(self):
+        config = "/private directory/titan config"
+        destination = "phablet@private-host"
+        old_umask = os.umask(0o077)
+        try:
+            with tempfile.TemporaryDirectory() as temporary, patch.object(inventory.subprocess, "run") as run:
+                run.return_value = subprocess.CompletedProcess(
+                    [], 255, b"", f"Cannot read {config} for {destination}".encode(),
+                )
+                output = Path(temporary) / "inventory"
+                terminal = io.StringIO()
+                with contextlib.redirect_stderr(terminal), self.assertRaises(SystemExit):
+                    inventory.main([
+                        "--ssh", destination, "--ssh-config", config, "--output", str(output),
+                    ])
+                self.assertFalse(output.exists())
+                self.assertEqual(run.call_count, 1)
+                command = run.call_args.args[0]
+                self.assertEqual(command[command.index("-F") + 1], config)
+                self.assertEqual(shlex.split(command[-1]), ["sh", "-c", "true"])
+                self.assertNotIn(config, terminal.getvalue())
+                self.assertNotIn(destination, terminal.getvalue())
+        finally:
+            os.umask(old_umask)
+
     def test_ssh_collection_uses_same_probes_without_adb(self):
         calls = []
+        config = "/private directory/titan config"
 
         def mock_ssh(command, **kwargs):
             calls.append(command)
             self.assertEqual(command[0], "ssh")
             self.assertEqual(command[-2], "phablet@private-host")
+            self.assertEqual(command[command.index("-F") + 1], config)
+            self.assertEqual(command[command.index("-p") + 1], "2222")
             script = shlex.split(command[-1])[2]
             self.assertIn(script, ["true", *inventory.PROBES.values(), *inventory.PRIVATE_PROBES.values()])
             return subprocess.CompletedProcess(command, 0, b"available\n", b"")
@@ -215,14 +272,17 @@ class SshBoundaryTests(unittest.TestCase):
                 terminal = io.StringIO()
                 with contextlib.redirect_stdout(terminal):
                     self.assertEqual(inventory.main([
-                        "--ssh", "phablet@private-host", "--include-private-logs", "--output", str(output),
+                        "--ssh", "phablet@private-host", "--ssh-config", config, "--ssh-port", "2222",
+                        "--include-private-logs", "--output", str(output),
                     ]), 0)
                 self.assertEqual(len(calls), 1 + len(inventory.PROBES) + len(inventory.PRIVATE_PROBES))
                 self.assertTrue((output / "dmesg.txt").exists())
                 self.assertEqual(json.loads((output / "report.json").read_text())["transport"], "ssh")
                 self.assertNotIn("private-host", terminal.getvalue())
+                self.assertNotIn(config, terminal.getvalue())
                 for path in output.iterdir():
                     self.assertNotIn(b"private-host", path.read_bytes())
+                    self.assertNotIn(config.encode(), path.read_bytes())
         finally:
             os.umask(old_umask)
 
