@@ -1,0 +1,159 @@
+= Original Titan recovery preparation
+:ut-src: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/unihertz-titan/-/blob/811aaa59fa3f21748c7b4142412633d9734d4928
+:job: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/unihertz-titan/-/jobs/16473049944
+:artifacts: https://gitlab.com/api/v4/projects/25471544/jobs/16473049944/artifacts/out
+
+Research date: 2026-10-14. This concerns the owner's original eMMC Titan running
+Ubuntu Touch, with a macOS computer available. The owner reports no saved boot
+image or recovery materials. No restoration procedure has been demonstrated.
+See link:hardware-inventory.adoc[the hardware record] for the measured layout.
+
+This record prepares read-only preservation and later recovery review. It does
+not authorize a reboot, flash, format, repartition, unlock or installation on the
+phone. The pinned adaptation's installation recipe includes destructive steps;
+it must not be run as a backup procedure.
+
+== Inspected Ubuntu Touch candidates
+
+The public adaptation's successful `devel-flashable` link:{job}[job 16473049944]
+belongs to pipeline `2845133496`, built on 2026-09-13 from adaptation commit
+`811aaa59fa3f21748c7b4142412633d9734d4928`. Its
+link:{job}/artifacts/browse/out/[artifact directory] includes boot, recovery and
+root-filesystem images. The exact-job boot/recovery URLs were downloadable on
+the research date, despite API metadata suggesting artifact expiration. These
+URLs are not a guarantee of future retention.
+
+[cols="1,1,4",options="header"]
+|===
+|Candidate |Bytes |Locally calculated SHA-256
+|link:{artifacts}/boot.img[boot.img]
+|33554432
+|`6829a8bcaa696a6fe283184a874450357dd81e7e203eedaf79329bdc55745e83`
+|link:{artifacts}/recovery.img[recovery.img]
+|33554432
+|`d96ce16af0b290e08d96c8332decb01cd3f32d43dd4a611b3217e9b4c80a6ca9`
+|===
+
+Both files were downloaded to private storage outside Git; repeated downloads
+agreed. These are locally calculated digests, not independently verified
+publisher-signed checksums. The binaries are not redistributed by this fork.
+
+Both have Android header v2, 2048-byte pages and the 112135-byte Android DT table.
+Their kernel and DTB bytes agree with each other; their ramdisks and complete
+images differ. `boot.img` passes `inspect-boot-image.py --check-titan`; its final
+vbmeta is 2752 bytes, with flags `2` and algorithm type `2`. `recovery.img` passes
+generic structural inspection; its vbmeta is 512 bytes, flags `0`, algorithm type
+`0`, and has no authentication block. The recovery metadata is unsigned. Neither
+result proves bootloader acceptance or signature trust.
+
+The candidate kernel's build string agrees with the owner's supplied kernel
+release/compiler/build timestamp, including `2026-09-13 21:55:45 UTC`. Its
+embedded configuration has the same decompressed SHA-256 as the uploaded runtime
+configuration and recorded reference build:
+
+[source,text]
+----
+1113327761998175c8cc78dbce10ac23c7fed8a8418f1072e553e8c0acc4286b
+----
+
+This is useful provenance evidence, but the installed boot/recovery partitions
+and current ramdisk have not been read or hashed. These remain candidate
+reinstallation artifacts, not backups of this installation. The separate
+`ubuntu.img.zst` artifact was listed but not downloaded or hashed; its URL alone
+does not establish a preserved complete reinstall set.
+
+== Installation and stock-firmware research limits
+
+The link:{ut-src}/deviceinfo[pinned deviceinfo] names the device `Titan`, selects
+`aarch64`, Halium 10 and Ubuntu Touch `24.04-1.x`, and enables unified recovery
+while retaining a separate 32 MiB recovery partition. The current CI recovery
+candidate must not be confused with the old TWRP images linked in the
+link:{ut-src}/README.md[pinned manual-install README]. That README targets eMMC,
+requires Android 10 firmware and TWRP, and includes boot replacement and userdata
+formatting. Its old `master` artifact link is stale; the inspected job above is
+from `main`.
+
+The link:https://github.com/ubports/installer-configs/tree/ad09affafe12b09474731ecd543bcc89ed754ba8/v2/devices[inspected UBports installer configuration tree]
+has no device paths named Titan, Unihertz or gargoyle. Standard Installer support
+for this phone was not established. In particular, the device catalog's
+link:https://devices.ubuntu-touch.io/device/titan/release/xenial[lowercase titan]
+is Motorola Moto G (2014), not the Unihertz Titan.
+
+The community link:https://unihertz-titan.neocities.org/[original Titan resource page]
+describes its Android 10 TWRP as a partially working alpha with missing userdata
+decryption and MTP. The linked
+link:https://github.com/rumplestilzken/twrp_device_unihertz_gargoyle/releases/tag/v.01[TWRP 3.6 release]
+reports testing only on UFS and inability to mount partitions. It is not a
+verified eMMC fallback. Its source tree is named `gargoyle`.
+
+That community page's historical Unihertz Drive links did not yield a verified
+matching firmware package/checksum during this investigation. No package was
+matched to the owner's vendor fingerprint ending `root.20221121.182739`.
+The board string `g61v71c2k_dfl_tee` is a software-reported clue to the TEE
+variant, not confirmation of a compatible OEM region/package.
+
+The current official link:https://www.unihertz.com/pages/contact-us[Unihertz contact page]
+lists `service@unihertz.com` for technical inquiries. A future owner inquiry
+should request the matching original-Titan eMMC firmware, exact variant/build,
+checksums, restore tool/driver versions and supported host OS. No contact was
+made. No OEM-supported Titan MediaTek emergency restoration workflow for macOS
+was verified. ADB/fastboot availability does not establish that low-level route.
+
+== Read-only preparation on the Mac
+
+. Obtain link:https://developer.android.com/tools/releases/platform-tools[Google SDK Platform-Tools for Mac]
+  if needed, and record the installed versions. Use a USB data cable and leave
+  the phone in its current Ubuntu Touch session.
+. Check ordinary USB/ADB connectivity and the shell's read permissions. From the
+  extracted `platform-tools` directory:
++
+[source,sh]
+----
+./adb version
+./fastboot --version
+./adb -d get-state
+./adb -d shell 'id -u; uname -r'
+./adb -d shell 'for label in boot recovery dtbo; do
+  printf "%s: " "$label"
+  if [ -r "/dev/disk/by-partlabel/$label" ]; then
+    printf "readable\n"
+  else
+    printf "not readable\n"
+  fi
+done'
+----
++
+These commands do not switch device mode or write partitions. `adb -d` selects
+a USB device and fails if multiple USB devices are present. ADB can start its
+host-side server; authorize only the intended Mac if the phone requests it.
+Keep transport identifiers private. Preserve errors if ADB or a label is
+unavailable; do not enable root, change permissions or reboot to work around them.
+
+. Before copying a partition, independently resolve its label and confirm its
+  block-device type and size against the inventory. Boot is currently
+  `mmcblk0p28` (33554432 bytes), recovery `mmcblk0p2` (33554432 bytes), and dtbo
+  `mmcblk0p30` (8388608 bytes). Treat these as observed values to check, not
+  universal Titan constants.
+. Prepare bounded, read-only acquisition to a private directory on the Mac
+  outside Git (directory `0700`, files `0600`). If the current shell cannot read
+  a partition, first determine the existing supported privilege mechanism;
+  do not blindly alter phone security settings. Hash each completed copy, verify
+  its byte count and inspect it with the repository's existing tools. Compare
+  the installed boot/recovery hashes to the candidates above.
+. Plan userdata and device-specific calibration/radio preservation separately.
+  Boot/recovery/dtbo copies alone do not preserve the operating-system data or
+  NVRAM/NVDATA. Several relevant partitions are mounted read-write; raw live
+  copies are not automatically filesystem-consistent backups.
+. Record actual recovery entry, host recognition and restoration only after the
+  owner explicitly authorizes the necessary mode changes or writes. A matching
+  image hash and an installed host tool are not a demonstrated restore.
+
+== Local Codex handoff
+
+Continue in `iko-soy/mobile-nixos`, branch `titan/feasibility-m1`, preserving any
+existing local changes. Read this file, the inventory, README and porting plan.
+Use local SSH or normal-mode USB inspection to preserve the working installation
+before any boot experiment. Keep identities, raw inventory, partition copies and
+candidate binaries outside Git; commit only reviewed findings and source/hash
+metadata. The cloud workspace's private SSH identity and backups are not assumed
+to exist on the Mac. No recovery gate is closed by this handoff.

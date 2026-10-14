@@ -197,6 +197,18 @@ kernel sources and image contents remain unverified. A mounted cgroup2 hierarchy
 `mtkfb` framebuffer and input-device enumeration provide concrete starting points
 for the next compatibility and driver checks.
 
+The installed Ubuntu Touch systemd tools report `255.4-1ubuntu8.17`. At the
+observed cgroup v2 root, `memory` is the only advertised controller and is enabled
+for children; the other `/proc/cgroups` entries do not establish v2 availability.
+See the link:hardware-inventory.adoc#runtime-cgroups[cgroup evidence] before
+designing resource-control or delegation assumptions. The active system-manager
+version and compatibility with pinned systemd 261 remain separate checks.
+
+The owner has no saved boot image or recovery materials. The
+link:recovery-preparation.adoc[recovery preparation record] identifies inspected
+Ubuntu Touch CI candidates, their hashes, stock-firmware research limits and
+read-only preparation using the owner's Mac. None is a tested restore path yet.
+
 Follow link:hardware-inventory.adoc[the inventory procedure] for the running
 Ubuntu Touch installation. Direct SSH is sufficient for the initial read-only
 collection. A USB recovery route must still be established before replacing the

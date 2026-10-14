@@ -27,6 +27,7 @@ environment, and probe completion/status information is still outstanding.
 |Board / platform |`g61v71c2k_dfl_tee` / `mt6771`; hardware property `mt6771`.
 |Device tree |Model `MT6771V/C`; compatible `mediatek,mt6771`.
 |Running OS |Ubuntu `24.04.5 LTS (Noble Numbat)`, variant `Touch`.
+|Installed systemd tools |`systemctl --version` reports `255 (255.4-1ubuntu8.17)`; running system-manager version not yet queried.
 |Kernel / architecture |`4.14.141+` / `aarch64`, reporting SMP and PREEMPT.
 |Kernel compiler |Android Clang 9.0.3, build 5484270 based on `r353983c`.
 |Internal storage |eMMC: `mmcblk0.type=MMC`, model `hDEaP3`, with internal Android partition labels mapped below.
@@ -112,8 +113,8 @@ cellular or Bluetooth functional result was supplied.
 This snapshot does not validate charging limits, thermal control or suspend.
 |Cgroups
 |A `cgroup2` filesystem is mounted at `/sys/fs/cgroup` with `nsdelegate`.
-Available controllers, writable delegation, syscall behavior and systemd 261
-compatibility remain untested.
+The root advertises only `memory`, also enabled for children. Writable delegation,
+syscall behavior and systemd 261 compatibility remain untested; see below.
 |Logging / configuration interfaces
 |pstore and configfs mounts are present; retained crash logs were not supplied.
 The separately supplied kernel configuration is audited below.
@@ -168,11 +169,59 @@ These mappings guide subsequent audits, not functional claims. `cf-keys` remains
 unmapped conclusively; no fingerprint-driver inference is made from that name.
 Input event numbers must not be treated as stable identifiers.
 
-Next, obtain probe statuses, check available cgroup controllers and identify
-matching private restore artifacts and a verified recovery procedure. The observed
-cgroup2 mount narrows the compatibility audit, but does not resolve the Linux 4.14/current
-systemd support gap. M0 and M1 hardware boot validation remain open; no generated
-image has been booted on this phone.
+[[runtime-cgroups]]
+=== Installed systemd and cgroup controllers
+
+The owner supplied output from `systemctl --version`, `/proc/cgroups`,
+`/sys/fs/cgroup/cgroup.controllers` and
+`/sys/fs/cgroup/cgroup.subtree_control`, in that order.
+
+[cols="1,2",options="header"]
+|===
+|Interface |Observed result
+|`systemctl --version` |`systemd 255 (255.4-1ubuntu8.17)`, built with `default-hierarchy=unified`.
+|`/proc/cgroups` |`cpuset`, `cpu`, `cpuacct`, `schedtune`, `memory`, `devices` and `freezer`; each has `hierarchy=0` and `enabled=1`.
+|`cgroup.controllers` at the v2 root |`memory`
+|`cgroup.subtree_control` at the v2 root |`memory`
+|===
+
+Only memory control is advertised for enabling at this observed v2 root, and
+it is already enabled for immediate children. The `/proc/cgroups` list includes
+kernel controllers that need not support v2; its enabled/hierarchy fields do not
+make CPU, cpuset or other listed controllers available through this v2 mount.
+The missing PIDs controller agrees with `CONFIG_CGROUP_PIDS=n`. These reads do
+not test controller behavior, resource limits, descendant availability or
+unprivileged delegation.
+
+The version output identifies the installed client/package, not necessarily
+the active PID 1 version. Its feature flags, such as `+ACL`, describe userspace
+build choices and do not establish kernel/filesystem ACL support. The earlier
+mount evidence establishes actual v2 use; `default-hierarchy=unified` alone is
+only a build default. A read-only follow-up can query the running manager:
+
+[source,sh]
+----
+cat /proc/1/comm
+systemctl --system show --property=Version --value
+----
+
+Retain any permission or D-Bus errors instead of changing the running system.
+Even a confirmed systemd 255 manager would demonstrate this Ubuntu Touch
+combination, not systemd 261 or Mobile NixOS stage-1 compatibility.
+
+The link:https://github.com/systemd/systemd/blob/v255/README[upstream v255 requirements]
+specify Linux 3.15 as the minimum and 4.15 as the recommended baseline, with
+limited support/functionality below the recommendation. They also list
+`CONFIG_FHANDLE` for libudev and mount handling. This explains why the presence
+of 255 tools on 4.14 is plausible without resolving the known configuration gaps
+or validating a NixOS package set.
+
+Next, obtain probe statuses and identify matching private restore artifacts and
+a verified recovery procedure. The owner reports no saved boot image or recovery
+materials and has a macOS computer available for USB preparation. M0 and M1
+hardware boot validation remain open; no generated image has been booted on this
+phone. See link:recovery-preparation.adoc[recovery preparation and candidate artifacts]
+for the subsequent source research and local handoff.
 
 == Collect directly over SSH
 
@@ -434,12 +483,12 @@ by itself proves the bootloader state or a usable restore procedure.
 |Bootloader state |Android properties report `flash.locked=0` and `orange`; independent recovery/bootloader capability check outstanding.
 |Partition map/capacity |Supplied mappings and sizes recorded above; boot and recovery each 33554432 bytes.
 |DTB/DTBO layout |8 MiB `dtbo` partition observed; contents and installed boot-image DTB layout unverified.
-|Known-working boot image |Not preserved by this helper; privately retain matching recovery materials and hashes.
-|Device calibration/radio backup |Not performed by this helper; owner must preserve required device-specific data privately.
-|Recovery host/tools |Unknown; record host OS, tool versions and reliable USB connection.
+|Known-working boot image |Owner reports no saved image; preservation of the running installation remains outstanding.
+|Device calibration/radio backup |No backup supplied or verified; this helper does not preserve partition contents.
+|Recovery host/tools |macOS computer available; platform-tools versions, USB connection and low-level restore tooling unverified.
 |Enter recovery/bootloader |Unknown; record exact verified procedure for this phone.
 |Temporary boot support |Unknown; do not assume `fastboot boot` or kexec is available.
-|Restore method and artifacts |Unknown; record exact commands, source URLs, hashes and required partition targets.
+|Restore method and artifacts |Owner reports no recovery materials; research candidate sources before selecting exact commands/targets.
 |Restoration demonstrated |No evidence yet; record date, result and subsequent normal boot.
 |===
 
