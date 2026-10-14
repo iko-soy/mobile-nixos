@@ -1,0 +1,227 @@
+= Original Unihertz Titan feasibility prototype
+
+This directory implements the build-only part of M0/M1 in
+link:../../../doc/porting-plans/unihertz-titan.adoc[the porting plan].
+It was prepared with OpenAI Codex assistance for this fork. It is an isolated
+experiment, not a supported device under `devices/` or an upstream submission.
+Titan Pocket, Slim, 2 and 2 Elite are different devices.
+
+The owner has an original Titan running Ubuntu Touch with Nix installed.
+Its storage variant, exact installed firmware and recovery procedure have not
+yet been verified. Build and image-format results below do not establish that an
+image boots or that any hardware works under NixOS.
+
+== What this builds
+
+* The pinned UBports Linux 4.14.141 kernel with `titan_defconfig halium.config`,
+  Android Clang r353983c and the matching Android GCC 4.9 cross toolchains.
+* A reproduction of the Ubuntu Touch reference boot-image recipe, using the
+  pinned Ubuntu Touch initramfs, adaptation overlay and prebuilt Titan DT table.
+* Host-side inventory and boot-image inspection tools, with automated tests.
+
+The reference image retains Ubuntu Touch's command line and userspace contract.
+It is not a NixOS initramfs or root filesystem. Current Mobile NixOS uses a
+systemd baseline requiring a newer kernel; choosing a compatible stage 1 and
+stage 2 remains a separate feasibility decision. The generic Android image
+builder and existing devices are unchanged.
+
+== Build and inspect
+
+Use an x86_64 Linux Nix builder. The original Android compiler prebuilts are
+x86_64 host executables; this expression is not a native build on the phone.
+It uses the repository's existing Nixpkgs pin through `pkgs.nix`.
+
+[source,sh]
+----
+# From the repository root:
+nix-build support/experimental-devices/unihertz-titan -A tests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A kernel --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A referenceBootImage --no-out-link
+----
+
+The kernel output includes `Image`, `Image.gz`, the final `config`, `vmlinux`,
+`System.map`, modules and build information. Preserve the configuration and
+hashes with any later hardware test. A repeat build from a separate clean store
+is required before claiming bit reproducibility.
+Kernel modules remain in the kernel output; this prototype does not construct
+or update the Ubuntu Touch root filesystem. Any eventual boot test must account
+for matching root-filesystem and vendor modules as well as the boot image.
+
+To inspect an image without Nix, use Python 3:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/inspect-boot-image.py \
+  --json --check-titan /absolute/path/to/boot.img
+----
+
+`--check-titan` checks the reference geometry, including the 32 MiB final image
+and AVB footer. Generic inspection without this flag can inspect intermediate
+unsigned images. The inspector checks bounds and metadata consistency; it does
+not verify cryptographic signatures, the bootloader's trust policy or bootability.
+
+== Reference inputs
+
+Every downloaded build input has a fixed revision or content hash. The
+authoritative URLs and hashes live in `sources.nix` and `kernel-sources.nix`.
+Gitiles compiler archives use hashes of extracted contents because compressed
+archive bytes can vary for the same revision.
+
+[cols="2,3",options="header"]
+|===
+|Input |Pin
+|Titan adaptation
+|`811aaa59fa3f21748c7b4142412633d9734d4928`
+|Titan kernel
+|`fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe`
+|Generic adaptation build tools used to inspect the recipe
+|`7dd99e0de224931a7af1ffcc8d41f3c4c51f5316`
+|Android Clang repository, `clang-r353983c`
+|`3f889f9c9d42bae85728fa89ba5f92a01704fd83`
+|Android AArch64 GCC 4.9
+|`961622e926a1b21382dba4dd9fe0e5fb3ee5ab7c`
+|Android ARM GCC 4.9
+|`09518d29069cf5993d0ef25c96a09bc851819b54`
+|LineageOS mkbootimg
+|`40a19c4c5ffe8b86c6c61318c8aa4ffe35d6e7ad`
+|Android avbtool
+|`342b0af8402a12b4c8cce6af5b54653beab1b05c`
+|Halium `dynparts-lvm` ARM64 initramfs
+|Content hash in `sources.nix`; release URL is not assumed immutable.
+|Google GSI `vbmeta.img`
+|Content hash in `sources.nix`; download URL is not assumed immutable.
+|===
+
+The adaptation's `unihertz-titan.dtb` is a 112135-byte Android DT table containing
+one 112071-byte flattened device tree at offset 64. It is not a raw FDT starting
+at byte zero. Header-v2 packing uses a separate DTB section and `Image.gz`;
+appending a DTB to the kernel or using the legacy `--dt` option is not equivalent.
+
+The reference recipe first adds an AVB hash footer, then appends the downloaded
+GSI vbmeta image. Inspection must describe the final metadata; it must not claim
+the earlier hash descriptor remains in the final vbmeta. Matching this recipe
+does not prove that the owner's installed firmware accepts it.
+
+The source pins document provenance, not a complete redistribution audit.
+Before publishing binary images or firmware, resolve the adaptation's included
+binaries, initramfs components and vendor firmware terms. Device backups,
+identifiers, authentication keys and raw collected logs belong outside Git.
+
+Two helper rebuild tasks remain open:
+
+* The adaptation ships an AArch64 glibc `uinput-titan` executable and a service,
+  without matching source/build instructions in the pinned tree. A
+  link:https://github.com/SolidEva/Unihertz-Titan-lineageos-microg/blob/9e03b1a73ff054e9b47970228f14d1e42225985a/resources/uinput-titan/uinput-titan.c[related public implementation]
+  builds with the Android NDK and `liblog`; it has not been matched to the
+  shipped glibc binary. Establish provenance or rebuild/adapt a reviewed source
+  before integrating that service into NixOS.
+* The ramdisk overlay ships a static ARM32 BusyBox reporting version 1.31.0,
+  without its matching source/configuration in the adaptation. The reference
+  kernel enables `CONFIG_COMPAT=y` and `CONFIG_BINFMT_ELF=y`. Replace or reproduce
+  this helper explicitly when constructing a NixOS initramfs; do not assume it
+  is an AArch64 binary.
+
+== First userspace configuration audit
+
+The merged reference configuration produced on 2026-10-14 has SHA-256
+`1113327761998175c8cc78dbce10ac23c7fed8a8418f1072e553e8c0acc4286b`.
+This is build evidence, not the configuration collected from the owner's phone.
+The reference build preserves it so a later NixOS configuration can be compared
+against the Ubuntu Touch baseline.
+
+[cols="2,3",options="header"]
+|===
+|Reference setting |Consequence for a later NixOS experiment
+|`FHANDLE=n`
+|Violates systemd 261's explicit requirement for libudev and mount handling.
+  Mobile stage 1 also uses systemd's udev.
+|`ANDROID_PARANOID_NETWORK=y`
+|Conflicts with Mobile's required configuration; Android-specific restrictions
+  need to be removed before testing ordinary non-root Linux networking.
+|`TMPFS_POSIX_ACL=n`, `TMPFS_XATTR=n`, `EXT4_FS_POSIX_ACL=n`
+|Missing filesystem features required by Mobile's kernel configuration.
+|`FW_LOADER_USER_HELPER=y`, `FW_LOADER_USER_HELPER_FALLBACK=y`
+|systemd does not provide the old firmware-loading helper. Audit driver reliance
+  and provide firmware using a tested kernel loading path.
+|`NF_TABLES=n`
+|Cannot provide the nftables functionality requested by current Mobile.
+|`CGROUP_PIDS=n`
+|Task-count accounting and limits are unavailable. This alone is not a PID-1
+  boot blocker: systemd permits cgroups without individual controllers.
+|===
+
+Modules, devtmpfs, VT, namespaces (including user namespaces), seccomp/filter,
+TUN, ext4, tmpfs, configfs USB gadget, evdev and uinput are already enabled.
+`DEVTMPFS_MOUNT=n` does not prevent early userspace from mounting devtmpfs itself.
+`RD_GZIP=y` matches Mobile's default initramfs compression; `RD_XZ=n` matters only
+if choosing XZ. `FRAMEBUFFER_CONSOLE=n` leaves a kernel console gap, without
+establishing whether userspace framebuffer graphics work.
+The merged configuration also has `CONFIG_BT=n` and `CONFIG_MTK_COMBO_BT=y`.
+Bluetooth suboptions requested by `halium.config` do not establish standard
+Linux Bluetooth support when their parent is disabled. Compare the running
+phone's configuration before designing a BlueZ or Android Bluetooth bridge.
+
+Sources: link:https://github.com/systemd/systemd/blob/v261/README[systemd 261 requirements],
+link:../../../modules/kernel-config.nix[Mobile kernel configuration], and
+link:../../../modules/initrd.nix[Mobile early userspace].
+Fixing flags does not resolve the separate Linux 4.14 versus systemd 261's
+supported Linux 5.10 baseline. Audit actual backports and select a compatible
+userspace or a newer kernel before attempting M2.
+
+== Hardware evidence and next gates
+
+Follow link:hardware-inventory.adoc[the inventory procedure] for the running
+Ubuntu Touch installation. Direct SSH is sufficient for the initial read-only
+collection. A USB recovery route must still be established before replacing the
+phone's boot path; an SSH connection cannot provide access after a failed boot.
+
+M0 remains open until the exact storage/firmware combination and restoration
+procedure are recorded. M1 hardware validation remains open until a generated
+image is compared with the known-working installation and tested using the
+verified recovery procedure. No flash or partition-writing helper is included.
+
+After those gates, record the downstream-versus-native route decision before
+adding a supported-device module. In particular, resolve the old kernel's
+userspace requirements and the native MT6771 driver gaps documented in the plan.
+
+== Host-side checks
+
+[source,sh]
+----
+python3 -m unittest discover \
+  -s support/experimental-devices/unihertz-titan/tools/tests -v
+----
+
+These tests exercise image parsing, malformed inputs and mocked transport/output
+handling. They do not execute probes against a phone. Validation results and any
+build limitations should be recorded with each implementation revision.
+
+== Validation record: 2026-10-14
+
+The pinned kernel compiled successfully on x86_64 Linux using the packaged
+Android compilers. Kernel build adjustments are limited to script interpreters,
+`/bin/pwd`, native host-tool C flags and module-index generation with Nix's kmod.
+The reference target configuration and driver sources were preserved. The build
+produced Linux 4.14.141, a 27197452-byte `Image`, a 9532189-byte `Image.gz`, and
+the `tcp_htcp` and `tcp_westwood` modules.
+The module-index step emits an expected warning about `modules.builtin.modinfo`,
+which this old kernel does not produce; module dependency indexes are generated.
+
+The actual reference boot image built successfully and passed the Titan geometry
+checks: 33554432 bytes, Android header v2, 2048-byte pages, the pinned DT table,
+and a final AVB footer with 2752 bytes of GSI vbmeta. That vbmeta reports flags
+`2` (verification disabled); these checks do not establish bootloader acceptance
+or cryptographic verification.
+
+Observed SHA-256 values:
+
+[source,text]
+----
+4a9b05b678e16e486c6149191fc67a87ccbd9d0659e77c440ad0e574d536d238  Image.gz
+72e8e05139ad7ef79e33a7947fc1801614a07311fbc166e27129fc8aa4445444  boot.img
+----
+
+The Nix `tests` build passed all 36 Python tests and the separate nonbootable
+packing fixture. All 249 tracked Nix files parsed, and the complete documentation
+build passed. No physical device was connected for these checks, no boot image
+was flashed, and a second independent kernel build has not been performed.

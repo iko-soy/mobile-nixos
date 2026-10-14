@@ -1,0 +1,200 @@
+= Original Titan hardware baseline
+
+This is the M0 collection procedure for the experimental Unihertz Titan port.
+It applies to the original Titan running Ubuntu Touch. The owner has confirmed
+that a device is available and runs Ubuntu Touch; the storage variant, exact
+firmware, bootloader state and recovery procedure remain unverified.
+
+The collector has automated host-side tests. It has not been exercised against
+a Titan, and this document records no hardware success claims.
+
+== Collect directly over SSH
+
+An SSH connection to the running Ubuntu Touch system is sufficient; no USB
+connection or separate computer beside the phone is needed. Run the helper from
+an environment that can reach the phone's SSH service, with Python 3 and OpenSSH
+installed. The phone needs only its existing shell and standard system tools;
+installing Nix on it does not change the collector's requirements.
+
+Use the phone's reachable hostname/address and existing Ubuntu Touch account
+(commonly `phablet`). First establish key-based authentication and verify its
+host-key fingerprint through a trusted channel. Then, from the repository root:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/collect-inventory.py \
+  --ssh phablet@TITAN_HOST
+----
+
+For a nonstandard port, add `--ssh-port 2222`. SSH configuration and an available
+agent can supply the identity key. The helper requires an already trusted host
+key (`StrictHostKeyChecking=yes`) and uses batch authentication with no terminal;
+it cannot prompt for a password, decrypt a key interactively or accept a new host
+key. It runs the same fixed probes as ADB, without privilege elevation. The SSH
+destination is not intentionally written into the report. Output stays on the
+machine running the helper, outside Git, with the private permissions below.
+
+SSH reachability, authentication and hardware collection have not yet been
+verified against this Titan. A private LAN address requires an existing network
+route or VPN from the collecting environment.
+
+== Alternative: collect on the Titan itself
+
+If remote access is unavailable, run the collector in a terminal on the Titan.
+This mode needs neither ADB nor SSH. From a checkout of this repository on the
+phone, use Python 3 already installed there, or enter a Nix shell to supply it:
+
+[source,sh]
+----
+nix-shell -p python3
+python3 support/experimental-devices/unihertz-titan/tools/collect-inventory.py --local
+----
+
+`--local` reads the machine on which the command runs, so run it on the phone,
+not on another development machine. It uses the same fixed probes and the current
+user's permissions. Output stays in a private directory on the phone, outside
+Git. Review `summary.json` there before sharing it. `--local`, `--ssh` and
+`--serial` are mutually exclusive.
+
+== Alternative: collect locally over USB
+
+Run on the computer connected to the Titan, with Python 3 and Android platform
+tools (`adb`) installed. Ubuntu Touch must already expose an authorized ADB shell;
+check its developer settings if `adb devices` shows no usable device. The cloud
+development environment has no attached Titan and cannot collect this remotely.
+
+From the repository root:
+
+[source,sh]
+----
+adb devices
+python3 support/experimental-devices/unihertz-titan/tools/collect-inventory.py
+----
+
+With multiple ADB transports, explicitly select the Titan using the first column
+from `adb devices`:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/collect-inventory.py \
+  --serial 'YOUR_TITAN_ADB_SELECTOR'
+----
+
+== Output and collected evidence
+
+For every transport, the collector writes to a new directory under
+`~/.local/state/mobile-nixos/titan-inventory/` (or `$XDG_STATE_HOME`), with directory
+permissions `0700` and file permissions `0600`. To choose a destination, add
+`--output /absolute/path/to/a/new/private-directory`.
+Existing destinations and paths inside Git checkouts are rejected. ADB transport
+identifiers are used to select the phone but are not intentionally recorded in
+the report. Do not paste the output of `adb devices` into a public issue.
+
+It reads a fixed set of interfaces using a local shell, SSH or `adb exec-out`.
+It does not run `adb root`, `sudo`, `su`, reboot, recovery, unlock, flash, mount
+or remount commands;
+it does not install software or copy raw partitions. Starting ADB can start its
+ordinary host-side server. Permission errors are retained instead of elevating
+privileges. Each probe has a 20-second timeout, configurable with `--timeout`.
+
+The ordinary collection includes:
+
+* Kernel version and `/proc/config.gz`, when readable.
+* Ubuntu Touch release, device-tree model/compatibility, and a small Android
+  property allowlist covering model, build and reported verified-boot state.
+* Partition names and block sizes, storage device types and SCSI driver names,
+  mount table, filesystem support and memory map.
+* Input enumeration with `Phys`/`Uniq` lines removed; framebuffer/connector
+  geometry; USB gadget state; selected power-supply attributes; network interface
+  names/status and ALSA cards.
+
+Block `size` values from sysfs count *512-byte sectors*, regardless of the logical
+block size. `/proc/partitions` uses KiB. Partition symlink listings show labels
+and device nodes; they do not contain partition contents. The script does not
+collect serial-number properties, IMEI, MAC-address fields, filesystem UUIDs,
+full `getprop`, environment or `logcat` dumps. Runtime paths, mount information
+and driver messages can still contain private information. Review all output.
+
+To also capture kernel messages and command-line parameters, run another
+collection with:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/collect-inventory.py \
+  --include-private-logs
+----
+
+Include `--local` when running on the Titan itself, or `--ssh phablet@TITAN_HOST`
+when using SSH, in that command as well.
+
+These additional files can contain serial numbers, addresses and other unique
+identifiers. Keep the original collection private, review any excerpts before
+sharing, and never commit the entire directory. No files are uploaded.
+
+== Return the smallest useful result
+
+Start by reviewing and sharing only `summary.json`. It contains kernel release,
+model/device name and storage-type evidence. The collector identifies an eMMC
+hint from an `MMC` device type and a UFS hint from a UFS SCSI host driver. An SD
+card or a generic `sda` node alone is not enough evidence. Confirm the hint against
+the internal partition map before selecting build inputs. Empty or inaccessible
+interfaces yield an unknown result rather than a guessed variant.
+
+Also report whether the collector marked any probes as unavailable or needing
+review, and whether the Ubuntu Touch installation currently boots reliably.
+If a specific missing interface matters, inspect `report.json` and the matching
+`.stderr` file locally first. The report includes the exact fixed commands and
+their return codes, but omits the ADB selector and SSH destination. Some shell probes inspect several
+optional paths, so an exit code of zero does not mean every interface was present.
+An overall zero exit status means collection completed, not that M0 passed.
+
+For the next round, provide only reviewed excerpts of `storage.txt`,
+`partitions.txt`, `android-properties.txt`, `device-tree.txt` and the relevant
+kernel configuration. Do not post `config.gz` if it contains locally added
+secrets or credentials. Log review must happen before publishing any excerpts.
+
+== Hardware and recovery record
+
+Fill this record using evidence from this exact phone. Keep unique identifiers,
+private backups and firmware with unclear redistribution rights outside Git.
+Neither an Android verified-boot property nor a working Ubuntu Touch installation
+by itself proves the bootloader state or a usable restore procedure.
+
+[cols="2,3",options="header"]
+|===
+|Field |Current evidence / required confirmation
+|Device |Original Unihertz Titan, owner-confirmed; verify model against collection.
+|Running OS |Ubuntu Touch, owner-confirmed; record exact release/build.
+|Storage variant |Unknown; confirm internal eMMC or UFS from runtime evidence.
+|Kernel/configuration |Awaiting `kernel.txt` and readable final configuration.
+|Underlying Android/vendor firmware |Unknown; record build fingerprint and matching restore source.
+|Bootloader state |Unknown; record exact observation and method.
+|Partition map/capacity |Unknown; confirm boot/recovery size and layout from this phone.
+|DTB/DTBO layout |Unknown on hardware; compare reference image and partition map.
+|Known-working boot image |Not preserved by this helper; privately retain matching recovery materials and hashes.
+|Device calibration/radio backup |Not performed by this helper; owner must preserve required device-specific data privately.
+|Recovery host/tools |Unknown; record host OS, tool versions and reliable USB connection.
+|Enter recovery/bootloader |Unknown; record exact verified procedure for this phone.
+|Temporary boot support |Unknown; do not assume `fastboot boot` or kexec is available.
+|Restore method and artifacts |Unknown; record exact commands, source URLs, hashes and required partition targets.
+|Restoration demonstrated |No evidence yet; record date, result and subsequent normal boot.
+|===
+
+Do not substitute generic Android flashing instructions for the missing recovery
+record. This collector is deliberately not a backup/restore tool. Building and
+inspecting experimental artifacts can proceed while these fields are unresolved;
+replacing the phone's boot path must wait for the plan's recovery gate.
+
+== Validate the helper without hardware
+
+[source,sh]
+----
+python3 -m unittest discover \
+  -s support/experimental-devices/unihertz-titan/tools/tests -p 'test_inventory.py' -v
+----
+
+Tests cover device selection, protected output destinations/permissions, storage
+classification, timeouts, SSH destination validation/authentication options,
+local-mode argument conflicts and the mocked transport boundaries. They establish
+host-side behavior, not
+compatibility with the Titan's ADB or SSH implementation.

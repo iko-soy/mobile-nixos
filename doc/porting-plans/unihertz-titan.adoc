@@ -19,6 +19,13 @@ source inspection and proposed work; no Titan image has been built or booted as
 part of this investigation. It does not declare device support or upstream
 acceptance. Upstream contribution rules remain applicable to any later submission.
 
+Implementation has started in the fork's
+link:https://github.com/iko-soy/mobile-nixos/tree/titan/feasibility-m1/support/experimental-devices/unihertz-titan[isolated M0/M1 prototype].
+Its README records the build scope and outstanding hardware gates. The original
+research snapshot above is not a statement of the latest build results. The
+owner has since confirmed an original Titan running Ubuntu Touch with Nix
+installed; its storage variant and recovery procedure still need verification.
+
 toc::[]
 
 == Objective and recommended approach
