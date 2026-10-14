@@ -305,6 +305,53 @@ metadata, userdata or calibration contents, and did not change block flags.
 The link:source/README.adoc[storage preflight prototype] uses these measured
 values as a fixed layout profile; it has not executed on the phone.
 
+=== Direct partition-table capture bounds
+
+A subsequent normal-mode ADB metadata probe found 38 kernel partitions on the
+same 244285440-sector eMMC user area. The first, `boot_para` (`mmcblk0p1`),
+starts at sector 64. The last, `flashinfo` (`mmcblk0p38`), starts at 244252608
+and spans 32768 sectors, ending immediately before sector 244285376. The
+preceding `otp` partition (`mmcblk0p37`) starts at 244164544 and spans 88064
+sectors. These partition names are not evidence that their contents are backed up.
+
+Only the first and last 64 sectors, 32768 bytes each, lie outside every mapped
+partition at the disk edges. A conventional first/last 1 MiB capture would
+overlap partitions and is unsuitable for a metadata-only helper. The bounded GPT
+acquisition therefore requires both complete GPT copies to fit in those smaller
+regions and cross-checks them against a fresh kernel partition map. Ordinary
+ADB still cannot read the whole-disk node. This initial probe read only kernel
+metadata; it did not acquire GPT or partition contents.
+
+=== Verified private GPT metadata
+
+The owner then ran the bounded acquisition helper using a local hidden sudo
+prompt. It preserved the two 32768-byte edge regions, repeated both reads and
+compared six complete kernel-map observations. Independent Mac readback matched
+all recorded hashes, reparsed the GPT and confirmed the map and private modes.
+The captures and their manifests remain outside Git.
+
+[cols="2,3",options="header"]
+|===
+|Observation |Value
+|Primary / backup header LBA |1 / 244285439
+|Header size |92 bytes in each copy
+|Primary / backup entry-array LBA |2 / 244285407
+|Entry-array geometry |128 entries of 128 bytes; 16384 bytes per array
+|Usable sector range |34 through 244285406, inclusive
+|Used partition entries |38; numbers, names and ranges match the kernel map
+|Integrity checks |Both header CRCs and array CRCs match; arrays are byte-identical
+|Disk GUID |Zero in both copies; explicitly recorded as a warning, not usable as unique identity
+|Used partition GUIDs |38 distinct nonzero values, retained only in private inventory
+|===
+
+The strict generic validator rejects a zero disk GUID. The measured Titan
+profile explicitly accepts only that field's zero value while retaining all
+other structural, identity, map and repeat-read checks. The initial strict
+capture remains separately marked incomplete and is byte-identical to the
+completed capture. No metadata was rewritten. These observations do not prove
+strict UEFI conformance, a consistent live filesystem/calibration snapshot,
+complete vendor-state preservation or a tested restoration route.
+
 === Direct kernel API measurements
 
 `tools/probe-kernel-apis.py` ran through normal-mode ADB using the phone's
@@ -639,14 +686,14 @@ by itself proves the bootloader state or a usable restore procedure.
 |Kernel/configuration |`4.14.141+`; uploaded configuration hash matches the recorded reference build. Exact source and kernel binary match remain unverified.
 |Underlying Android/vendor firmware |Reported Android 10 system/vendor fingerprints recorded above; matching restore source and hashes still needed.
 |Bootloader state |Android properties report `flash.locked=0` and `orange`; independent recovery/bootloader capability check outstanding.
-|Partition map/capacity |Supplied mappings and sizes recorded above; boot and recovery each 33554432 bytes.
+|Partition map/capacity |Both GPT copies preserved privately and checked against all 38 kernel partitions; zero disk GUID explicitly recorded. Boot and recovery each 33554432 bytes.
 |DTB/DTBO layout |Installed boot/recovery have a 112135-byte DT table. The 8 MiB dtbo partition contains a 47545-byte table matching installed recovery's recovery-DTBO section; full partition preserved.
 |Known-working boot image |Private installed boot copy verified; its whole-image hash matches job 16473049944. Installed recovery and dtbo also preserved; no restore or new-image boot tested.
 |Device calibration/radio backup |No backup supplied or verified; this helper does not preserve partition contents.
 |Recovery host/tools |Mac Platform-Tools `37.0.1-15733141`; normal-mode ADB confirmed. Bootloader connectivity and low-level restore remain unverified.
 |Enter recovery/bootloader |Unknown; record exact verified procedure for this phone.
 |Temporary boot support |Unknown; do not assume `fastboot boot` or kexec is available.
-|Restore method and artifacts |Owner reports no recovery materials; research candidate sources before selecting exact commands/targets.
+|Restore method and artifacts |Private installed boot/recovery/dtbo and GPT metadata retained; verified restoration transport/commands and matching OEM package remain unavailable.
 |Restoration demonstrated |No evidence yet; record date, result and subsequent normal boot.
 |===
 

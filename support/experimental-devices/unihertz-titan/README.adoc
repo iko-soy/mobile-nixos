@@ -26,7 +26,8 @@ hardware works under NixOS.
   validation; see the build-only rescue section below.
 * Host-side inventory, kernel configuration comparison, read-only kernel API
   probes, boot-image inspection and bounded private boot/recovery/dtbo
-  acquisition tools, plus a host-only sparse ext4 archive verifier, with
+  acquisition tools, bounded GPT capture/validation, and a host-only sparse ext4
+  archive verifier, with
   automated tests.
 
 The reference image retains Ubuntu Touch's command line and userspace contract.
@@ -684,4 +685,42 @@ binaries, detailed reports and build logs remain private.
 This stage performed no phone operations. The production rescue ramdisk still
 has no acquisition or USB startup service. Consistent userdata/calibration
 preservation, independent GPT validation, writer quiescence, a second backup
-destination and an authorized, demonstrated boot/return route remain open.
+destination and an authorized, demonstrated boot/return route remained open at
+that checkpoint.
+
+=== Follow-up: private GPT preservation
+
+Normal-mode USB inspection found 38 partitions and only 64 sectors outside
+partitions at each disk edge. The new bounded acquisition helper therefore reads
+two fixed 32768-byte regions, with complete identity/geometry/non-overlap guards
+before each read. It never expands a capture to satisfy a malformed or larger
+table. The separate host parser checks both headers, CRCs, entry arrays and
+partition identities; the acquisition requires exact agreement with the complete
+kernel map and repeated captured bytes. See
+link:recovery-preparation.adoc#_bounded_partition_table_preservation[the acquisition contract].
+
+The installed GPT has a zero disk GUID in both copies. The first strict capture
+correctly stopped and remains private incomplete evidence. A narrow, explicit
+compatibility policy now preserves that observed value with a warning; it does
+not relax partition GUID checks or change any metadata. A fresh acquisition
+completed under that policy, saving 64 KiB total. Both windows have matching
+transfer/readback/repeat hashes, both GPT copies agree, and the numbers, names and
+ranges of all 38 used entries match the kernel map. An independent Mac inspection
+confirmed the saved hashes, parsed metadata and `0700`/`0600` permissions.
+Unique identifiers and raw metadata
+remain private. The original boot/recovery/dtbo backups were also re-read and
+still match their recorded hashes and byte counts.
+
+The complete Mac Nix tools suite now passes 153 tests and the boot-packaging
+fixture, including 24 parser and 25 acquisition tests. New cases cover malformed
+or divergent GPT copies, CRC collisions with unequal arrays, capture bounds,
+map changes, repeated-read and saved-file corruption, incomplete publication,
+private output handling and the explicit zero-GUID policy. The three updated
+documents rendered without warnings.
+
+These reads did not change partitions, block flags, phone software or boot mode.
+They preserve partition-table metadata, not userdata, calibration, eMMC boot/RPMB
+regions or a complete firmware set. The Mac remains the only backup destination.
+Quiescent data preservation, production USB/acquisition startup and a demonstrated
+boot/return and restoration route remain required. No generated image has booted
+on the Titan, and NixOS boot compatibility remains unresolved.

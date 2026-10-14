@@ -289,6 +289,77 @@ table parser. Compare whole-image hashes with the candidates, then compare kerne
 ramdisk, DTB and AVB sections if they differ. A profile mismatch must be retained
 as evidence; never modify a backup to make it satisfy the reference profile.
 
+=== Bounded partition-table preservation
+
+A fresh private acquisition completed on 2026-10-14 using the explicit zero-disk-GUID
+policy described below. Both 32768-byte files matched their transfer, saved-file
+readback and independent repeated-read SHA-256 hashes. A separate Mac inspection
+reparsed both GPT copies, matched all 38 entries to the saved kernel map and
+verified private permissions. Raw metadata, GUIDs and hashes remain outside Git.
+
+The earlier strict attempt is retained separately as incomplete evidence: it
+stopped at the zero disk GUID before the required repeats. Its captured bytes
+are identical to the completed acquisition. No capture was repaired, normalized
+or silently resumed.
+
+`tools/acquire-gpt.py` preserves two fixed 32768-byte regions at the beginning
+and end of the measured 125074145280-byte eMMC user area through normal-mode
+ADB. Together they occupy 64 KiB. Fresh kernel metadata must show that neither
+region intersects a partition before each content read. The helper revalidates
+the MMC type, non-removable parent, block-node identity, capacity, 512-byte
+sector geometry and known boot/recovery/dtbo/userdata mappings. It accepts no
+alternative disk path, capture size or offset.
+
+The host validator implements bounded structural checks from the
+link:https://uefi.org/specs/UEFI/2.11/05_GUID_Partition_Table_Format.html[UEFI GPT format].
+It requires a protective MBR, valid primary and backup GPT
+headers and entry-array CRCs, reciprocal header locations, matching table
+contents, bounded non-overlapping partition ranges and unambiguous partition
+identities. Every used entry must agree with the complete kernel partition map.
+Both copies must fit inside the two fixed captures; an unsupported layout stops
+the helper instead of expanding the read. CRC agreement detects corruption;
+it is not cryptographic authentication.
+
+The installed table has a zero disk GUID in both headers. Offline inspection
+confirmed matching valid header/array CRCs and byte-identical arrays. All 38 used
+entries have numbers, names and ranges agreeing with the kernel map; their
+partition GUIDs are distinct and nonzero. The fixed Titan acquisition
+profile therefore explicitly permits the zero *disk* GUID and records
+`zero-disk-guid` as a warning. This value cannot identify the disk uniquely.
+All other checks, including partition GUID validation and equality between
+copies, remain required. The host inspector rejects zero disk GUIDs by default;
+its separate `--allow-zero-disk-guid` option makes this exception explicit.
+Neither program rewrites or normalizes any captured byte. Acceptance under this
+policy is not a claim of strict UEFI conformance or a demonstrated restore.
+
+The helper independently rereads both regions, compares their hashes with the
+saved files and checks the partition map again before recording completion.
+Matching observations show identical captured bytes and partition maps at the
+sampled checks; they cannot exclude intervening changes or establish an atomic
+snapshot of the entire device. These regions can contain GUIDs, device
+identifiers or reserved vendor data. Keep all captures, parsed tables, manifests
+and diagnostics private and outside Git, with directory mode `0700` and file
+mode `0600`. Only reviewed geometry belongs in public findings.
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/acquire-gpt.py \
+  --sudo --output /absolute/private/new-gpt-backup
+----
+
+The optional sudo password is entered only at the hidden prompt in the Mac's
+local terminal. Do not send it in chat or save it in a command or file. The
+helper reuses the tested binary/status-framed ADB transport and fails before
+creating an output directory if required read permissions are absent. It does
+not change permissions, install software, set storage flags, mount filesystems
+or change boot mode. The timeout applies separately to each remote operation.
+
+The two edge captures are not a whole-disk image or a complete backup of all
+reserved vendor state. They exclude partition contents and the separate eMMC
+boot/RPMB regions. In particular, `boot_para`, `otp`, `flashinfo`, calibration
+and userdata still require separate accounting and consistency checks. A valid
+table does not authorize restoring it, and this helper provides no write path.
+
 === Consistent userdata and calibration preservation
 
 The current direct mount evidence establishes this layout:
@@ -315,9 +386,10 @@ Android/host paths. Live raw copies are not consistent backups.
 |No filesystem mount was observed. That does not exclude modem or other raw
 writers; establish quiescence before a consistency claim.
 |Other recovery dependencies
-|Inventory the GPT, `para`/bootloader control state, vendor/firmware and any
-additional unique partitions. eMMC `boot0`/`boot1` are distinct from GPT `boot`;
-leave their write protection intact. This helper does not acquire them.
+|Retain the preserved GPT metadata and inventory `para`/bootloader control state,
+vendor/firmware and any additional unique partitions. eMMC `boot0`/`boot1` are
+distinct from GPT `boot`; leave their write protection intact. The GPT helper
+does not acquire their contents.
 |===
 
 The Mac had approximately 32 GiB free during this session, insufficient for an
@@ -529,9 +601,10 @@ it does not set them, read partition contents or launch acquisition. Exclusive
 claims do not exclude ordinary raw opens or firmware writers, and the standalone
 checker's claim is released on exit. The separate
 link:block/README.adoc[guarded block producer] retains its own checked descriptors
-through acquisition and final checks. Neither has run on the Titan. GPT
-preservation, complete storage discovery, writer quiescence and a verified
-acquisition startup remain prerequisites for a consistent backup.
+through acquisition and final checks. Neither has run on the Titan. GPT metadata
+is now preserved separately; complete storage discovery, additional device-state
+preservation, writer quiescence and a verified acquisition startup remain
+prerequisites for a consistent backup.
 
 ==== Pinned watchdog and ACM source audit
 
