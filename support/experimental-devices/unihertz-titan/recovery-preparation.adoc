@@ -522,6 +522,15 @@ An independent second storage destination is currently unavailable. The private
 Mac copies remain the only retained backup set; successful host or VM tests do
 not close that retention requirement.
 
+The separate link:source/README.adoc[storage-source preflight] now checks the
+measured userdata geometry against kernel/sysfs metadata while retaining a
+read-only exclusive partition descriptor. It queries existing read-only flags;
+it does not set them, read partition contents or launch acquisition. Exclusive
+claims do not exclude ordinary raw opens or firmware writers, and the standalone
+checker's claim is released on exit. It has not run on the Titan. GPT preservation,
+complete storage discovery, writer quiescence and integration with the producer
+remain prerequisites for a consistent backup.
+
 ==== Pinned watchdog and ACM source audit
 
 The pinned kernel archive was inspected on the Linux builder without executing

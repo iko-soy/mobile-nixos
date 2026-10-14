@@ -1,0 +1,84 @@
+= Titan storage-source preflight
+
+This standalone Linux prototype checks the measured original-Titan userdata
+layout before a future acquisition. It reads kernel metadata, opens block
+devices read-only and queries their geometry and read-only flags. It does not
+read partition contents, set block flags, mount filesystems, start the producer,
+configure USB or provide a recovery boot route. It is separate from rescue PID 1.
+
+== Fixed profile and retained descriptors
+
+The production checker accepts no arguments, alternative device paths or
+runtime profiles. Its profile requires the eMMC parent `/dev/mmcblk0`, with
+125074145280 bytes, and `/dev/mmcblk0p36` with partition number 36,
+`PARTNAME=userdata`, start sector 10027008 and 234137536 sectors. Sysfs sectors
+are 512-byte units; the measured logical and physical sectors are also 512 bytes.
+The parent must report MMC and non-removable storage. This matches the measured
+layout, not a private device serial or cryptographic identity.
+
+The guard matches direct block-node identities to sysfs device numbers and the
+partition's canonical parent. It checks the kernel-reported partition name,
+number, start and size, both open descriptors' block geometry and read-only
+flags, and empty parent/partition holder sets. The parent's slave set must be
+empty. This kernel has no partition `slaves` directory: absence is accepted only
+there; an existing directory must be empty.
+
+Only the existing rescue environment's six RAM/virtual mounts are accepted:
+RAM root, devtmpfs `/dev`, proc `/proc`, sysfs `/sys`, and tmpfs `/run` and `/tmp`.
+Swap must be absent and the mount namespace must agree with PID 1. These checks
+describe the current kernel namespace; they do not prove that no other namespace,
+kernel thread, firmware component or ordinary raw-device writer exists.
+
+The parent descriptor is read-only and nonexclusive. The partition descriptor
+adds `O_EXCL`, remains open across a second complete check, and is returned to
+the library caller on success. The standalone checker closes it before exiting.
+Its success message is an observation that expires when those descriptors close;
+it cannot authorize reopening a path for a later acquisition.
+
+The pinned Titan kernel's
+link:https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe/fs/block_dev.c#L1027[block claim implementation]
+rejects conflicting exclusive claims to that partition or its whole disk.
+Ordinary nonexclusive raw opens and claims on sibling partitions remain possible.
+Opening the whole disk exclusively as a second file would also conflict with
+the retained partition claim. `O_EXCL` is therefore not an all-writers lock.
+Claim setup can wait in an uninterruptible kernel state; `O_NONBLOCK` does not
+provide a hard deadline for the complete preflight.
+The kernel's final block close can also synchronize cached data. Read-only
+descriptors alone do not prove an absence of lower-layer effects or writes
+previously queued by another component.
+
+== Build and synthetic validation
+
+[source,sh]
+----
+nix-build support/experimental-devices/unihertz-titan -A storage.checker --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A storage.vmTests --no-out-link
+----
+
+The production checker is a static AArch64 executable. The VM fixture compiles
+the same guard with a separate, fixed test profile for a 64 MiB virtio disk and
+16 MiB `userdata` partition. That profile and its callback never enter the
+production checker. The existing rescue PID 1 initializes the disposable guest
+and protects its visible block devices before invoking the test callback.
+
+Each networkless x86_64 TCG guest gets a newly generated sparse GPT disk. The
+harness bounds diagnostics and runtime, and hashes the complete disk before and
+after the guest. Negative cases must reach their particular expected rejection;
+an unrelated boot or setup failure does not pass. Test-only callbacks may change
+the guest's RAM mounts, device nodes or volatile block flags to exercise guards.
+They do not write storage contents. Successful test completion powers off only
+the disposable guest.
+
+These fixtures exercise the builder's pinned VM kernel, not the Titan kernel or
+the production eMMC profile. The standalone checker is not included in a phone
+ramdisk and has not run on the Titan.
+
+== Remaining acquisition requirements
+
+The kernel partition view is not an independent primary/backup GPT integrity
+check. Complete storage discovery, private partition-table/calibration retention,
+writer quiescence, filesystem consistency and source changes during a long read
+remain separate requirements. A future caller must keep the checked descriptor
+open, repeat the guards around acquisition and integrate them with producer and
+transport supervision. A verified USB startup and explicitly authorized
+boot/return route are still required before any hardware trial.

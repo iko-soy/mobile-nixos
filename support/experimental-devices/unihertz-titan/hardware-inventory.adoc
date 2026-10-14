@@ -278,6 +278,33 @@ was bound, and this is a running Ubuntu Touch observation, not rescue USB
 validation. The UDC name alone must not be mistaken for the alternative disabled
 vendor USB2 driver.
 
+=== Direct userdata source geometry
+
+A later normal-mode ADB probe revalidated the original eMMC layout without
+privilege elevation or partition-content reads. The collector's binary-output,
+stderr and explicit remote-status checks passed before the probe.
+
+[cols="2,3",options="header"]
+|===
+|Observation |Value
+|Parent MMC type / removable |`MMC` / `0`
+|Parent capacity |244285440 sectors, 125074145280 bytes
+|Parent logical / physical sector size |512 / 512 bytes
+|Resolved userdata label |`/dev/mmcblk0p36`
+|Partition number / kernel `PARTN` |36 / 36
+|Kernel `PARTNAME` |`userdata`
+|Partition start |10027008 sectors of 512 bytes
+|Partition length |234137536 sectors, 119878418432 bytes
+|===
+
+The parent exposes `holders`, `slaves` and `queue` directories. The userdata
+partition exposes `holders`; its `slaves` and `queue` paths are absent. A guard
+must not require directories this kernel does not provide. Whole-disk content
+remains unreadable to the ordinary ADB shell. This probe did not acquire GPT
+metadata, userdata or calibration contents, and did not change block flags.
+The link:source/README.adoc[storage preflight prototype] uses these measured
+values as a fixed layout profile; it has not executed on the phone.
+
 === Direct kernel API measurements
 
 `tools/probe-kernel-apis.py` ran through normal-mode ADB using the phone's

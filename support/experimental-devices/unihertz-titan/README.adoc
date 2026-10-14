@@ -179,6 +179,24 @@ Separately compiled test variants allow synthetic failing executables; the
 production binary rejects those overrides. No phone block device, live userdata
 copy or recovery boot is part of these tests.
 
+== Build-only storage-source preflight
+
+`storage.checker` builds a standalone static AArch64 checker for the measured
+userdata layout. It verifies kernel/sysfs identities and geometry, read-only
+block flags, mount/swap state and holders, while retaining a read-only exclusive
+partition descriptor across repeated checks. It does not read partition contents
+or change storage flags. Its fixed production profile has no runtime overrides.
+
+The link:source/README.adoc[preflight contract] explains the retained-descriptor
+API and the limits of Linux block claims. The checker closes its descriptors on
+exit; its success cannot authorize a later separate acquisition. It is not
+integrated with the producer, transport or rescue PID 1.
+
+`storage.vmTests` uses the same guard with a separate fixed virtio profile and
+generated sparse GPT disks in disposable x86_64 guests. Neither the test profile
+nor its fault-injection/poweroff callback enters the production checker. These
+checks do not establish GPT integrity, writer quiescence or Titan runtime support.
+
 == Reference inputs
 
 Every downloaded build input has a fixed revision or content hash. The
@@ -576,3 +594,35 @@ derivation identity.
 This stage performed no phone operations. The producer remains separate from
 rescue PID 1, accepts no block devices, and does not establish a consistent
 userdata/calibration backup, USB gadget startup or a boot/return procedure.
+
+=== Follow-up: fixed-profile storage preflight
+
+A normal-mode ADB probe confirmed userdata's start sector, kernel partition name
+and logical/physical sector sizes; see the
+link:hardware-inventory.adoc#_direct_userdata_source_geometry[geometry record].
+No privilege elevation or partition-content read was involved.
+
+The standalone production checker builds as a static AArch64 executable of
+148200 bytes, with SHA-256
+`c8f41c55805a71311e049ebb1acd85ab74b360374acb87dab75c108b6f4f09d3`.
+A same-builder `nix-build --check -A storage.checker` reproduced the complete
+output. Its private Mac copy matches, and ELF inspection found no interpreter
+or shared-library dependency. Argument/profile overrides were rejected under
+qemu-user. The production eMMC profile has not executed on the Titan.
+
+All ten networkless x86_64 VM cases passed with the same guard core and a
+separate fixed virtio profile: valid selection, wrong label/start/size, missing
+read-only protection, an extra mount, a symlink device node, a competing claim,
+read-only protection cleared after open, and node replacement after open.
+The valid case verified that partition and whole-disk exclusive claims conflict
+while ordinary read-only opens remain possible. Failed rechecks retained the
+existing claim until explicit close. Every generated disk's complete before/after
+SHA-256 matched, and each negative case reached its specific expected rejection.
+These are VM-kernel results, not Titan 4.14 runtime results.
+
+The reviewed local source hashes match the builder checkout. The previously
+validated 104-test/packaging target retains its derivation identity. The existing
+rescue ramdisk, producer and transport were not integrated or activated by this
+stage. The phone received only read-only kernel metadata probes; private backups
+remain untouched. GPT preservation, writer quiescence, acquisition integration
+and the authorized boot/return route remain open.
