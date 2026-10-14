@@ -265,6 +265,19 @@ The corrected collection includes explicit probe status; `/proc/iomem` remains
 permission-denied under `phablet`, so its memory probe requires review. No root
 memory-map claim is made.
 
+=== Direct USB gadget observation
+
+A later read-only normal-mode ADB check on 2026-10-14 found the UDC
+`/sys/class/udc/musb-hdrc` bound to the `mtu3_phone` platform driver. It reported
+`state=configured`, `current_speed=high-speed`, `maximum_speed=super-speed`, and
+`is_a_peripheral=0`; preserve these as reported attributes rather than inferring
+an untested role or speed capability. The active configfs gadget `g1` binds
+`musb-hdrc`, reports VID/PID `1209:0005`, and links `ffs.adb` and `rndis.usb0`.
+Raw output remains private. No gadget settings were changed, no ACM function
+was bound, and this is a running Ubuntu Touch observation, not rescue USB
+validation. The UDC name alone must not be mistaken for the alternative disabled
+vendor USB2 driver.
+
 === Direct kernel API measurements
 
 `tools/probe-kernel-apis.py` ran through normal-mode ADB using the phone's

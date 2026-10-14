@@ -560,6 +560,16 @@ The same driver logs the first three bytes of some TX/RX buffers through
 `pr_notice`; acquisition logs must remain private. `CONFIG_U_SERIAL_CONSOLE`
 is disabled in the retained configuration.
 
+An off-device link:transport/protocol.adoc[serial transfer prototype] now defines
+bounded nonce/sequence framing, SHA-256 verification and a two-way completion
+exchange. Its separate sender/receiver tests use synthetic sockets and PTYs.
+It is not included in rescue PID 1 and does not configure configfs or bind ACM.
+Future gadget setup must establish raw sender readiness before UDC binding;
+bytes sent to a canonical/echoing TTY during startup cannot be recovered by
+assuming the later raw-mode setting repairs them. A producer supervisor must
+also validate imaging/compression exits and diagnostics before attesting success.
+Transport completion alone does not establish a valid or consistent backup.
+
 No independent physical bootloader entry/exit or temporary-boot capability was
 established. The link:https://www.unihertz.com/pages/faqs[manufacturer FAQ]
 describes Power plus Volume Up as recovery entry. The

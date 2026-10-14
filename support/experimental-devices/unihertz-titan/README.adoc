@@ -120,6 +120,48 @@ validation. See link:recovery-preparation.adoc[the recovery record]. Keep built
 payloads and raw diagnostics outside Git; no phone mode change is part of these
 commands.
 
+== Off-device serial transport prototype
+
+`transport.sender` builds a separate static AArch64 sender with pinned OpenSSL
+3.6.3 for SHA-256; `transport.nativeSender` builds the corresponding Linux host
+fixture. Neither is included in `rescue.ramdisk` or started by its PID 1.
+The Python receiver and exact
+link:transport/protocol.adoc[TTR1 wire contract] live in `transport/`.
+
+The protocol binds every frame to a random host nonce, bounds chunks and total
+bytes, rejects sequence/hash mismatches, and requires a host acknowledgement
+followed by a matching sender receipt. The host saves to a new private staging
+file, fsyncs it and independently verifies its contents before acknowledging.
+Missing completion leaves an incomplete staging file. The nonce is not peer
+authentication, and a successful transfer does not establish source consistency.
+
+The sender accepts only already-open local read-only regular files or pipes;
+the host cannot request paths, commands or partitions. Streamed input additionally
+requires a separate local producer-status pipe. A future acquisition supervisor
+must validate every pipeline exit and diagnostic before reporting success there.
+It must account for e2image's possible read-error diagnostics with exit status
+zero. That supervisor and phone storage acquisition are not implemented here.
+
+Limits apply to transmitted bytes, so a future compressed sparse acquisition can
+stream without retaining userdata in RAM or reserving its entire logical size
+on the Mac. The receiver checks free space incrementally and preserves a 64 MiB
+reserve; this is not a guarantee that a particular archive will fit.
+
+[source,sh]
+----
+# x86_64 Linux builder; synthetic sockets, PTYs, files and pipes only.
+nix-build support/experimental-devices/unihertz-titan -A transport.sender --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A transport.tests --no-out-link
+
+# Host receiver fixtures, without executing a sender binary or using real USB.
+PYTHONDONTWRITEBYTECODE=1 python3 support/experimental-devices/unihertz-titan/transport/test_transport.py
+----
+
+The receiver's explicit TTY interface is for later integration. Do not point it
+at the running phone: no ACM gadget, source supervisor or boot/return route has
+been established. Actual USB enumeration, peer readiness and acquisition
+quiescence remain separate requirements. Keep artifacts and diagnostics private.
+
 == Reference inputs
 
 Every downloaded build input has a fixed revision or content hash. The
@@ -463,3 +505,26 @@ and documents watchdog and USB ACM constraints. A second independent backup
 destination remains unavailable. Normal-mode ADB remains available; only its
 connection state was checked in this follow-up. No phone configuration change,
 reboot, flash or generated-image hardware boot was performed.
+
+=== Follow-up: off-device serial transfer
+
+The transport sender builds as static musl executables for x86_64 and AArch64
+with strict compiler warnings. The AArch64 executable is 5005624 bytes, with
+SHA-256 `3d7c2e1bacab2a8c17bd4028c66f78e64416dab5c73910e7938d44625cb37b24`.
+A same-builder `nix-build --check -A transport.sender` reproduced the complete
+output using the pinned compiled OpenSSL input. The private Mac copy matches
+that hash. ELF inspection found no interpreter or shared-library dependency.
+
+All 18 transport test methods pass with the native Mac sender, native Linux
+sender and AArch64 sender under qemu-user. Coverage includes every byte value
+over independently configured bridged PTYs, fragmented frames, source-status
+failures, stale sessions, corrupt or oversized data, missing acknowledgements,
+receiver disk/readback failures and private output handling. These are repeated
+executions of the same suite, not 54 distinct tests. They do not exercise the
+Titan kernel or physical USB serial behavior.
+
+A read-only normal-mode check also confirmed the running phone's `musb-hdrc`
+UDC, `mtu3_phone` driver and existing ADB/RNDIS gadget functions; see the
+link:hardware-inventory.adoc#_direct_usb_gadget_observation[hardware record].
+No ACM gadget was enabled and no sender binary was installed or run on the phone.
+The original rescue ramdisk remains separate from this transport prototype.

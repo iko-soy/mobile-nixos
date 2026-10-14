@@ -1,0 +1,103 @@
+= Titan rescue transport prototype, version 1
+
+This is an off-device transport experiment. It is not enabled by rescue PID 1,
+does not configure a USB gadget, and does not open phone storage. Passing these
+checks establishes byte transfer behavior, not an offline backup or hardware
+recovery procedure. A host nonce binds a session; it does not authenticate peers.
+
+== Wire contract
+
+Every frame has a 48-byte header: ASCII `TTR1`, one-byte type, three zero reserved
+bytes, a big-endian unsigned 32-bit sequence, and a big-endian unsigned 32-bit
+payload length, followed by the host's 32-byte nonce. The nonce must match in
+every frame after HELLO. Reject bad magic, nonce, reserved bits, types, order, sequence or length;
+there is no resynchronization. Payloads are at most 32768 bytes. DATA must be
+nonempty. All integers below are unsigned big-endian. Total transfer size is
+bounded locally by each endpoint, with an absolute maximum of 1099511627776 bytes
+(1 TiB). Sequence wrap is forbidden.
+
+[cols="1,1,3",options="header"]
+|===
+|Type |Sequence |Payload
+|1 HELLO (host) |0
+|u64 host byte limit, u16 label length, ASCII label. HELLO chooses the header nonce
+using 32 cryptographically random bytes.
+|2 BEGIN (sender) |0
+|u64 effective byte limit, u8 source kind (0 regular file, 1 pipe),
+u64 declared length (file size, or UINT64_MAX for a pipe), u16 label length, label.
+|3 DATA (sender) |1 onward
+|1 through 32768 data bytes, with strictly consecutive sequence numbers.
+|4 END (sender) |Next DATA sequence
+|u64 total bytes, 32-byte SHA-256 of all DATA payloads in order.
+|5 ACK (host) |Same as END
+|Exact END payload, sent only after the host has flushed, fsynced and independently
+read back the saved regular file and verified its byte count and SHA-256.
+|6 COMPLETE (sender) |Same as END
+|Exact END payload, sent only after validating ACK.
+|7 ERROR (sender) |Current expected DATA/END sequence, or 0 before BEGIN
+|u32 nonzero error code. No arbitrary diagnostic text on the wire.
+|===
+
+Labels match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` and must match independently supplied
+local labels at both endpoints. They are transfer identifiers, never paths or
+partition selectors. Effective limit is the smaller of the two local limits;
+both limits must be positive. The host must reject an effective limit above its
+own. Empty streams may END
+without DATA. A regular file's declared size must equal its final total.
+
+The sender uses already open, distinct local source and bidirectional transport
+descriptors. It accepts only a regular file or FIFO as source, opened read-only;
+block devices and character devices are rejected. Socket transports support
+fixtures; a TTY transport is placed in raw mode and its original settings restored
+on exit. All framing stays off stderr. No peer request executes a command, opens
+a path or writes to storage.
+
+A regular source must start at offset zero; its declared size covers the whole
+file. The status descriptor must be distinct from both other descriptors and
+must not refer to the same FIFO as the source.
+
+For a FIFO source, a separate read-only FIFO status descriptor is mandatory.
+After EOF, the sender requires exactly eight bytes (`TPST` followed by a u32 zero)
+and EOF on that descriptor before sending END. Any nonzero status, extra bytes,
+missing status, input failure or timeout prevents END. The future local producer
+supervisor must provide zero only after every pipeline process succeeded and all
+bounded diagnostics were checked. In particular e2image can report read failures
+while returning zero. This prototype does not yet provide that supervisor and
+must not treat ordinary pipe EOF as backup success.
+
+Each endpoint has an absolute monotonic deadline covering data and handshake,
+bounded buffers, short-I/O/EINTR/EAGAIN handling and a maximum frame size. The
+deadline bounds protocol polling and is checked between file operations; it
+cannot interrupt a synchronous filesystem syscall stalled inside the host OS.
+The
+receiver enforces its limit before writing each frame, maintains a free-space
+reserve incrementally, and never requires space for the entire advertised limit.
+This permits future sparse/compressed streaming without staging userdata in RAM.
+
+== Host acceptance and failure
+
+Create a new private output directory and regular `payload.partial` with
+exclusive creation and no symlink following. Never overwrite existing output.
+Keep a private state report. After END, validate count/hash, fsync the file and
+directory, independently read back the file, then ACK. Only after a matching
+COMPLETE may the host rename it to `payload.bin`, sync the directory and record
+transfer completion. ACK/receipt loss leaves an explicitly incomplete staging
+file even if its bytes were independently verified; never silently accept or
+resume that session. All diagnostics and transcripts remain private.
+
+The serial receiver must use raw termios and an exclusive host TTY open. Do not
+use production serial endpoints in automated tests: use synthetic files, pipes,
+sockets and PTYs. Neither test setup nor these programs may configure a phone
+gadget, mount phone filesystems, stop services, reboot or flash.
+
+The future gadget supervisor must establish raw sender readiness before binding
+the gadget and allowing the host to send HELLO. Bytes sent to an echoing or
+canonical terminal during startup may already be transformed; this protocol
+deliberately does not resynchronize or retry a corrupted session. The PTY fixture
+observes completed child descriptor/termios setup before starting the exchange.
+
+Kernel ACM logging can expose the first three bytes of buffers. Keep logs private.
+The inspected vendor driver can discard queued bytes on close after 15 seconds;
+completion depends on the explicit acknowledgement and receipt, not close alone.
+Actual MTU3/ACM enumeration, boot/return behavior, complete storage identity,
+quiescence and a source-supervising acquisition service remain separate gates.
