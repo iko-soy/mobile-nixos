@@ -1,0 +1,161 @@
+= Titan guarded block acquisition prototype
+
+`acquisition.producer` is a separate, build-only integration of the
+link:../source/README.adoc[fixed userdata source guard] and the
+link:../producer/README.adoc[imaging/compression supervisor]. It builds a static
+AArch64 `titan-block-produce` executable. It is not included in the phone rescue
+ramdisk, invoked by production PID 1, or connected to a USB startup service.
+No generated image has been booted on the Titan, and this does not boot NixOS.
+
+== Fixed source and descriptor ownership
+
+The producer accepts only this inherited-descriptor interface:
+
+[source,text]
+----
+titan-block-produce --output-fd N --status-fd N --max-bytes N --timeout-seconds N
+----
+
+The output and status descriptors must be distinct, write-only FIFOs numbered
+at least 3, with different underlying identities. Those roles are checked before
+the source guard opens any storage. The local launcher must close its duplicate
+pipe writers so downstream consumers can observe EOF. The byte limit applies to
+compressed output; it and the timeout must be positive, with a 1 TiB maximum
+byte limit. This interface does not supply a production launcher.
+
+There is no caller-supplied input descriptor, source path, partition label or
+executable path. The production profile selects only `/dev/mmcblk0p36`, named
+`userdata`, under the measured `/dev/mmcblk0` eMMC parent. The guard checks the
+fixed partition number, start, size, parent capacity, 512-byte sector geometry,
+canonical sysfs relationship and direct block-node identities. It also requires
+both devices to report read-only, the expected empty holder/slave sets, an empty
+swap inventory, and exactly the rescue environment's six RAM/virtual mounts in
+the same mount namespace and root as PID 1.
+
+The parent disk descriptor is read-only and nonexclusive. The partition
+descriptor retains its `O_RDONLY|O_EXCL` kernel claim through the entire pipeline,
+child cancellation and reaping, final source checks, status writing and status
+descriptor closure. Only then does the parent release the guard. Children close
+the other guard descriptors; e2image inherits only the selected source descriptor
+and its intended standard descriptors. A failed recheck prevents success while
+the claim stays held through cleanup.
+
+The exclusive partition claim rejects conflicting exclusive opens of that
+partition or its whole disk. It does not exclude ordinary raw-device writers,
+sibling-partition activity, kernel threads or firmware. Read-only flags and
+namespace observations are not proof of writer quiescence or a consistent live
+filesystem backup.
+
+== Filesystem checks and completion
+
+Before reading the primary superblock, the producer repeats the source guard,
+queries `BLKGETSIZE64` on the retained partition descriptor and requires its
+current offset to be zero. Block-device `st_size` and timestamps are not used as
+content-stability evidence. The 1024-byte primary superblock must have the
+ext-family magic, clean state, no pending journal recovery or orphan cleanup,
+and a block geometry matching the guarded partition size. These selected checks
+are not a complete filesystem validator.
+
+The fixed pipeline is `/bin/e2image -ra /proc/self/fd/N -` followed by
+`/bin/zstd -q -c`, using a minimal environment. No shell is involved. The block
+target rejects executable overrides; combining its build macro with the regular
+producer's executable-override test macro is a compile error. Only the separate
+VM source profile changes which fixed block nodes are selected.
+
+The supervisor concurrently drains compressed stdout and both diagnostic
+streams, using a 64 KiB data queue and an 8 KiB bound for each diagnostic stream.
+It accepts exactly the pinned e2image banner and empty zstd diagnostics. Both
+children must exit normally with status zero; stdout and both stderr streams
+must reach EOF, and every queued output byte must be delivered. An e2image
+read-error message is a failure even if the program exits zero.
+
+After child cleanup, the producer repeats the guard and size checks, compares
+the complete primary superblock with its initial copy, validates its geometry
+and clean state again, then repeats the guard once more. Only after these checks
+and a valid deadline does it write `TPST` followed by a big-endian zero to the
+status FIFO. The link:../transport/protocol.adoc[TTR1 sender] requires that exact
+record and status EOF before sending END. A nonzero or missing record prevents
+host publication of the transfer.
+
+Protocol polling uses one monotonic deadline. Child cleanup allows up to one
+additional second for direct-child reaping after signalling the pipeline's
+process groups. A guard open, ioctl, filesystem call or child in uninterruptible
+kernel I/O can outlive that deadline. Group cancellation does not contain a
+process that deliberately escapes its group; the fixed helper programs are
+trusted. The source guard's final block close can also have lower-layer effects
+described in its documentation.
+
+== Disposable VM integration
+
+[source,sh]
+----
+nix-build support/experimental-devices/unihertz-titan -A acquisition.producer --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A acquisition.vmRamdisk --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A acquisition.vmTests --no-out-link
+----
+
+`acquisition.vmRamdisk` is an x86_64 test artifact containing the existing rescue
+PID 1, a test-only acquisition callback, the VM-profile block producer, sender,
+and static imaging/compression tools. The source profile is a generated 64 MiB
+virtio disk with a 16 MiB `userdata` partition. It has no runtime source or
+executable override interface. The VM wrapper loads its virtio modules before
+entering rescue PID 1; only the test callback launches acquisition.
+
+`acquisition.vmTests` defines five networkless QEMU TCG cases. Console output
+uses `ttyS0`; framed data uses a dedicated second 16550 UART, `ttyS1`, connected
+through a private QEMU Unix socket to the host receiver. The callback establishes
+raw serial settings before announcing transfer readiness. It checks exact
+producer, sender and status-record results, verifies that the source claim is
+released afterward, and drains the synthetic UART before powering off the guest.
+Only these disposable guests are powered off.
+
+[cols="1,3",options="header"]
+|===
+|Case |Required result
+|`valid`
+|Complete producer-to-sender-to-host transfer, independently verified and published
+by the receiver, followed by host filesystem restoration and payload checks.
+|`dirty-filesystem`
+|Reject the superblock before transmitting filesystem bytes; no completed host payload.
+|`wrong-label`
+|Reject the source identity before transmitting filesystem bytes; no completed host payload.
+|`output-limit`
+|Enforce a one-byte compressed-output limit and leave an incomplete transfer.
+|`post-readonly-change`
+|Hold completion after the real compressor has produced its output and exited
+successfully, confirm that the partition claim still conflicts with an exclusive
+whole-disk open, clear the fixture's volatile read-only flags, then require the
+producer's final guard to reject completion.
+|===
+
+The last case installs a test-only compressor proxy at the fixed path inside the
+guest's RAM filesystem. It is a deterministic completion gate, not a production
+executable-selection feature. Negative cases must reach their expected failure;
+an unrelated boot or setup error cannot satisfy a case. They must leave the
+receiver's staging file incomplete and must not create `payload.bin`.
+
+For the valid case, the host receiver checks the transferred byte count and
+SHA-256, fsyncs and independently reads back the saved file, and completes the
+acknowledgement exchange. The harness then decompresses the archive into a
+sparse regular file, verifies its 16 MiB logical size, requires `e2fsck -fn` to
+succeed, and extracts a known fixture file with debugfs for an exact byte
+comparison and recorded SHA-256. Every case hashes the complete synthetic disk
+before and after guest execution and requires equality. These are the validation
+requirements provided by the harness; runtime results must be recorded separately.
+
+== Hardware boundary
+
+The VM uses the builder's pinned x86_64 kernel and a virtio disk. Its serial link
+does not exercise the Titan's MediaTek USB controller, ACM gadget driver,
+enumeration, startup ordering, disconnect behavior or hardware watchdogs. It
+does not validate the Titan kernel's block-claim behavior at runtime, establish
+quiescence of Android/modem/kernel/firmware writers, or demonstrate a phone boot
+and return route.
+
+This integration selects userdata only. Independent primary/backup GPT checks,
+complete storage discovery and private partition-table, calibration and other
+device-specific preservation remain separate work. A production rescue launcher,
+reviewed USB startup and failure handling, filesystem consistency and restoration
+checks, and an explicitly authorized, demonstrated hardware boot/return procedure
+are still required. These artifacts have not been executed on the Titan and do
+not supply a hardware acquisition or flashing procedure.

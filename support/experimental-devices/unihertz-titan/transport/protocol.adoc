@@ -59,12 +59,14 @@ must not refer to the same FIFO as the source.
 For a FIFO source, a separate read-only FIFO status descriptor is mandatory.
 After EOF, the sender requires exactly eight bytes (`TPST` followed by a u32 zero)
 and EOF on that descriptor before sending END. Any nonzero status, extra bytes,
-missing status, input failure or timeout prevents END. The future local producer
+missing status, input failure or timeout prevents END. The local producer
 supervisor must provide zero only after every pipeline process succeeded and all
 bounded diagnostics were checked. In particular e2image can report read failures
 while returning zero. The separate
 link:../producer/README.adoc[producer prototype] exercises supervision against
-regular ext4 files; phone block-source acquisition remains unimplemented.
+regular ext4 files. The separate link:../block/README.adoc[guarded block producer]
+uses the fixed userdata profile and retains its checked descriptors through
+completion; phone startup and USB integration remain unimplemented.
 Ordinary pipe EOF must not be treated as backup success.
 
 Each endpoint has an absolute monotonic deadline covering data and handshake,
@@ -102,4 +104,4 @@ Kernel ACM logging can expose the first three bytes of buffers. Keep logs privat
 The inspected vendor driver can discard queued bytes on close after 15 seconds;
 completion depends on the explicit acknowledgement and receipt, not close alone.
 Actual MTU3/ACM enumeration, boot/return behavior, complete storage identity,
-quiescence and a source-supervising acquisition service remain separate gates.
+quiescence and production acquisition startup remain separate gates.

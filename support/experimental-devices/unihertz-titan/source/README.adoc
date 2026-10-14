@@ -1,7 +1,7 @@
 = Titan storage-source preflight
 
 This standalone Linux prototype checks the measured original-Titan userdata
-layout before a future acquisition. It reads kernel metadata, opens block
+layout before acquisition. It reads kernel metadata, opens block
 devices read-only and queries their geometry and read-only flags. It does not
 read partition contents, set block flags, mount filesystems, start the producer,
 configure USB or provide a recovery boot route. It is separate from rescue PID 1.
@@ -78,7 +78,9 @@ ramdisk and has not run on the Titan.
 The kernel partition view is not an independent primary/backup GPT integrity
 check. Complete storage discovery, private partition-table/calibration retention,
 writer quiescence, filesystem consistency and source changes during a long read
-remain separate requirements. A future caller must keep the checked descriptor
-open, repeat the guards around acquisition and integrate them with producer and
-transport supervision. A verified USB startup and explicitly authorized
-boot/return route are still required before any hardware trial.
+remain separate requirements. The separate
+link:../block/README.adoc[guarded block producer] now keeps the checked descriptor
+open through the imaging/compression pipeline, repeats the guards and supervises
+completion. These observations do not prove the absence of other writers.
+A verified USB startup and explicitly authorized boot/return route are still
+required before any hardware trial.

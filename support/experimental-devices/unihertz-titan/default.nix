@@ -12,6 +12,7 @@ let
   transport = import ./transport.nix { inherit pkgs; };
   producer = import ./producer.nix { inherit pkgs transport; };
   storage = import ./storage.nix { inherit pkgs; };
+  acquisition = import ./acquisition.nix { inherit pkgs transport; };
   # This pin's Darwin libffi trampoline dylib aborts on macOS 27 when ctypes
   # loads. Backport the targeted upstream fix for the host test interpreter:
   # https://github.com/NixOS/nixpkgs/commit/31ac410db37503704af446f2cad40811fabe0b04
@@ -50,7 +51,7 @@ let
   };
 in
 {
-  inherit sources toolchains kernel referenceBootImage rescue transport producer storage;
+  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition;
 
   tests = pkgs.runCommand "titan-tools-and-boot-packaging-tests" {
     nativeBuildInputs = [ testPython ];

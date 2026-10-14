@@ -140,7 +140,8 @@ the host cannot request paths, commands or partitions. Streamed input additional
 requires a separate local producer-status pipe. The separate
 link:producer/README.adoc[producer prototype] exercises pipeline supervision
 against regular ext4 image files, including e2image read-error diagnostics with
-exit status zero. Phone block-source selection and acquisition remain
+exit status zero. The separate link:block/README.adoc[guarded block producer]
+adds the fixed userdata source profile; phone startup and USB integration remain
 unimplemented.
 
 Limits apply to transmitted bytes, so a future compressed sparse acquisition can
@@ -189,13 +190,32 @@ or change storage flags. Its fixed production profile has no runtime overrides.
 
 The link:source/README.adoc[preflight contract] explains the retained-descriptor
 API and the limits of Linux block claims. The checker closes its descriptors on
-exit; its success cannot authorize a later separate acquisition. It is not
-integrated with the producer, transport or rescue PID 1.
+exit; its success cannot authorize a later separate acquisition. The separate
+block producer below uses the library API to retain its own checked descriptors.
+The standalone checker is not started by rescue PID 1.
 
 `storage.vmTests` uses the same guard with a separate fixed virtio profile and
 generated sparse GPT disks in disposable x86_64 guests. Neither the test profile
 nor its fault-injection/poweroff callback enters the production checker. These
 checks do not establish GPT integrity, writer quiescence or Titan runtime support.
+
+== Build-only guarded block acquisition
+
+`acquisition.producer` combines the fixed userdata guard with the imaging and
+compression supervisor in a separate static AArch64 executable. It accepts
+only output/status pipe descriptors, a compressed-byte limit and a deadline.
+It retains the checked exclusive partition descriptor through child cleanup,
+repeated source checks and status EOF. The caller cannot override its source
+or helper executable paths. No acquisition-enabled production ramdisk or phone
+startup is supplied.
+
+The link:block/README.adoc[block acquisition contract] describes its preflight,
+completion rules and remaining consistency limits. `acquisition.vmTests` runs
+five generated GPT/ext4 fixtures through a separate x86_64 VM profile, the real
+imaging/compression tools, sender and host receiver. It includes sparse restore,
+filesystem/payload verification, specific failure results and complete disk
+hashes before and after each guest. The emulated second serial port is a test
+transport; it does not establish Titan USB operation or a recovery route.
 
 == Reference inputs
 
@@ -624,5 +644,44 @@ The reviewed local source hashes match the builder checkout. The previously
 validated 104-test/packaging target retains its derivation identity. The existing
 rescue ramdisk, producer and transport were not integrated or activated by this
 stage. The phone received only read-only kernel metadata probes; private backups
-remain untouched. GPT preservation, writer quiescence, acquisition integration
-and the authorized boot/return route remain open.
+remained untouched. At that checkpoint, GPT preservation, writer quiescence,
+acquisition integration and the authorized boot/return route remained open.
+
+=== Follow-up: guarded block acquisition and VM restoration
+
+The separate `acquisition.producer` now builds as a static AArch64 executable of
+152008 bytes, with SHA-256
+`72b8eeefce80893c41d0c3db796d9603809f0b5d51da5ab7dd5bbc2e0a7f426b`.
+A same-builder `nix-build --check -A acquisition.producer` reproduced its complete
+output. The private Mac copy matches that hash; ELF inspection found no
+interpreter or shared-library dependency. Under qemu-user, valid pipe descriptors
+in a non-rescue environment produce the expected source refusal. Caller-supplied
+input and executable overrides are rejected separately as invalid arguments.
+
+All five networkless x86_64 VM cases passed: a complete acquisition, dirty
+filesystem rejection, wrong-label rejection, compressed-output limit enforcement,
+and a read-only flag change detected after compression. The latter confirms the
+claim remains held while completion is delayed and requires the final source
+guard to prevent publication. Every negative case produced the exact expected
+producer/status/sender result and left only incomplete host staging. Both early
+source failures transmitted zero filesystem bytes.
+
+The valid case streamed through the real static e2image/Zstandard tools and
+the TTR1 sender to the host receiver over a dedicated emulated serial port.
+The receiver independently verified the saved bytes and completed the receipt
+exchange. Sparse decompression restored the 16 MiB logical filesystem;
+`e2fsck -fn` passed and the extracted known payload matched exactly. The complete
+64 MiB GPT disk's before/after SHA-256 matched in all five cases. This exercised
+the pinned VM kernel, not the Titan kernel or its USB controller.
+
+The shared supervisor's existing 11 test methods passed again both natively on
+Linux and with the AArch64 supervisor/sender under qemu-user. The previously
+validated 104-test/packaging target retains its derivation identity. Reviewed
+build source hashes match the uploaded snapshot, and all six updated documents
+rendered without warnings. Only sanitized source and findings are committed;
+binaries, detailed reports and build logs remain private.
+
+This stage performed no phone operations. The production rescue ramdisk still
+has no acquisition or USB startup service. Consistent userdata/calibration
+preservation, independent GPT validation, writer quiescence, a second backup
+destination and an authorized, demonstrated boot/return route remain open.

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT
- * Off-device producer supervision for already-open regular image fixtures.
- * No block source, mount, repair, shell, gadget or phone operation is provided.
+ * Build-only producer supervision. The default target accepts already-open
+ * regular image fixtures. A separate block target uses the fixed source guard;
+ * neither target mounts, repairs, configures a gadget, or boots a device.
  */
 #define _POSIX_C_SOURCE 200809L
 #define _DEFAULT_SOURCE 1
@@ -22,6 +23,16 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#if defined(TITAN_PRODUCER_BLOCK_SOURCE) && defined(TITAN_PRODUCER_TEST_ONLY)
+#error The fixed block-source producer must not accept executable overrides
+#endif
+
+#ifdef TITAN_PRODUCER_BLOCK_SOURCE
+#include "guard.h"
+#include <linux/fs.h>
+#include <sys/ioctl.h>
+#endif
 
 #define SOURCE_LIMIT UINT64_C(1099511627776)
 #define QUEUE_SIZE 65536U
@@ -138,9 +149,12 @@ static int parse_options(int argc, char **argv, struct options *options)
                 options->zstd = argv[i + 1];
 #endif
         } else {
+#ifndef TITAN_PRODUCER_BLOCK_SOURCE
             if (strcmp(argv[i], "--input-fd") == 0)
                 bit = 4U;
-            else if (strcmp(argv[i], "--output-fd") == 0)
+            else
+#endif
+            if (strcmp(argv[i], "--output-fd") == 0)
                 bit = 8U;
             else if (strcmp(argv[i], "--status-fd") == 0)
                 bit = 16U;
@@ -159,7 +173,12 @@ static int parse_options(int argc, char **argv, struct options *options)
             return ERR_ARGUMENT;
         seen |= bit;
     }
-    if ((seen & 31U) != 31U || options->input == options->output ||
+#ifdef TITAN_PRODUCER_BLOCK_SOURCE
+    const unsigned int required = 27U;
+#else
+    const unsigned int required = 31U;
+#endif
+    if ((seen & required) != required || options->input == options->output ||
         options->input == options->status || options->output == options->status)
         return ERR_ARGUMENT;
     return OK;
@@ -236,6 +255,7 @@ static int make_pipe(struct pipe_pair *pair)
     return OK;
 }
 
+#ifndef TITAN_PRODUCER_BLOCK_SOURCE
 static int unchanged(const struct stat *before, const struct stat *after)
 {
 #ifdef __APPLE__
@@ -255,6 +275,7 @@ static int unchanged(const struct stat *before, const struct stat *after)
 #undef TTR_MTIME
 #undef TTR_CTIME
 }
+#endif
 
 static int read_superblock(const struct context *context, int fd, unsigned char *bytes)
 {
@@ -277,7 +298,7 @@ static int read_superblock(const struct context *context, int fd, unsigned char 
     return OK;
 }
 
-static int valid_superblock(const unsigned char *bytes, off_t file_size)
+static int valid_superblock(const unsigned char *bytes, uint64_t logical_size)
 {
     uint32_t incompat = le32(bytes + 0x60);
     uint32_t log_size = le32(bytes + 0x18);
@@ -292,9 +313,10 @@ static int valid_superblock(const unsigned char *bytes, off_t file_size)
         return 0;
     uint64_t block_size = UINT64_C(1024) << log_size;
     return blocks != 0 && blocks <= SOURCE_LIMIT / block_size &&
-           blocks * block_size == (uint64_t) file_size;
+           blocks * block_size == logical_size;
 }
 
+#ifndef TITAN_PRODUCER_BLOCK_SOURCE
 static int verify_source(const struct context *context, int fd,
                          const struct stat *initial, const unsigned char *superblock)
 {
@@ -307,11 +329,96 @@ static int verify_source(const struct context *context, int fd,
         return result;
     if (fstat(fd, &after) != 0 || !unchanged(initial, &after) ||
         memcmp(superblock, current, sizeof(current)) != 0 ||
-        !valid_superblock(current, after.st_size) || lseek(fd, 0, SEEK_CUR) != 0)
+        !valid_superblock(current, (uint64_t) after.st_size) || lseek(fd, 0, SEEK_CUR) != 0)
         return ERR_SOURCE;
     int milliseconds;
     return active(context, &milliseconds);
 }
+#else
+/* This descriptor remains owned by the guard. Block st_size and timestamps
+ * are not content-stability evidence and are deliberately unused here. */
+static int guarded_size(const struct context *context, struct titan_source *source,
+                        uint64_t *logical_size)
+{
+    int milliseconds;
+    int result = active(context, &milliseconds);
+    if (result != OK)
+        return result;
+    const char *reason = NULL;
+    int checked = titan_source_recheck(source, &reason);
+    result = active(context, &milliseconds);
+    if (result != OK)
+        return result;
+    if (checked != 0)
+        return ERR_SOURCE;
+    uint64_t size = 0;
+    int queried = ioctl(source->partition_fd, BLKGETSIZE64, &size);
+    result = active(context, &milliseconds);
+    if (result != OK)
+        return result;
+    if (queried != 0 || size < 2048 || size > SOURCE_LIMIT ||
+        lseek(source->partition_fd, 0, SEEK_CUR) != 0)
+        return ERR_SOURCE;
+    *logical_size = size;
+    return active(context, &milliseconds);
+}
+
+static int open_block_source(const struct context *context, struct options *options,
+                             struct titan_source *source, uint64_t *logical_size,
+                             unsigned char *superblock)
+{
+    int milliseconds;
+    int result = active(context, &milliseconds);
+    if (result != OK)
+        return result;
+    const char *reason = NULL;
+    int opened = titan_source_open(source, &reason);
+    if (opened == 0)
+        options->input = source->partition_fd;
+    /* O_NONBLOCK does not prevent an open or ioctl from stalling in kernel
+     * code; check the deadline again as soon as each guard call returns. */
+    result = active(context, &milliseconds);
+    if (result != OK)
+        return result;
+    if (opened != 0)
+        return ERR_SOURCE;
+    result = guarded_size(context, source, logical_size);
+    if (result != OK)
+        return result;
+    result = read_superblock(context, source->partition_fd, superblock);
+    if (result != OK)
+        return result;
+    if (!valid_superblock(superblock, *logical_size))
+        return ERR_SOURCE;
+    uint64_t current_size;
+    result = guarded_size(context, source, &current_size);
+    if (result != OK)
+        return result;
+    return current_size == *logical_size ? OK : ERR_SOURCE;
+}
+
+static int verify_block_source(const struct context *context, struct titan_source *source,
+                               uint64_t logical_size, const unsigned char *superblock)
+{
+    uint64_t current_size;
+    unsigned char current[1024];
+    int result = guarded_size(context, source, &current_size);
+    if (result != OK)
+        return result;
+    if (current_size != logical_size)
+        return ERR_SOURCE;
+    result = read_superblock(context, source->partition_fd, current);
+    if (result != OK)
+        return result;
+    if (memcmp(superblock, current, sizeof(current)) != 0 ||
+        !valid_superblock(current, logical_size))
+        return ERR_SOURCE;
+    result = guarded_size(context, source, &current_size);
+    if (result != OK)
+        return result;
+    return current_size == logical_size ? OK : ERR_SOURCE;
+}
+#endif
 
 /* Inventory after creating every helper pipe, before fork. This bounded list
  * avoids close_range (absent on 4.14), huge close loops, and leaked unrelated
@@ -696,7 +803,13 @@ int main(int argc, char **argv)
         .errors = { { -1, -1 }, { -1, -1 } }, .barrier = { -1, -1 }
     };
     int output_flags = -1, status_flags = -1, status_ready = 0;
-    struct stat source, output, status, after;
+    struct stat output, status;
+#ifdef TITAN_PRODUCER_BLOCK_SOURCE
+    struct titan_source source = TITAN_SOURCE_INITIALIZER;
+    uint64_t logical_size = 0;
+#else
+    struct stat source, after;
+#endif
     unsigned char superblock[1024];
     int result = parse_options(argc, argv, &options);
     if (result != OK)
@@ -725,33 +838,43 @@ int main(int argc, char **argv)
         result = ERR_IO;
         goto done;
     }
-    int input_flags = fcntl(options.input, F_GETFL);
     output_flags = fcntl(options.output, F_GETFL);
     status_flags = fcntl(options.status, F_GETFL);
     result = ERR_ARGUMENT;
-    if (input_flags < 0 || output_flags < 0 || status_flags < 0 ||
-        (input_flags & O_ACCMODE) != O_RDONLY ||
+    /* In the block target this must complete before opening any storage. */
+    if (output_flags < 0 || status_flags < 0 ||
         (output_flags & O_ACCMODE) != O_WRONLY || (status_flags & O_ACCMODE) != O_WRONLY ||
-        fstat(options.input, &source) != 0 || fstat(options.output, &output) != 0 ||
-        fstat(options.status, &status) != 0 || !S_ISREG(source.st_mode) ||
+        fstat(options.output, &output) != 0 || fstat(options.status, &status) != 0 ||
         !S_ISFIFO(output.st_mode) || !S_ISFIFO(status.st_mode) ||
-        (output.st_dev == status.st_dev && output.st_ino == status.st_ino) ||
+        (output.st_dev == status.st_dev && output.st_ino == status.st_ino))
+        goto done;
+#ifndef TITAN_PRODUCER_BLOCK_SOURCE
+    int input_flags = fcntl(options.input, F_GETFL);
+    if (input_flags < 0 || (input_flags & O_ACCMODE) != O_RDONLY ||
+        fstat(options.input, &source) != 0 || !S_ISREG(source.st_mode) ||
         source.st_size < 2048 || (uint64_t) source.st_size > SOURCE_LIMIT ||
         lseek(options.input, 0, SEEK_CUR) != 0)
         goto done;
+#endif
     if (nonblocking(options.output) != OK || nonblocking(options.status) != OK) {
         result = ERR_IO;
         goto done;
     }
     status_ready = 1;
+#ifdef TITAN_PRODUCER_BLOCK_SOURCE
+    result = open_block_source(&context, &options, &source, &logical_size, superblock);
+    if (result != OK)
+        goto done;
+#else
     result = read_superblock(&context, options.input, superblock);
     if (result != OK)
         goto done;
-    if (!valid_superblock(superblock, source.st_size) || fstat(options.input, &after) != 0 ||
+    if (!valid_superblock(superblock, (uint64_t) source.st_size) || fstat(options.input, &after) != 0 ||
         !unchanged(&source, &after)) {
         result = ERR_SOURCE;
         goto done;
     }
+#endif
     result = launch(&context, &options);
     if (result == OK)
         result = pump(&context, &options);
@@ -771,8 +894,13 @@ done:
     close_pair(&context.barrier);
     if (cleanup != OK)
         result = cleanup;
-    if (result == OK)
+    if (result == OK) {
+#ifdef TITAN_PRODUCER_BLOCK_SOURCE
+        result = verify_block_source(&context, &source, logical_size, superblock);
+#else
         result = verify_source(&context, options.input, &source, superblock);
+#endif
+    }
     if (status_ready) {
         int sent = send_status(&context, options.status, result);
         if (sent != OK)
@@ -781,6 +909,11 @@ done:
     if (status_flags >= 0)
         (void) fcntl(options.status, F_SETFL, status_flags);
     close_fd(&options.status);
+#ifdef TITAN_PRODUCER_BLOCK_SOURCE
+    /* The exclusive claim outlives children, final verification and status EOF.
+     * Never close options.input separately: it is owned by this guard. */
+    titan_source_close(&source);
+#endif
     if (result != OK)
         report_failure();
     return result;

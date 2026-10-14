@@ -1,10 +1,12 @@
 = Titan producer supervision prototype
 
-This Linux-only prototype exercises the source side of the
+This Linux-only regular-file variant exercises the source side of the
 link:../transport/protocol.adoc[TTR1 transport] using synthetic regular ext4
 image files. It is separate from rescue PID 1 and is not a phone acquisition
-service. It accepts no block-device source and performs no mount, repair, gadget
-setup or boot operation.
+service. Its source interface rejects block devices. The separate
+link:../block/README.adoc[guarded block producer] combines the same pipeline with
+the fixed userdata source guard. Both remain build-only prototypes and perform
+no mount, repair, gadget setup or phone boot operation.
 
 == Source and pipeline contract
 
@@ -72,7 +74,9 @@ Native Linux imaging/compression tools are used in both test runs; the second
 run emulates the AArch64 supervisor and sender under qemu-user. The separate
 rescue tool fixture covers AArch64 e2image/Zstandard execution.
 
-Actual phone use still requires a reviewed block-source selector, complete
-partition identity and mount/holder checks, writer quiescence, a USB startup
-supervisor and an authorized, demonstrated boot/return route. This prototype
-does not close those recovery requirements.
+The separate link:../block/README.adoc[guarded block integration] exercises a
+fixed source selector and retained claim using disposable VM fixtures. Actual
+phone use still requires complete storage discovery and private preservation,
+verified writer quiescence and filesystem consistency, a reviewed USB startup
+supervisor, and an explicitly authorized, demonstrated boot/return route. The
+regular-file and block prototypes do not close those hardware recovery requirements.

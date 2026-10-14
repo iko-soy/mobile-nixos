@@ -527,9 +527,11 @@ measured userdata geometry against kernel/sysfs metadata while retaining a
 read-only exclusive partition descriptor. It queries existing read-only flags;
 it does not set them, read partition contents or launch acquisition. Exclusive
 claims do not exclude ordinary raw opens or firmware writers, and the standalone
-checker's claim is released on exit. It has not run on the Titan. GPT preservation,
-complete storage discovery, writer quiescence and integration with the producer
-remain prerequisites for a consistent backup.
+checker's claim is released on exit. The separate
+link:block/README.adoc[guarded block producer] retains its own checked descriptors
+through acquisition and final checks. Neither has run on the Titan. GPT
+preservation, complete storage discovery, writer quiescence and a verified
+acquisition startup remain prerequisites for a consistent backup.
 
 ==== Pinned watchdog and ACM source audit
 
@@ -577,9 +579,11 @@ Future gadget setup must establish raw sender readiness before UDC binding;
 bytes sent to a canonical/echoing TTY during startup cannot be recovered by
 assuming the later raw-mode setting repairs them. A producer supervisor must
 also validate imaging/compression exits and diagnostics before attesting success.
-The link:producer/README.adoc[separate producer prototype] exercises that
-supervision against regular ext4 files; phone block-source acquisition remains
-unimplemented. Transport completion alone does not establish a valid or
+The link:producer/README.adoc[regular-image producer] exercises that supervision
+against ext4 files. The separate link:block/README.adoc[guarded block producer]
+adds fixed userdata selection and retained claims, with a disposable VM fixture
+covering the full transfer and restore path. Production USB/startup integration
+remains unimplemented. Transport completion alone does not establish a valid or
 consistent backup.
 
 No independent physical bootloader entry/exit or temporary-boot capability was
