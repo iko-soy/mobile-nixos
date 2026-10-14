@@ -1,12 +1,178 @@
 = Original Titan hardware baseline
+:kernel-src: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe
 
 This is the M0 collection procedure for the experimental Unihertz Titan port.
-It applies to the original Titan running Ubuntu Touch. The owner has confirmed
-that a device is available and runs Ubuntu Touch; the storage variant, exact
-firmware, bootloader state and recovery procedure remain unverified.
+It applies to the original Titan running Ubuntu Touch. The owner has supplied
+a runtime summary and inventory excerpts, recorded below. These identify this
+phone's internal eMMC and partition capacities. Exact build provenance,
+boot-image contents and recovery procedure still need confirmation.
 
-The collector has automated host-side tests. It has not been exercised against
-a Titan, and this document records no hardware success claims.
+The collector has automated host-side tests. The owner's excerpts are partial
+hardware evidence; the complete probe report and raw inventory have not been
+reviewed here. It does not establish a boot result for the experimental image.
+
+[[runtime-baseline]]
+== Owner-reported runtime baseline: 2026-10-14
+
+The owner supplied a summary followed by runtime inventory excerpts from the
+running phone. The tables below retain selected hardware/build facts; raw mount
+listings, input bitmaps, build-host identifiers and transient resource readings
+are omitted. No direct SSH inspection was completed from the development
+environment, and probe completion/status information is still outstanding.
+
+[cols="2,3",options="header"]
+|===
+|Field |Reported value
+|Model / Android device |`Titan` / `Titan`; manufacturer property `A-gold`.
+|Board / platform |`g61v71c2k_dfl_tee` / `mt6771`; hardware property `mt6771`.
+|Device tree |Model `MT6771V/C`; compatible `mediatek,mt6771`.
+|Running OS |Ubuntu `24.04.5 LTS (Noble Numbat)`, variant `Touch`.
+|Kernel / architecture |`4.14.141+` / `aarch64`, reporting SMP and PREEMPT.
+|Kernel compiler |Android Clang 9.0.3, build 5484270 based on `r353983c`.
+|Internal storage |eMMC: `mmcblk0.type=MMC`, model `hDEaP3`, with internal Android partition labels mapped below.
+|Memory visible to Linux |`MemTotal: 5903100 kB`; physical/reserved-memory layout still needed.
+|Android release / reported security patch |`10` / `2023-02-05`.
+|Android system build fingerprint |`Unihertz/Titan/Titan:10/QQ3A.200805.001/1439:userdebug/test-keys`
+|Android vendor build fingerprint |`Unihertz/Titan/Titan:10/QP1A.190711.020/root.20221121.182739:user/release-keys`
+|Reported boot state |`ro.boot.flash.locked=0`, `ro.boot.verifiedbootstate=orange`; `ro.boot.vbmeta.device_state` empty.
+|===
+
+These values agree with the owner-confirmed original Titan and the reference
+kernel's 4.14.141 version family. The release string, including its `+` suffix,
+does not identify an exact source revision, configuration or binary. The running
+kernel binary/source has not yet been matched to the pinned reference build,
+although its compiler family and supplied configuration match as described below.
+The Android properties identify reported
+system/vendor builds, not a verified stock restore package or its provenance.
+The boot-state properties are consistent with Android reporting an unlocked
+bootloader; they do not verify fastboot capabilities or a restoration procedure.
+
+=== Storage and image capacity
+
+The supplied `/dev/disk/by-partlabel` mappings associate the internal Android
+partitions with the reported MMC device, establishing the eMMC variant for this
+phone. Sizes below are sysfs `size` multiplied by 512; the corresponding supplied
+`/proc/partitions` KiB values agree. These are observations of this installation,
+not partition-number constants for other Titans.
+
+[cols="1,1,1,1",options="header"]
+|===
+|Label / device |Block node |512-byte sectors |Bytes
+|Whole eMMC |`mmcblk0` |244285440 |125074145280
+|`boot` |`mmcblk0p28` |65536 |33554432
+|`recovery` |`mmcblk0p2` |65536 |33554432
+|`dtbo` |`mmcblk0p30` |16384 |8388608
+|`vendor` |`mmcblk0p33` |1753088 |897581056
+|`system` |`mmcblk0p34` |6291456 |3221225472
+|`cache` |`mmcblk0p35` |884736 |452984832
+|`userdata` |`mmcblk0p36` |234137536 |119878418432
+|===
+
+Boot and recovery are each 32 MiB, matching the recipe's capacity requirement
+and the previously built 33554432-byte reference image. This closes the measured
+capacity comparison for this phone. It does not validate the installed image's
+header, DTB layout, AVB metadata or acceptance of the generated image. A `dtbo`
+partition is present; the supplied label listing has no separate `dtb` or
+`vbmeta` label. That absence does not establish where those contents reside.
+
+The mount excerpt associates `mmcblk0p36` with ext4 `/userdata` and `/nix`, and
+`mmcblk0p33` with read-only ext4 `/android/vendor`. Root `/` is a read-only ext4
+`loop0`; `/android/system` uses read-only ext4 `loop1`. Loop backing files and
+free space were not supplied. An existing `/nix` mount does not establish a
+sandboxed Nix build or a NixOS root filesystem. A future userdata-image design
+must implement its own discovery/mount logic and preserve existing data.
+
+Device-specific preservation targets visible in the label map include `nvcfg`
+(`mmcblk0p6`), `nvdata` (`mmcblk0p7`), `nvram` (`mmcblk0p25`), `protect1`
+(`mmcblk0p9`) and `protect2` (`mmcblk0p10`). This is not an exhaustive backup list;
+no partition contents or backups were collected or verified.
+
+=== Enumerated runtime interfaces
+
+[cols="1,3",options="header"]
+|===
+|Interface |Observed enumeration and limits
+|Display
+|`fb0` named `mtkfb`; mode `U:1440x1440p-0`, virtual size `1440,4320`, 32 bits per
+pixel. The virtual height is buffer geometry, not the panel resolution. No
+DRM/KMS or acceleration result is established.
+|Input
+|`aw9523-key`, `synaptics_dsx_i2c`, `mtk-tpd`, `mtk-pad`, `mtk-kpd`, `cf-keys` and
+`ACCDET` are enumerated. The Synaptics path identifies I2C bus 0, address `0x5d`.
+Enumeration does not establish key mappings, touch axes or behavior after resume.
+|USB
+|`musb-hdrc` reports state `configured`, `current_speed=high-speed` and
+`maximum_speed=super-speed`; `rndis0` is up and an ADB FunctionFS mount is present.
+The maximum does not establish a SuperSpeed link or working host communication.
+|Audio / networking
+|ALSA exposes `mt-snd-card`; `wlan0` is up. No playback, recording, traffic,
+cellular or Bluetooth functional result was supplied.
+|Power
+|Battery reports Li-ion, present, charging and health `Good`; USB reports online.
+This snapshot does not validate charging limits, thermal control or suspend.
+|Cgroups
+|A `cgroup2` filesystem is mounted at `/sys/fs/cgroup` with `nsdelegate`.
+Available controllers, writable delegation, syscall behavior and systemd 261
+compatibility remain untested.
+|Logging / configuration interfaces
+|pstore and configfs mounts are present; retained crash logs were not supplied.
+The separately supplied kernel configuration is audited below.
+|===
+
+=== Running kernel configuration
+
+The owner supplied `config.gz` separately. Parsing the private gzip input
+produced 4000 settings, with decompressed SHA-256:
+
+[source,text]
+----
+1113327761998175c8cc78dbce10ac23c7fed8a8418f1072e553e8c0acc4286b
+----
+
+This exactly matches the reference build's previously recorded configuration
+hash in the README. The comparison here is against that recorded hash; the
+original reference output file was not present in this workspace. It establishes
+configuration-content agreement, not identical kernel binaries, source revisions
+or backported APIs. The raw uploaded configuration remains outside Git.
+
+The allowlisted settings confirm the reference userspace audit applies to this
+configuration: `FHANDLE=n`, `TMPFS_POSIX_ACL=n`, `TMPFS_XATTR=n`,
+`EXT4_FS_POSIX_ACL=n`, `NF_TABLES=n`, `ANDROID_PARANOID_NETWORK=y`, and
+`FW_LOADER_USER_HELPER=y` / `FW_LOADER_USER_HELPER_FALLBACK=y`.
+`CGROUPS=y` with `CGROUP_PIDS=n` is consistent with a cgroup2 mount while leaving
+the PIDs controller unavailable. `BT=n` with `MTK_COMBO_BT=y` does not establish
+standard Linux Bluetooth support. Configuration changes alone would not resolve
+the separate systemd 261/Linux 4.14 support gap.
+
+The comparison tool now also reports these boolean/tristate driver settings,
+selected by matching the runtime enumeration to the pinned source. Symbols in
+the table omit the `CONFIG_` prefix; all enabled entries below are `y`.
+
+[cols="1,2",options="header"]
+|===
+|Observed interface |Configuration and source interpretation
+|`mtkfb` |`MTK_FB=y`; downstream MediaTek framebuffer path.
+|`mtk-kpd`, `aw9523-key` |`KEYBOARD_MTK=y`, `MTK_AW9523=y`.
+|`mtk-tpd`, `synaptics_dsx_i2c` |`TOUCHSCREEN_MTK=y`, `TOUCHSCREEN_MTK_SYNAPTICS=y`; touchscreen wrapper and Synaptics implementation.
+|`mtk-pad` |`MTK_TOUCHPAD=y`, `MTK_TOUCHPAD_SYNAPTICS=y`; separate touchpad wrapper and Synaptics implementation.
+|`mt-snd-card` |`SND_SOC=y`, `MTK_SND_SOC_NEW_ARCH=y`; downstream sound-card path.
+|`musb-hdrc` |`USB_MTU3=y`, `USB_MTU3_PLAT_PHONE=y`, `USB_MTU3_DUAL_ROLE=y`; the MTU3 phone variant sets this name. The alternative vendor USB2 path `USB_MTK_HDRC=n` shares the name but is disabled.
+|===
+
+Sources include the pinned
+link:{kernel-src}/drivers/misc/mediatek/aw9523/aw9523_key.c[AW9523 driver],
+link:{kernel-src}/drivers/input/touchscreen/mediatek/synaptics_dsx/synaptics_dsx_i2c.c[Synaptics touchscreen driver],
+link:{kernel-src}/drivers/usb/mtu3/mtu3_plat_v2.c[MTU3 phone implementation] and
+link:{kernel-src}/drivers/usb/mtu3/Makefile[MTU3 build selection].
+These mappings guide subsequent audits, not functional claims. `cf-keys` remains
+unmapped conclusively; no fingerprint-driver inference is made from that name.
+Input event numbers must not be treated as stable identifiers.
+
+Next, obtain probe statuses, check available cgroup controllers and identify
+matching private restore artifacts and a verified recovery procedure. The observed
+cgroup2 mount narrows the compatibility audit, but does not resolve the Linux 4.14/current
+systemd support gap. M0 and M1 hardware boot validation remain open; no generated
+image has been booted on this phone.
 
 == Collect directly over SSH
 
@@ -38,9 +204,10 @@ key. It runs the same fixed probes as ADB, without privilege elevation. The SSH
 destination is not intentionally written into the report. Output stays on the
 machine running the helper, outside Git, with the private permissions below.
 
-SSH reachability, authentication and hardware collection have not yet been
-verified against this Titan. A private LAN address requires an existing network
-route or VPN from the collecting environment.
+SSH reachability and authentication have not yet been verified against this
+Titan from the development environment. The owner-provided summary above does
+not establish which collection transport was used. A private LAN address
+requires an existing network route or VPN from the collecting environment.
 
 === SSH through an authorized TCP forward
 
@@ -237,7 +404,7 @@ python3 support/experimental-devices/unihertz-titan/tools/compare-kernel-config.
 The tool hashes the decompressed configuration bytes, so the reference hash is
 comparable with the build record in the README. It compares all parsed settings
 but prints values only for a fixed list of boolean/tristate settings relevant to
-the first userspace audit. Arbitrary configuration strings, source paths and
+the userspace and observed-driver audits above. Arbitrary configuration strings, source paths and
 input filenames are not included in the report. Keep the output private and
 review it before sharing.
 
@@ -259,14 +426,14 @@ by itself proves the bootloader state or a usable restore procedure.
 [cols="2,3",options="header"]
 |===
 |Field |Current evidence / required confirmation
-|Device |Original Unihertz Titan, owner-confirmed; verify model against collection.
-|Running OS |Ubuntu Touch, owner-confirmed; record exact release/build.
-|Storage variant |Unknown; confirm internal eMMC or UFS from runtime evidence.
-|Kernel/configuration |Awaiting `kernel.txt` and readable final configuration.
-|Underlying Android/vendor firmware |Unknown; record build fingerprint and matching restore source.
-|Bootloader state |Unknown; record exact observation and method.
-|Partition map/capacity |Unknown; confirm boot/recovery size and layout from this phone.
-|DTB/DTBO layout |Unknown on hardware; compare reference image and partition map.
+|Device |Original Unihertz Titan, owner-confirmed; supplied summary reports model/device `Titan`.
+|Running OS |Owner reports Ubuntu Touch `24.04.5 LTS`; OTA channel/image identifier still needed.
+|Storage variant |eMMC confirmed by supplied MMC type and internal partition/mount mappings; see baseline above.
+|Kernel/configuration |`4.14.141+`; uploaded configuration hash matches the recorded reference build. Exact source and kernel binary match remain unverified.
+|Underlying Android/vendor firmware |Reported Android 10 system/vendor fingerprints recorded above; matching restore source and hashes still needed.
+|Bootloader state |Android properties report `flash.locked=0` and `orange`; independent recovery/bootloader capability check outstanding.
+|Partition map/capacity |Supplied mappings and sizes recorded above; boot and recovery each 33554432 bytes.
+|DTB/DTBO layout |8 MiB `dtbo` partition observed; contents and installed boot-image DTB layout unverified.
 |Known-working boot image |Not preserved by this helper; privately retain matching recovery materials and hashes.
 |Device calibration/radio backup |Not performed by this helper; owner must preserve required device-specific data privately.
 |Recovery host/tools |Unknown; record host OS, tool versions and reliable USB connection.

@@ -7,9 +7,13 @@ experiment, not a supported device under `devices/` or an upstream submission.
 Titan Pocket, Slim, 2 and 2 Elite are different devices.
 
 The owner has an original Titan running Ubuntu Touch with Nix installed.
-Its storage variant, exact installed firmware and recovery procedure have not
-yet been verified. Build and image-format results below do not establish that an
-image boots or that any hardware works under NixOS.
+Supplied runtime evidence identifies the eMMC variant, Linux `4.14.141+`, and
+32 MiB boot/recovery partitions matching the reference image's capacity
+requirement. Reported Android system/vendor builds are recorded in the inventory;
+the uploaded kernel configuration matches the reference build's recorded hash.
+Restore provenance and recovery procedure still need verification. Build and
+image-format results below do not establish that an image boots or that any
+hardware works under NixOS.
 
 == What this builds
 
@@ -126,9 +130,12 @@ Two helper rebuild tasks remain open:
 
 The merged reference configuration produced on 2026-10-14 has SHA-256
 `1113327761998175c8cc78dbce10ac23c7fed8a8418f1072e553e8c0acc4286b`.
-This is build evidence, not the configuration collected from the owner's phone.
-The reference build preserves it so a later NixOS configuration can be compared
-against the Ubuntu Touch baseline.
+The owner's subsequently uploaded configuration has exactly the same decompressed
+hash and 4000 parsed settings; see the
+link:hardware-inventory.adoc#_running_kernel_configuration[runtime audit].
+This matches configuration contents without establishing identical kernel
+binaries or source revisions. The findings below apply to the supplied runtime
+configuration as well as the reference build.
 
 [cols="2,3",options="header"]
 |===
@@ -147,7 +154,8 @@ against the Ubuntu Touch baseline.
 |`NF_TABLES=n`
 |Cannot provide the nftables functionality requested by current Mobile.
 |`CGROUP_PIDS=n`
-|Task-count accounting and limits are unavailable. This alone is not a PID-1
+|The PIDs cgroup controller's task-count accounting and limits are unavailable.
+  This alone is not a PID-1
   boot blocker: systemd permits cgroups without individual controllers.
 |===
 
@@ -159,8 +167,9 @@ if choosing XZ. `FRAMEBUFFER_CONSOLE=n` leaves a kernel console gap, without
 establishing whether userspace framebuffer graphics work.
 The merged configuration also has `CONFIG_BT=n` and `CONFIG_MTK_COMBO_BT=y`.
 Bluetooth suboptions requested by `halium.config` do not establish standard
-Linux Bluetooth support when their parent is disabled. Compare the running
-phone's configuration before designing a BlueZ or Android Bluetooth bridge.
+Linux Bluetooth support when their parent is disabled. The supplied runtime
+configuration confirms these settings; inspect the actual driver interfaces
+before designing a BlueZ or Android Bluetooth bridge.
 
 Sources: link:https://github.com/systemd/systemd/blob/v261/README[systemd 261 requirements],
 link:../../../modules/kernel-config.nix[Mobile kernel configuration], and
@@ -174,19 +183,28 @@ this reference output; see the
 link:hardware-inventory.adoc#_compare_the_running_kernel_configuration[inventory procedure].
 The comparison keeps missing symbols distinct from disabled settings, hashes
 uncompressed configuration contents and limits printed values to a fixed list
-of boolean/tristate settings. It is a host-side audit aid, not a systemd
+of 50 boolean/tristate settings, including the source-mapped display, input,
+audio and USB drivers in the runtime inventory. It is a host-side audit aid, not a systemd
 compatibility test or a substitute for hardware evidence.
 
 == Hardware evidence and next gates
+
+The link:hardware-inventory.adoc#runtime-baseline[owner-reported runtime baseline]
+records the sanitized findings. Internal partition mappings confirm eMMC, with
+boot (`mmcblk0p28`) and recovery (`mmcblk0p2`) each measuring 33554432 bytes.
+The supplied configuration matches the reference build's recorded hash; matching
+kernel sources and image contents remain unverified. A mounted cgroup2 hierarchy,
+`mtkfb` framebuffer and input-device enumeration provide concrete starting points
+for the next compatibility and driver checks.
 
 Follow link:hardware-inventory.adoc[the inventory procedure] for the running
 Ubuntu Touch installation. Direct SSH is sufficient for the initial read-only
 collection. A USB recovery route must still be established before replacing the
 phone's boot path; an SSH connection cannot provide access after a failed boot.
 
-M0 remains open until the exact storage/firmware combination and restoration
-procedure are recorded. M1 hardware validation remains open until a generated
-image is compared with the known-working installation and tested using the
+M0 remains open until firmware/restore provenance, outstanding hardware details
+and a restoration procedure are recorded. M1 hardware validation remains open
+until a generated image is compared with the known-working installation and tested using the
 verified recovery procedure. No flash or partition-writing helper is included.
 
 After those gates, record the downstream-versus-native route decision before
@@ -241,6 +259,17 @@ The host-side configuration comparison has ten additional tests for gzip/plain
 input, decompressed hashes, missing/disabled/module distinctions, malformed
 inputs, size limits and omission of private values and paths. All 49 Python
 tests passed both on the host and in the Nix `tests` build, together with its
-nonbootable packing fixture. This follow-up has not collected a Titan baseline
-or compared an actual running configuration; hardware and recovery gates remain
-open.
+nonbootable packing fixture. These checks did not collect a Titan baseline or
+compare an actual running configuration. The subsequently supplied runtime
+evidence and configuration hash match are recorded separately above; hardware
+and recovery gates remain open.
+
+=== Follow-up: owner-supplied runtime baseline
+
+The hardware record now includes eMMC partition capacities, reported firmware,
+enumerated interfaces and the uploaded configuration's match to the recorded
+reference hash. Thirteen source-mapped driver settings extend the comparison
+allowlist to 50. All 49 Python tests passed again on the host and in the pinned
+Nix `tests` target, including its nonbootable packing fixture. The raw inventory
+and configuration are not committed; no phone writes or hardware boot test were
+performed.

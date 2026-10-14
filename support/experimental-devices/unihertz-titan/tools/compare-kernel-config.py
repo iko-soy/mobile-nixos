@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compare private runtime and reference kernel configurations on the host.
 
-Only the boolean/tristate settings discussed in the Titan README are reported.
+Only the boolean/tristate settings in the Titan README and inventory driver
+audit are reported.
 Configuration strings, comments and input paths are never included in results.
 This is not a kernel API audit or evidence of userspace compatibility/bootability.
 """
@@ -30,10 +31,14 @@ AUDITED_SETTINGS = tuple(sorted((
     "CGROUPS", "CGROUP_PIDS", "COMPAT", "CONFIGFS_FS", "DEVTMPFS",
     "DEVTMPFS_MOUNT", "EXT4_FS", "EXT4_FS_POSIX_ACL", "FHANDLE",
     "FRAMEBUFFER_CONSOLE", "FW_LOADER_USER_HELPER", "FW_LOADER_USER_HELPER_FALLBACK",
-    "INPUT_EVDEV", "INPUT_UINPUT", "IPC_NS", "MODULES", "MTK_COMBO_BT",
+    "INPUT_EVDEV", "INPUT_UINPUT", "IPC_NS", "KEYBOARD_MTK", "MODULES",
+    "MTK_AW9523", "MTK_COMBO_BT", "MTK_FB", "MTK_SND_SOC_NEW_ARCH",
+    "MTK_TOUCHPAD", "MTK_TOUCHPAD_SYNAPTICS",
     "NAMESPACES", "NET_NS", "NF_TABLES", "PID_NS", "RD_GZIP", "RD_XZ",
-    "SECCOMP", "SECCOMP_FILTER", "TMPFS", "TMPFS_POSIX_ACL", "TMPFS_XATTR",
-    "TUN", "USB_CONFIGFS", "USER_NS", "UTS_NS", "VT",
+    "SECCOMP", "SECCOMP_FILTER", "SND_SOC", "TMPFS", "TMPFS_POSIX_ACL", "TMPFS_XATTR",
+    "TOUCHSCREEN_MTK", "TOUCHSCREEN_MTK_SYNAPTICS", "TUN", "USB_CONFIGFS",
+    "USB_MTK_HDRC", "USB_MTU3", "USB_MTU3_DUAL_ROLE", "USB_MTU3_PLAT_PHONE",
+    "USER_NS", "UTS_NS", "VT",
 )))
 SCOPE = (
     "Configuration comparison only; kernel APIs, backports, installed modules, "

@@ -24,7 +24,15 @@ link:https://github.com/iko-soy/mobile-nixos/tree/titan/feasibility-m1/support/e
 Its README records the build scope and outstanding hardware gates. The original
 research snapshot above is not a statement of the latest build results. The
 owner has since confirmed an original Titan running Ubuntu Touch with Nix
-installed; its storage variant and recovery procedure still need verification.
+installed. Supplied runtime evidence reports model/device `Titan`, kernel
+`4.14.141+` and internal eMMC identified by MMC type and Android partition
+mappings. Boot and recovery each measure 33554432 bytes, matching the reference
+image's capacity requirement. The uploaded runtime configuration matches the
+reference build's recorded hash. Firmware/restore provenance and recovery
+procedure still need verification. See
+link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/experimental-devices/unihertz-titan/hardware-inventory.adoc[the hardware evidence record]
+for provenance, limitations and the next measurements. This is not a hardware
+boot result for the reference build or NixOS.
 
 toc::[]
 
