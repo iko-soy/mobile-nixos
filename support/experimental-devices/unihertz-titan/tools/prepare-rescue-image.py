@@ -3,7 +3,8 @@
 
 Only the reviewed installed boot and the reviewed USB ramdisk hashes are accepted:
 the USB acquisition ramdisk by default, the USB probe ramdisk or the offline
-control-region acquisition ramdisk.
+control-region acquisition ramdisk. With the probe ramdisk only, the pinned
+repository-built kernel may replace the installed kernel.
 No private input is submitted to Nix, an external executable, or a repository.
 The output has no AVB metadata and is not evidence of bootloader acceptance,
 hardware bootability, storage consistency or a working recovery procedure.
@@ -18,12 +19,21 @@ from pathlib import Path
 import stat
 import struct
 import sys
+import zlib
 
 
 BOOT_BYTES = 33554432
 BOOT_SHA256 = "6829a8bcaa696a6fe283184a874450357dd81e7e203eedaf79329bdc55745e83"
 KERNEL_BYTES = 9537534
 KERNEL_SHA256 = "f11ae9a7d90cdd9f1bad0b59b79b38c83ff9fd9f11133b119d480a60e9621787"
+# The repository's own build of the pinned UBports kernel (kernel.nix): a
+# different binary from the installed kernel, with the same configuration; the
+# installed kernel's exact source revision is unverified. It reports release
+# "4.14.141" where the installed kernel reports "4.14.141+".
+REPO_KERNEL_BYTES = 9532189
+REPO_KERNEL_SHA256 = "cd370ef6438dc4e76ddc4477ed1392675cb034b6f737f682f755cfec445d5f0b"
+REPO_IMAGE_BYTES = 27197452
+REPO_IMAGE_SHA256 = "34a45c8ac5e1e7574deaf97e8fbc536e062cc7a50cca7e0af906d77c818d2570"
 DTB_BYTES = 112135
 DTB_SHA256 = "51a6baed284c9caaec627cf402c4925db133856a4eecbaa87cfefe070915ce69"
 # Corrected 2026-10-15 build: accepts mount ID 0, requires the complete measured
@@ -181,6 +191,21 @@ def validate_ramdisk(data, profile="usb-acquisition"):
         raise PreparationError("USB rescue ramdisk archive validation failed.") from error
 
 
+def validate_repo_kernel(data):
+    """Return the pinned repository-built Image.gz after checking its contents."""
+    require(type(data) is bytes and len(data) == REPO_KERNEL_BYTES and sha256(data) == REPO_KERNEL_SHA256,
+            "Kernel does not match the pinned repository build.")
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        image = decoder.decompress(data, REPO_IMAGE_BYTES + 1)
+    except zlib.error as error:
+        raise PreparationError("Repository kernel is not a valid gzip stream.") from error
+    require(decoder.eof and not decoder.unconsumed_tail and not decoder.unused_data
+            and len(image) == REPO_IMAGE_BYTES and sha256(image) == REPO_IMAGE_SHA256,
+            "Repository kernel image differs from the pinned build.")
+    return data
+
+
 def validate_recovery(data):
     """Return the preserved stock recovery's pinned recovery-DTBO section."""
     require(type(data) is bytes and len(data) == RECOVERY_BYTES and sha256(data) == RECOVERY_SHA256,
@@ -196,9 +221,15 @@ def validate_recovery(data):
     return section
 
 
-def assemble_image(boot, ramdisk, profile="usb-acquisition", recovery_dtbo=b""):
+def assemble_image(boot, ramdisk, profile="usb-acquisition", recovery_dtbo=b"", repo_kernel=None):
     """Return (raw envelope bytes, private manifest); no filesystem or subprocess I/O."""
     original, kernel, dtb = validate_boot(boot)
+    # Only the probe in the recovery layout may carry the repository-built
+    # kernel instead of the installed one; the DTB and every other field stay.
+    require(repo_kernel is None or (profile == "usb-probe" and recovery_dtbo),
+            "The repository kernel is allowed only with the probe in the recovery layout.")
+    if repo_kernel is not None:
+        kernel = validate_repo_kernel(repo_kernel)
     ramdisk_report = validate_ramdisk(ramdisk, profile)
     # Only the self-restarting profiles may use the recovery-partition layout,
     # and only with the pinned stock section.
@@ -243,7 +274,8 @@ def assemble_image(boot, ramdisk, profile="usb-acquisition", recovery_dtbo=b""):
         "layout": "recovery" if recovery_dtbo else "boot",
         "inputs": {
             "installed_boot": {"bytes": len(boot), "sha256": sha256(boot)},
-            "kernel": {"bytes": len(kernel), "sha256": sha256(kernel)},
+            "kernel": {"bytes": len(kernel), "sha256": sha256(kernel),
+                       "source": "installed boot" if repo_kernel is None else "repository build (kernel.nix)"},
             "dtb": {"bytes": len(dtb), "sha256": sha256(dtb)},
             "usb_ramdisk": ramdisk_report,
             **({"recovery_dtbo": {"bytes": len(recovery_dtbo), "sha256": sha256(recovery_dtbo),
@@ -354,12 +386,14 @@ def write_private(directory_fd, name, data):
     return metadata.st_dev, metadata.st_ino
 
 
-def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition", recovery_path=None):
+def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition", recovery_path=None, kernel_path=None):
     output = private_path(output_path)
     require(not os.path.lexists(output), "Output must be a new private directory.")
     require(recovery_path is None or profile in SELF_RESTARTING,
             "The recovery layout is only for the probe and control profiles.")
-    boot = ramdisk = recovery = None
+    require(kernel_path is None or (profile == "usb-probe" and recovery_path is not None),
+            "The repository kernel is only for the probe in the recovery layout.")
+    boot = ramdisk = recovery = kernel = None
     directory_fd = parent_fd = -1
     owned = {}
     try:
@@ -369,11 +403,16 @@ def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition", rec
         if recovery_path is not None:
             recovery = PrivateInput(recovery_path, RECOVERY_BYTES)
             section = validate_recovery(recovery.data)
-        image, manifest = assemble_image(boot.data, ramdisk.data, profile, section)
+        if kernel_path is not None:
+            kernel = PrivateInput(kernel_path, REPO_KERNEL_BYTES)
+        image, manifest = assemble_image(boot.data, ramdisk.data, profile, section,
+                                         kernel.data if kernel is not None else None)
         boot.recheck()
         ramdisk.recheck()
         if recovery is not None:
             recovery.recheck()
+        if kernel is not None:
+            kernel.recheck()
         parent_fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
         parent_metadata = os.fstat(parent_fd)
         parent_identity = (parent_metadata.st_dev, parent_metadata.st_ino)
@@ -400,6 +439,8 @@ def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition", rec
         ramdisk.recheck()
         if recovery is not None:
             recovery.recheck()
+        if kernel is not None:
+            kernel.recheck()
         require(identity(os.stat(output.name, dir_fd=parent_fd, follow_symlinks=False))[:2] == directory_identity
                 and identity(os.stat(output.parent, follow_symlinks=False))[:2] == parent_identity
                 and private_path(output) == output,
@@ -441,6 +482,8 @@ def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition", rec
             os.close(directory_fd)
         if parent_fd >= 0:
             os.close(parent_fd)
+        if kernel is not None:
+            kernel.close()
         if recovery is not None:
             recovery.close()
         if ramdisk is not None:
@@ -459,9 +502,12 @@ def main(argv=None):
     parser.add_argument("--recovery", type=Path,
                         help="private preserved stock recovery copy; adds its recovery-DTBO section "
                              "for the recovery-partition layout (usb-probe and usb-control only)")
+    parser.add_argument("--kernel", type=Path,
+                        help="private copy of the pinned repository-built kernel Image.gz, replacing the "
+                             "installed kernel (usb-probe with --recovery only)")
     args = parser.parse_args(argv)
     try:
-        report = prepare(args.boot, args.ramdisk, args.output, args.ramdisk_profile, args.recovery)
+        report = prepare(args.boot, args.ramdisk, args.output, args.ramdisk_profile, args.recovery, args.kernel)
     except PreparationError as error:
         print(f"Preparation refused: {error}", file=sys.stderr)
         return 1

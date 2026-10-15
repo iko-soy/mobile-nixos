@@ -1,6 +1,7 @@
 """Private host repackaging tests: synthetic bytes only, never a phone or Nix input."""
 
 import contextlib
+import gzip
 import hashlib
 import importlib.util
 import io
@@ -436,6 +437,126 @@ class RescueImageTests(unittest.TestCase):
                 self.assertEqual((written["ramdisk_profile"], written["layout"]), ("usb-control", "recovery"))
         self.assertEqual(prepare.ramdisk_pin("usb-control"),
                          (3773960, "14a573ef702b5bf1a85abcbdd634cf780d9403c64e8bc5829708810964757d48"))
+
+    def test_probe_can_carry_the_pinned_repository_kernel(self):
+        probe, dtbo, recovery, pins = self.probe_fixture()
+        image = b"synthetic repository kernel image " * 2048
+        kernel = gzip.compress(image, mtime=0)
+        pins.update({"REPO_KERNEL_BYTES": len(kernel), "REPO_KERNEL_SHA256": hashlib.sha256(kernel).hexdigest(),
+                     "REPO_IMAGE_BYTES": len(image), "REPO_IMAGE_SHA256": hashlib.sha256(image).hexdigest()})
+        with patch.multiple(prepare, **pins):
+            envelope, report = prepare.assemble_image(self.boot, probe, "usb-probe", dtbo, kernel)
+            info = prepare.boot_inspector.inspect_image(envelope)
+            # Only the kernel changes; the DTB, ramdisk, section and command line stay.
+            self.assertEqual(prepare.payload(envelope, info, "kernel"), kernel)
+            self.assertEqual(prepare.payload(envelope, info, "dtb"), self.dtb)
+            self.assertEqual(prepare.payload(envelope, info, "ramdisk"), probe)
+            self.assertEqual(prepare.payload(envelope, info, "recovery_dtbo"), dtbo)
+            self.assertEqual(info["cmdline"], prepare.PROBE_CMDLINE)
+            self.assertEqual(report["inputs"]["kernel"], {"bytes": len(kernel), "sha256": hashlib.sha256(kernel).hexdigest(),
+                                                          "source": "repository build (kernel.nix)"})
+            digest = hashlib.sha1(usedforsecurity=False)
+            for item in (kernel, probe, b"", b"", dtbo, self.dtb):
+                digest.update(item)
+                digest.update(struct.pack("<I", len(item)))
+            self.assertEqual(envelope[576:608], digest.digest() + bytes(12))
+            _, installed = prepare.assemble_image(self.boot, probe, "usb-probe", dtbo)
+            self.assertEqual(installed["inputs"]["kernel"]["source"], "installed boot")
+            # Any other profile, a changed stream or a changed decompressed image is refused.
+            with self.assertRaisesRegex(prepare.PreparationError, "only with the probe"):
+                prepare.assemble_image(self.boot, self.ramdisk, "usb-acquisition", b"", kernel)
+            with self.assertRaises(prepare.PreparationError):
+                prepare.assemble_image(self.boot, probe, "usb-probe", dtbo, kernel[:-1] + b"x")
+            with patch.object(prepare, "REPO_IMAGE_SHA256", "0" * 64), self.assertRaises(prepare.PreparationError):
+                prepare.assemble_image(self.boot, probe, "usb-probe", dtbo, kernel)
+            # A stream without its gzip trailer still inflates to the whole image,
+            # but never reaches its end.
+            truncated = kernel[:-8]
+            with patch.multiple(prepare, REPO_KERNEL_BYTES=len(truncated),
+                                REPO_KERNEL_SHA256=hashlib.sha256(truncated).hexdigest()), \
+                    self.assertRaisesRegex(prepare.PreparationError, "image differs"):
+                prepare.assemble_image(self.boot, probe, "usb-probe", dtbo, truncated)
+            trailing = kernel + b"\0"
+            with patch.multiple(prepare, REPO_KERNEL_BYTES=len(trailing),
+                                REPO_KERNEL_SHA256=hashlib.sha256(trailing).hexdigest()), \
+                    self.assertRaises(prepare.PreparationError):
+                prepare.assemble_image(self.boot, probe, "usb-probe", dtbo, trailing)
+            # The same image in a different gzip stream fails the stream pin itself.
+            recompressed = gzip.compress(image, compresslevel=1, mtime=0)
+            self.assertNotEqual(recompressed, kernel)
+            with self.assertRaisesRegex(prepare.PreparationError, "pinned repository build"):
+                prepare.assemble_image(self.boot, probe, "usb-probe", dtbo, recompressed)
+            with self.assertRaisesRegex(prepare.PreparationError, "recovery layout"):
+                prepare.assemble_image(self.boot, probe, "usb-probe", b"", kernel)
+            real_assemble = prepare.assemble_image
+            with self.private_inputs() as (parent, boot, ramdisk, output):
+                ramdisk.write_bytes(probe)
+                stock = parent / "recovery.img"
+                stock.write_bytes(recovery)
+                stock.chmod(0o600)
+                kernel_file = parent / "Image.gz"
+                kernel_file.write_bytes(kernel)
+                kernel_file.chmod(0o600)
+                for profile, section in (("usb-control", stock), ("usb-probe", None)):
+                    with self.subTest(profile=profile), \
+                            self.assertRaisesRegex(prepare.PreparationError, "only for the probe in the recovery layout"):
+                        prepare.prepare(boot, ramdisk, output, profile, section, kernel_file)
+                    self.assertFalse(output.exists())
+
+                def alter_kernel(*args):
+                    result = real_assemble(*args)
+                    with kernel_file.open("r+b") as handle:
+                        handle.write(kernel[:1])
+                    return result
+                with patch.object(prepare, "assemble_image", side_effect=alter_kernel), \
+                        self.assertRaisesRegex(prepare.PreparationError, "changed during"):
+                    prepare.prepare(boot, ramdisk, output, "usb-probe", stock, kernel_file)
+                self.assertFalse(output.exists())
+                # A change after the first recheck, while outputs are written, is
+                # caught by the recheck before publication.
+                kernel_file.write_bytes(kernel)
+                kernel_file.chmod(0o600)
+                real_write = prepare.write_private
+
+                def alter_while_writing(*args):
+                    with kernel_file.open("r+b") as handle:
+                        handle.write(kernel[:1])
+                    return real_write(*args)
+                with patch.object(prepare, "write_private", side_effect=alter_while_writing), \
+                        self.assertRaisesRegex(prepare.PreparationError, "changed during"):
+                    prepare.prepare(boot, ramdisk, output, "usb-probe", stock, kernel_file)
+                self.assertFalse((output / prepare.IMAGE_NAME).exists())
+                os.rmdir(output)
+                kernel_file.unlink()
+                kernel_file.write_bytes(kernel)
+                kernel_file.chmod(0o600)
+                prepare.prepare(boot, ramdisk, output, "usb-probe", stock, kernel_file)
+                written = json.loads((output / prepare.MANIFEST_NAME).read_text())
+                self.assertEqual(written["inputs"]["kernel"]["source"], "repository build (kernel.nix)")
+        self.assertEqual((prepare.REPO_KERNEL_BYTES, prepare.REPO_KERNEL_SHA256, prepare.REPO_IMAGE_BYTES,
+                          prepare.REPO_IMAGE_SHA256),
+                         (9532189, "cd370ef6438dc4e76ddc4477ed1392675cb034b6f737f682f755cfec445d5f0b",
+                          27197452, "34a45c8ac5e1e7574deaf97e8fbc536e062cc7a50cca7e0af906d77c818d2570"))
+
+    def test_flash_profiles_agree_with_the_envelope_pins(self):
+        # Each recovery-layout envelope is a header page plus page-padded kernel,
+        # ramdisk, recovery-DTBO and DTB sections; the flash helper pins its size.
+        # Fresh module copies: setUp patches the pins of the shared module.
+        modules = {}
+        for name, path in (("flash", SCRIPT.with_name("flash-recovery.py")), ("real", SCRIPT)):
+            spec = importlib.util.spec_from_file_location(f"titan_pin_check_{name}", path)
+            modules[name] = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(modules[name])
+        flash, real = modules["flash"], modules["real"]
+        pages = lambda size: size + (-size) % real.PAGE_SIZE
+        tail = pages(real.RECOVERY_DTBO_BYTES) + pages(real.DTB_BYTES)
+        expected = {"rescue-probe": (real.KERNEL_BYTES, real.PROBE_RAMDISK_BYTES),
+                    "repo-kernel-probe": (real.REPO_KERNEL_BYTES, real.PROBE_RAMDISK_BYTES),
+                    "control-acquisition": (real.KERNEL_BYTES, real.CONTROL_RAMDISK_BYTES)}
+        for name, (kernel, ramdisk) in expected.items():
+            with self.subTest(profile=name):
+                self.assertEqual(flash.PROFILES[name]["source_bytes"],
+                                 real.PAGE_SIZE + pages(kernel) + pages(ramdisk) + tail)
 
     @unittest.skipUnless(os.environ.get("TITAN_MKBOOTIMG_SOURCE"), "pinned mkbootimg source required for independent assembly comparison")
     def test_recovery_layout_byte_identical_to_pinned_mkbootimg(self):

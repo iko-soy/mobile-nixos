@@ -1,0 +1,164 @@
+= Repository-kernel probe trial
+
+Status on 2026-10-15: proposal only. Nothing in it has run on the phone, and
+it authorizes no phone action. Running it needs the owner's explicit approval
+of this procedure, and that approval covers one run.
+
+The kernel this repository builds (`kernel.nix`) comes from the pinned UBports
+source with the same configuration as the installed kernel, whose exact source
+revision is unverified. It is a different binary and has never run on
+hardware. M1's remaining gate is a hardware boot of
+a generated image through the verified recovery procedure. This trial boots that
+kernel from the recovery partition with the second-version
+link:usb-probe/README.adoc[USB probe] ramdisk, which already ran on the phone
+in the link:recovery-route-trial.adoc[recovery-partition trial], and then
+restores the original recovery. Ubuntu Touch's boot partition is never written.
+
+== Questions
+
+. Does the bootloader start the repository-built kernel from the recovery
+  partition?
+. Does the probe run on it: guard storage, bind its USB gadget and report to
+  the Mac with the kernel release `4.14.141`? The installed kernel reports
+  `4.14.141+`, so the release identifies the running kernel.
+. Does the probe's deadline restart reach bootloader fastboot?
+. Does `fastboot flash recovery` restore the original as before?
+
+== Basis
+
+* *Kernel.* `Image.gz` from the repository build: 9532189 bytes, SHA-256
+  `cd370ef6438dc4e76ddc4477ed1392675cb034b6f737f682f755cfec445d5f0b`,
+  decompressing to a 27197452-byte `Image` (`34a45c8a...`) whose configuration
+  (`11133277...`) equals the phone's runtime configuration. The installed kernel
+  is a different 9537534-byte build (`f11ae9a7...`). See the README's record of
+  the independent reference build.
+* *Image.* That kernel, the installed DTB (`51a6baed...`; on 2026-10-15 the
+  adaptation's DTB that the reference build uses had the same SHA-256), the
+  probe ramdisk
+  (`cdb87d51...`), the probe's command line and the stock recovery's
+  recovery-DTBO section, in the recovery layout: 9764864 bytes, SHA-256
+  `35fb8d6427b3b32809b48789235158fda460b5d6e6ecbf4ed703ed0f3694050f`,
+  byte-identical to the pinned `mkbootimg`. It differs from the probe image of
+  the recovery-route trial only in the kernel. Padded with zeros to the
+  partition's 33554432 bytes it has SHA-256
+  `e59463888dae6b7db6c64bbd2c84965d2ffce2a76a5b51a6cb5f0c426a5fc251`.
+  `tools/prepare-rescue-image.py --kernel` accepts only this kernel, and only
+  with the probe ramdisk in the recovery layout.
+* *What runs.* The probe mounts nothing from storage, sets the kernel's
+  volatile read-only flag on every block device, binds the fixed ACM gadget,
+  writes a status line every two seconds and restarts into the bootloader 150
+  seconds after it starts. It reads no storage contents.
+* *Listener.* `tools/read-probe-report.py` now accepts macOS's spelling of the
+  product string, which made it miss the lines in the recovery-route trial, and
+  records the reported kernel release.
+* *Flash helper.* `tools/flash-recovery.py` gained the `repo-kernel-probe`
+  profile; its identity checks and its single `fastboot flash recovery` are
+  unchanged, and have now worked four times.
+
+== Preconditions
+
+* Battery at least 60%, as in the recovery-route trial, since the run is
+  short; see the worst case below.
+* As in the link:control-acquisition-trial.adoc[offline acquisition trial]: the
+  owner present, a direct cable to the Mac, no system update pending or in
+  progress, no command file in `/android/cache/recovery` or `/cache/recovery`,
+  both private copies of the original recovery (`4dd1c1f7...`) verified by
+  hash, and a normal-mode control-region copy taken right before the trial with
+  `para` matching the latest copies.
+* From step 5 until step 13 passes: no system update, factory reset,
+  `reboot recovery` or Volume Up start other than step 9 and the rows below
+  that name one.
+
+== Procedure
+
+*Part 1: write the image.* Steps 1 to 7 of the
+link:recovery-route-trial.adoc[recovery-route trial]: the read-only baseline;
+the owner's partition and control-region copies, with recovery `4dd1c1f7...`
+and boot, dtbo and `para` unchanged; entry into fastboot with
+`sudo /sbin/reboot bootloader`; recognition; then the write:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/flash-recovery.py \
+  --profile repo-kernel-probe \
+  --image /absolute/private/repo-kernel-probe-envelope-recovery/UNTESTED-UNSIGNED-rescue.img \
+  --output /absolute/private/new-recovery-flash
+----
+
+and the return, after which step 7 must read recovery back as `e5946388...`,
+with boot and dtbo unchanged.
+
+*Part 2: run the probe.*
+
+[start=8]
+. *Listen:* start `tools/read-probe-report.py` and, after it,
+  `observe-fastboot.py observe` with a 600-second wait.
+. *Start, owner-run:* keep the USB cable connected, power the phone off from
+  Ubuntu Touch, hold Volume Up and press Power, and release both once the
+  unlocked-state warning appears.
+. *Expected:* within about 30 seconds the Mac sees the probe's USB device and
+  the listener records at least five lines reporting `kernel=4.14.141`. About
+  150 seconds after the probe starts, the phone restarts into fastboot.
+
+*Part 3: restore.* Steps 11 to 13 of the recovery-route trial: write the
+preserved original with the `original-recovery` profile, return, and read
+recovery back as `4dd1c1f7...`, with boot and dtbo unchanged.
+
+== Stop conditions
+
+The recovery-route trial's stop conditions apply, including its precedence
+rule: whenever the phone is in bootloader fastboot while recovery holds the
+probe or a partial image, run Part 3 there. These rows replace or add to them:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|Ubuntu Touch starts instead of the probe in step 9
+|Read the boot reason from `/proc/cmdline`. Only `PowerKey`, a missed key
+entry, allows one retry of step 9. Any other reason may follow a crash of the
+repository kernel: record it, and any pstore or `last_kmsg` record that exists,
+then enter fastboot from Ubuntu Touch and go to Part 3 without retrying.
+|The lines report `kernel=4.14.141+`
+|Record it: the installed kernel ran, which this image cannot contain. Continue
+to Part 3 and investigate before any repeat.
+|No USB device appears and the phone does not restart within six minutes of
+step 9
+|The repository kernel may not have started or may have stopped early, before
+the probe's deadline process existed. Try the physical fallback: hold Power
+about ten seconds, without Volume Up. It is unverified, and the PMIC long-press
+reset is enabled by the running kernel's keypad driver, so it may do nothing if
+the kernel stopped before that driver started. If the phone stays unresponsive,
+unplug the cable so that it stops charging, let the battery run down until it
+is off, charge it, and start it normally: Ubuntu Touch's boot partition is
+unchanged. From Ubuntu Touch, enter fastboot and go to Part 3.
+|Ubuntu Touch cannot be reached while the probe is installed
+|Use the probe's own route only if this trial has already answered Question 3
+with yes; otherwise stop in the recovery-route trial's end state.
+|===
+
+== Residual risks
+
+* The repository kernel has never run on hardware. It may stop before PID 1,
+  leaving the phone without the probe's restart. The worst case is a hung
+  phone that the long-press does not reset, which then ends only when the
+  battery runs down. It may also behave differently from the installed build
+  in drivers the probe uses; the matching configuration and compiler narrow
+  but do not remove that difference.
+* If the kernel crashes, its exception handler requests an immediate watchdog
+  reset. How the bootloader handles that reset is unknown; so far only
+  bootloader crashes have been seen, and they reset into a normal boot.
+* While it runs, the probe mounts nothing from storage and sets every block
+  device read-only, so no filesystem replay or userspace write can happen; a
+  defective kernel driver is the remaining way storage could change.
+* The bootloader risks of the recovery-route trial remain: the image differs
+  from the stock recovery in the same ways as the probe image it accepted.
+
+== What this can and cannot show
+
+Success shows that this pinned kernel binary (`cd370ef6...`) boots on the
+Titan from a generated image and supports the probe's storage guard, USB gadget
+and restart: M1's hardware gate for the kernel. The same recipe has produced a
+different `Image.gz` on another machine, so success covers this binary, not
+every build of the recipe. It does not show that the reference boot image with
+the UBports initramfs boots, that any NixOS userspace runs on this kernel, or
+anything about replacing the boot partition.

@@ -52,6 +52,9 @@ hardware works under NixOS.
   consistent, then restarted into fastboot, and the original recovery was
   restored. The first attempt stalled in macOS's serial driver; the repeat
   succeeded.
+* A link:repo-kernel-trial.adoc[repository-kernel probe trial] proposal: it
+  boots the kernel this repository builds, from the recovery partition with the
+  probe, which is M1's remaining hardware gate. Not run.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -380,7 +383,8 @@ archive bytes can vary for the same revision.
 |===
 
 The adaptation's `unihertz-titan.dtb` is a 112135-byte Android DT table containing
-one 112071-byte flattened device tree at offset 64. It is not a raw FDT starting
+one 112071-byte flattened device tree at offset 64. On 2026-10-15 its SHA-256,
+`51a6baed...`, matched the installed boot's DTB. It is not a raw FDT starting
 at byte zero. Header-v2 packing uses a separate DTB section and `Image.gz`;
 appending a DTB to the kernel or using the legacy `--dt` option is not equivalent.
 
@@ -519,12 +523,15 @@ collection. A USB recovery route must still be established before replacing the
 phone's boot path; an SSH connection cannot provide access after a failed boot.
 
 M0 remains open until firmware/restore provenance and outstanding hardware
-details are recorded and a restoration procedure is demonstrated on this phone,
-with consistent preservation and a verified entry/return route. The normal-mode
-route into bootloader fastboot and back worked once on 2026-10-15; a rescue
-boot and its return have not been tried. M1 hardware validation remains open
-until a generated image is compared with the preserved known-working boot image and tested using the
-verified recovery procedure. No flash or partition-writing helper is included.
+details are recorded and the offline copy has a second copy on separate
+storage. Rescue boots from the recovery partition and their returns into
+fastboot have worked three times, the original recovery has been restored byte
+for byte twice, and the sixteen regions other than `userdata` have a consistent
+offline copy. M1 hardware validation remains open until a generated image with
+the repository's own kernel boots through that procedure; the
+link:repo-kernel-trial.adoc[repository-kernel trial] proposes it.
+`tools/flash-recovery.py` writes only the recovery partition, and only pinned
+images.
 
 After those gates, record the downstream-versus-native route decision before
 adding a supported-device module. In particular, resolve the old kernel's

@@ -32,7 +32,14 @@ With `--ramdisk-profile usb-control`, the helper accepts only the 3773960-byte
 link:control/README.adoc[offline control-region acquisition ramdisk] with
 SHA-256 `14a573ef702b5bf1a85abcbdd634cf780d9403c64e8bc5829708810964757d48`,
 checked by the inspector's `usb-control` profile; it uses the probe's command
-line and may use the same recovery layout.
+line and may use the same recovery layout. With the probe profile in the
+recovery layout only, `--kernel` replaces the installed kernel with the pinned repository-built
+`Image.gz` (9532189 bytes, `cd370ef6...`), whose decompressed `Image`
+(`34a45c8a...`) it also checks; the DTB and all other fields stay. That
+recovery-layout envelope is 9764864 bytes, SHA-256
+`35fb8d6427b3b32809b48789235158fda460b5d6e6ecbf4ed703ed0f3694050f`,
+byte-identical to the pinned `mkbootimg`, for the
+link:repo-kernel-trial.adoc[repository-kernel trial].
 These constants select reviewed inputs; there is no runtime hash, source-profile
 or command-line override. A future ramdisk build requires a reviewed profile
 update. Matching a digest establishes byte identity, not hardware suitability.

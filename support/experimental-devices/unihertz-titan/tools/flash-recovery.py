@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
-This host helper writes only the `recovery` partition, and only one of three
-pinned full-partition images: the USB probe envelope or the offline
-control-region acquisition envelope, each padded with zeros to the partition
-size, or the preserved original recovery image that restores it. It
+This host helper writes only the `recovery` partition, and only one of four
+pinned full-partition images: the USB probe envelope, the same probe with the
+repository-built kernel, or the offline control-region acquisition envelope,
+each padded with zeros to the partition size, or the preserved original
+recovery image that restores it. It
 first sends fixed read-only identity queries, including the recovery
 partition's size and type, from a verified read-only private copy that it
 measures again afterwards. It never writes another partition and never issues
 erase, boot, oem, flashing, set_active or any other command. Running it changes
 the phone's storage and needs the owner's explicit authorization of the
-procedure in recovery-route-trial.adoc or control-acquisition-trial.adoc.
+procedure in recovery-route-trial.adoc, control-acquisition-trial.adoc or
+repo-kernel-trial.adoc.
 """
 
 import argparse
@@ -41,6 +43,13 @@ PROFILES = {
         "source_bytes": 9768960,
         "source_sha256": "f37dd3b159226e7c9955ee87246a570b8075d6e95187d4f1406d456f5c0ce59d",
         "sha256": "a97cb154eb82a7241e155fbdb5c6bc804404ab1bb8082739aaa63835f1d96080",
+    },
+    # The same second-version probe ramdisk and recovery layout with the
+    # repository-built kernel (kernel.nix) in place of the installed one.
+    "repo-kernel-probe": {
+        "source_bytes": 9764864,
+        "source_sha256": "35fb8d6427b3b32809b48789235158fda460b5d6e6ecbf4ed703ed0f3694050f",
+        "sha256": "e59463888dae6b7db6c64bbd2c84965d2ffce2a76a5b51a6cb5f0c426a5fc251",
     },
     # The offline control-region acquisition envelope (control/README.adoc),
     # which restarts into the bootloader after the transfer or at its deadline,
