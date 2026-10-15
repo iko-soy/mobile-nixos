@@ -125,8 +125,8 @@ class RecoveryFlashTests(unittest.TestCase):
 
     def test_pinned_profiles_match_the_reviewed_images(self):
         real = load("titan_fastboot_flash_constants", HERE.parent / "flash-recovery.py")
-        self.assertEqual(set(real.PROFILES), {"rescue-probe", "repo-kernel-probe", "control-acquisition",
-                                              "original-recovery"})
+        self.assertEqual(set(real.PROFILES), {"rescue-probe", "repo-kernel-probe", "native-probe",
+                                              "control-acquisition", "original-recovery"})
         self.assertEqual(real.PARTITION_BYTES, 33554432)
         self.assertEqual(real.PARTITION, "recovery")
         # The probe is the second version, not the first-version envelope that
@@ -140,6 +140,14 @@ class RecoveryFlashTests(unittest.TestCase):
         self.assertEqual((repo["source_bytes"], repo["source_sha256"], repo["sha256"]),
                          (9764864, "35fb8d6427b3b32809b48789235158fda460b5d6e6ecbf4ed703ed0f3694050f",
                           "e59463888dae6b7db6c64bbd2c84965d2ffce2a76a5b51a6cb5f0c426a5fc251"))
+        native = real.PROFILES["native-probe"]
+        self.assertEqual((native["source_bytes"], native["source_sha256"], native["sha256"]),
+                         (15712256, "5945dad1ae4041224136a184e49f07abffdef14c63d3797cf43cb9191985da88",
+                          "35a45a98f06d1a5fca462a6f2540e370189a26346ec727b892e9776ca2ba63b3"))
+        # Header page plus page-padded kernel (15585590), modern probe (65731),
+        # overlay table (5765) and DTB table (47337), as built in Nix.
+        pages = lambda size: size + (-size) % 2048
+        self.assertEqual(native["source_bytes"], 2048 + pages(15585590) + pages(65731) + pages(5765) + pages(47337))
         control = real.PROFILES["control-acquisition"]
         self.assertEqual((control["source_bytes"], control["source_sha256"], control["sha256"]),
                          (13475840, "41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65",

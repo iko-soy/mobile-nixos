@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
+/*
+ * Original Unihertz Titan (MT6771, eMMC), minimal first-boot board tree for
+ * the native route (native-n0.adoc). Untested on hardware.
+ *
+ * Scope: CPUs without idle or frequency scaling, memory and the bootloader's
+ * reserved regions, the MT6358 PMIC, the eMMC at a conservative speed and USB
+ * in peripheral-only mode through the T-PHY software role switch. Display,
+ * input, charging, audio, radios, cameras and sensors are left out.
+ *
+ * Board facts come from the Titan's own device tree and board overlay and a
+ * read-only reading of its live tree; the layout follows the postmarketOS
+ * Gigaset GS4 and FPlus T1100 trees for the same SoC and PMIC.
+ */
+/dts-v1/;
+#include "mt6771.dtsi"
+#include "mt6358.dtsi"
+
+/*
+ * The bootloader protects the SCP region, and the Android SCP firmware does
+ * not suit the upstream driver (as in the T1100 tree). The video codecs depend
+ * on the SCP.
+ */
+/delete-node/ &scp;
+/delete-node/ &vcodec_dec;
+/delete-node/ &vcodec_enc;
+
+/ {
+	model = "Unihertz Titan";
+	compatible = "unihertz,titan", "mediatek,mt6771";
+	chassis-type = "handset";
+
+	aliases {
+		serial0 = &uart0;
+		mmc0 = &mmc0;
+	};
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		/*
+		 * The bootloader requires this property and adds its own
+		 * arguments. Keep what it left powered and clocked: no driver
+		 * here manages the display or the other unused blocks.
+		 */
+		bootargs = "console=tty0 clk_ignore_unused pd_ignore_unused regulator_ignore_unused";
+	};
+
+	/* 6 GiB at 0x40000000; the bootloader writes the actual size. */
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x00 0x40000000 0x01 0x80000000>;
+	};
+
+	/*
+	 * Required by the bootloader, which adds its own regions here: ATF,
+	 * TEE, SCP, SPM, SSPM, the modem, the framebuffer and others.
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+	};
+};
+
+&cpu0 {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu1 {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu2 {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu3 {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu4 {
+	proc-supply = <&mt6358_vproc11_reg>;
+	sram-supply = <&mt6358_vsram_proc11_reg>;
+};
+
+&cpu5 {
+	proc-supply = <&mt6358_vproc11_reg>;
+	sram-supply = <&mt6358_vsram_proc11_reg>;
+};
+
+&cpu6 {
+	proc-supply = <&mt6358_vproc11_reg>;
+	sram-supply = <&mt6358_vsram_proc11_reg>;
+};
+
+&cpu7 {
+	proc-supply = <&mt6358_vproc11_reg>;
+	sram-supply = <&mt6358_vsram_proc11_reg>;
+};
+
+&gpu {
+	mali-supply = <&mt6358_vgpu_reg>;
+	sram-supply = <&mt6358_vsram_gpu_reg>;
+};
+
+&mfg {
+	domain-supply = <&mt6358_vgpu_reg>;
+};
+
+&mfg_async {
+	domain-supply = <&mt6358_vsram_gpu_reg>;
+};
+
+/* As on the GS4 and T1100: the IOMMU is left off. */
+&iommu {
+	status = "disabled";
+};
+
+/* The PMIC interrupt is GPIO 182 (Titan stock tree). */
+&pmic {
+	interrupts-extended = <&pio 182 IRQ_TYPE_LEVEL_HIGH>;
+};
+
+&mt6358_vdram2_reg {
+	regulator-always-on;
+};
+
+/* The stock eMMC supply is 3.0 V; do not let the eMMC driver raise it. */
+&mt6358_vemc_reg {
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+};
+
+/*
+ * Keep the PMIC keys driver away from this PMIC. Mainline's MT6358 entry places
+ * the long-press reset enables and duration in TOP_RST_MISC bits 5, 6, 8 and 9,
+ * but the Titan's vendor kernel defines bit 8 (home key) and bit 9 (power key)
+ * as the enables, bits 12-13 as the power-key duration and bit 5 as the
+ * watchdog reset debounce. Any setting would rewrite that persistent state.
+ */
+&mt6358keys {
+	status = "disabled";
+};
+
+/*
+ * eMMC at plain high speed: no HS200/HS400 tuning values are known for this
+ * board, and the first boot only needs it readable.
+ */
+&mmc0 {
+	status = "okay";
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc0_pins_default>;
+	pinctrl-1 = <&mmc0_pins_uhs>;
+	bus-width = <8>;
+	max-frequency = <52000000>;
+	cap-mmc-highspeed;
+	no-sdio;
+	no-sd;
+	vmmc-supply = <&mt6358_vemc_reg>;
+	vqmmc-supply = <&mt6358_vio18_reg>;
+	assigned-clocks = <&topckgen CLK_TOP_MUX_MSDC50_0>;
+	assigned-clock-parents = <&topckgen CLK_TOP_MSDCPLL_CK>;
+	non-removable;
+};
+
+/*
+ * USB in peripheral mode only. The T-PHY software role-switch property forces
+ * the device role and the VBUS and session signals at PHY init; the graph link
+ * lets the PHY find this controller. No USB role switch is registered, so the
+ * forced role stays (patch 0004). USB 2.0 only, as on the T1100.
+ */
+&ssusb {
+	status = "okay";
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	mediatek,u3p-dis-msk = <1>;
+	vusb33-supply = <&mt6358_vusb_reg>;
+
+	port {
+		ssusb_phy_ep: endpoint {
+			remote-endpoint = <&u2port0_ep>;
+		};
+	};
+};
+
+&u2port0 {
+	mediatek,software-role-switch;
+
+	port {
+		u2port0_ep: endpoint {
+			remote-endpoint = <&ssusb_phy_ep>;
+		};
+	};
+};
+
+&pio {
+	mmc0_pins_default: mmc0-pins-default {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO123__FUNC_MSDC0_DAT0>,
+				 <PINMUX_GPIO128__FUNC_MSDC0_DAT1>,
+				 <PINMUX_GPIO125__FUNC_MSDC0_DAT2>,
+				 <PINMUX_GPIO132__FUNC_MSDC0_DAT3>,
+				 <PINMUX_GPIO126__FUNC_MSDC0_DAT4>,
+				 <PINMUX_GPIO129__FUNC_MSDC0_DAT5>,
+				 <PINMUX_GPIO127__FUNC_MSDC0_DAT6>,
+				 <PINMUX_GPIO130__FUNC_MSDC0_DAT7>,
+				 <PINMUX_GPIO122__FUNC_MSDC0_CMD>;
+			input-enable;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-up-adv = <01>;
+		};
+
+		pins-clk {
+			pinmux = <PINMUX_GPIO124__FUNC_MSDC0_CLK>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <10>;
+		};
+
+		pins-rst {
+			pinmux = <PINMUX_GPIO133__FUNC_MSDC0_RSTB>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <01>;
+		};
+	};
+
+	mmc0_pins_uhs: mmc0-pins-uhs {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO123__FUNC_MSDC0_DAT0>,
+				 <PINMUX_GPIO128__FUNC_MSDC0_DAT1>,
+				 <PINMUX_GPIO125__FUNC_MSDC0_DAT2>,
+				 <PINMUX_GPIO132__FUNC_MSDC0_DAT3>,
+				 <PINMUX_GPIO126__FUNC_MSDC0_DAT4>,
+				 <PINMUX_GPIO129__FUNC_MSDC0_DAT5>,
+				 <PINMUX_GPIO127__FUNC_MSDC0_DAT6>,
+				 <PINMUX_GPIO130__FUNC_MSDC0_DAT7>,
+				 <PINMUX_GPIO122__FUNC_MSDC0_CMD>;
+			input-enable;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-up-adv = <01>;
+		};
+
+		pins-clk {
+			pinmux = <PINMUX_GPIO124__FUNC_MSDC0_CLK>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <10>;
+		};
+
+		pins-ds {
+			pinmux = <PINMUX_GPIO131__FUNC_MSDC0_DSL>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <10>;
+		};
+
+		pins-rst {
+			pinmux = <PINMUX_GPIO133__FUNC_MSDC0_RSTB>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <01>;
+		};
+	};
+};

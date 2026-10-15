@@ -19,6 +19,13 @@ nix-build support/experimental-devices/unihertz-titan -A usbProbe.ramdisk --no-o
 nix-build support/experimental-devices/unihertz-titan -A usbProbe.vmTests --no-out-link
 ----
 
+`usbProbe.modernRamdisk` is the same probe built for the native route's
+modern kernel (`-DTITAN_RESCUE_MODERN_KERNEL`): it expects mainline's USB
+controller identity and no RPMB block device, allows 30 seconds for storage
+discovery and waits up to 30 seconds for the controller, which mainline probes
+asynchronously; it is otherwise identical. See
+link:../native-boot-trial.adoc[the first native-route boot trial].
+
 == Behavior
 
 The ramdisk holds only one static program, the rescue PID 1 built with the probe

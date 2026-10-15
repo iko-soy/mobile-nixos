@@ -1,0 +1,171 @@
+= First native-route boot trial
+
+Status on 2026-10-15: proposal only. Nothing in it has run on the phone, and
+it authorizes no phone action. Running it needs the owner's explicit approval
+of this procedure, and that approval covers one run.
+
+This is N1's first hardware step on the native route (link:native-n0.adoc[N0
+record]): a modern kernel with a Titan device tree, started from the recovery
+partition with the link:usb-probe/README.adoc[USB probe] built for modern
+device naming, then the original recovery restored. Ubuntu Touch's boot and
+`dtbo` partitions are never written.
+
+== Questions
+
+. Does the bootloader accept the modern image, with the Titan tree and the
+  minimal overlay in the recovery-DTBO section, and start it?
+. Does the probe run on Linux 7.3-rc3: find the eMMC and guard it, bind USB in
+  peripheral mode with the device role forced at the PHY, and report kernel
+  release `7.3.0-rc3`?
+. Does the probe's deadline restart work? The modern kernel restarts through
+  PSCI (the ARM trusted firmware), with the mainline watchdog driver as the
+  fallback, and sets no vendor bootloader-mode marker, so the phone is expected
+  to boot Ubuntu Touch, not fastboot.
+. Does the restore work as before, from fastboot entered from Ubuntu Touch?
+
+== Basis
+
+* *Kernel.* Linux `v7.3-rc3` with the two postmarketOS MT6771 patches, the
+  vendored T-PHY software role-switch patch and a local follow-up (0004) that
+  keeps the forced role when no USB role switch exists, built by
+  `native/kernel.nix` with GCC (the donor builds with clang) and the
+  postmarketOS configuration, with debug info and BTF off: `Image.gz` 15585590
+  bytes, SHA-256 `461372e7dd4f98f1924ae9ecae0381731d75cd0cf92f5b6f3b30eddce59986d1`.
+* *Device tree.* `native/dts/mt6771-unihertz-titan.dts`: CPUs without idle or
+  frequency scaling, 6 GiB at `0x40000000` and an empty `/reserved-memory` for
+  the bootloader to fill, the MT6358 PMIC on GPIO 182 with the eMMC supply
+  pinned at its stock 3.0 V and the PMIC keys node disabled (mainline's
+  long-press register layout disagrees with the vendor kernel's, so the driver
+  would rewrite persistent PMIC state), the eMMC at 52 MHz, USB peripheral-only with the device
+  role forced at the PHY (no reference tree uses this property yet), the IOMMU
+  off, and the SCP and video codecs removed as in the T1100 tree. Its
+  `/chosen/bootargs` and the header command line keep unused clocks, power
+  domains and regulators on.
+* *Overlay.* `native/dts/mt6771-unihertz-titan-minimal-dtbo.dts`: the Titan's
+  stock `gpio_init_default` table for all 192 pins, copied from its stock
+  overlay, and the SCP node the bootloader updates, as in the GS4 overlay.
+  Both trees are wrapped by `native/dt-table.py`; on 2026-10-15 it reproduced
+  the Titan's stock DTB and overlay tables byte for byte from their FDTs
+  (checked against the private copies; the repository tests are synthetic).
+* *Probe.* The second-version probe built with `-DTITAN_RESCUE_MODERN_KERNEL`:
+  mainline's USB controller identity (`11201000.usb` on the `soc` bus, driver
+  `mtu3`, checked against the pinned source), no RPMB block device, 30 seconds
+  for storage discovery and a 30-second wait for the controller. Its logic is
+  otherwise unchanged; the original probe and the control ramdisk are still
+  byte-identical. Ramdisk 65731 bytes, SHA-256
+  `d4c9c68e14fd83b20ad968e9d6a63bfc10093c1eb0fc3359f19e62090e9027af`.
+* *Image.* Assembled in Nix by the pinned `mkbootimg` with the reviewed header
+  fields and the command line `bootopt=64S3,32N2,64N2 rdinit=/init panic=5
+  clk_ignore_unused pd_ignore_unused regulator_ignore_unused`: 15712256 bytes,
+  SHA-256 `5945dad1ae4041224136a184e49f07abffdef14c63d3797cf43cb9191985da88`;
+  padded to 33554432 bytes,
+  `35a45a98f06d1a5fca462a6f2540e370189a26346ec727b892e9776ca2ba63b3`
+  (`tools/flash-recovery.py --profile native-probe`). Its geometry matches the
+  images this bootloader has accepted.
+
+== Preconditions
+
+As in the link:repo-kernel-trial.adoc[repository-kernel trial]: the owner
+present, a direct cable, battery at least 60% (the worst case below waits for
+it to run down), no update pending, no recovery command file, both private
+copies of the original recovery (`4dd1c1f7...`) verified, and a normal-mode
+control-region copy right before the trial with `para` matching the latest
+copies. From step 5 until step 13 passes: no system update, factory reset,
+`reboot recovery` or Volume Up start other than step 9 and the rows below.
+
+== Procedure
+
+*Part 1: write the image.* Steps 1 to 7 of the repository-kernel trial, with
+`--profile native-probe` and the image
+`native-probe-image-v3/UNTESTED-UNSIGNED-native-probe.img`; step 7 must read
+recovery back as `35a45a98...`, with boot and dtbo unchanged.
+
+*Part 2: run the probe.*
+
+[start=8]
+. *Listen:* start `tools/read-probe-report.py`, and a watcher script (not
+  part of the repository, as in the earlier trials) that polls `adb -d
+  get-state` and `fastboot devices` and records which appears next, for up to
+  15 minutes.
+. *Start, owner-run:* keep the cable connected, power the phone off from
+  Ubuntu Touch, hold Volume Up and press Power, and release both once the
+  unlocked-state warning appears.
+. *Expected:* the screen may keep the bootloader's last picture or go dark.
+  Within about 30 seconds the listener records at least five lines reporting
+  `kernel=7.3.0-rc3`. About 150 seconds after the probe starts, the phone
+  restarts and boots Ubuntu Touch.
+
+*Part 3: restore.* From Ubuntu Touch, `sudo /sbin/reboot bootloader`
+(owner-run); then, as in the earlier trials, write the preserved original
+with the `original-recovery` profile, return, and read recovery back as
+`4dd1c1f7...`, with boot and dtbo unchanged.
+
+*Part 4: compare.* A normal-mode control-region copy after Part 3, compared
+with the one from step 2, to see whether this first mainline run changed any
+of those regions (`expdb` changes on every boot).
+
+== Stop conditions
+
+The repository-kernel trial's stop conditions apply, including its boot-reason
+rule for a missed key entry and its worst case. These rows replace or add to
+them:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The probe reports, then Ubuntu Touch starts
+|The expected outcome. Go to Part 3.
+|The probe reports, then fastboot appears
+|Unexpected but harmless: run Part 3 there.
+|Ubuntu Touch starts without any probe lines
+|Read the boot reason from `/proc/cmdline`. Only `PowerKey` allows one retry
+of step 9. Any other reason may mean the bootloader refused the image or the
+kernel crashed: record it, then Part 3 without retrying. This kernel keeps no
+pstore record, so there is no log to recover.
+|A MediaTek boot ROM or preloader USB device (`0e8d:0003` or `0e8d:2000`)
+stays present
+|The phone is in the SoC's download mode. Do not interact with it or run any
+flashing tool. Hold Power about ten seconds; if it persists, stop and report.
+|The screen shows a bootloader error or a crash-dump screen
+|Photograph or note it. Wait six minutes; if nothing changes, use the physical
+fallback below.
+|No USB device appears and the phone neither restarts nor changes within six
+minutes of step 9
+|Hold Power about ten seconds, but expect nothing: this kernel does not arm
+the PMIC long-press reset, so it works only if the bootloader left it armed,
+which is unverified. Then unplug, let the battery run down, charge, start
+Ubuntu Touch normally and go to Part 3.
+|===
+
+== Residual risks
+
+* The modern kernel has never run on this phone. Mainline has no MT6771
+  support of its own; the donor has booted only on other MT6771 boards, and
+  with clang rather than GCC. An early hang leaves no feedback channel, since
+  the display is not driven, and no way out but the battery running down, with
+  the backlight possibly on.
+* The bootloader may apply the `dtbo` partition's stock overlay instead of the
+  recovery-DTBO section on a recovery start. The stock overlay cannot apply to
+  the modern tree, and the bootloader may then refuse to start. The partition
+  is not changed.
+* The MT6358 regulator driver binds. Unused regulators stay on and the eMMC
+  supply is pinned at its stock 3.0 V, but other mainline constraints may move
+  a voltage the bootloader set, as they do on the GS4 and T1100. At restart the
+  eMMC driver switches its supply off, as a normal shutdown does.
+* The eMMC driver is different code from the vendor's; the probe reads only
+  the partition tables through it, guards every block device read-only and
+  writes nothing.
+* The mainline restart has not been seen on this phone, and how the
+  bootloader treats it is unknown.
+* No charger driver runs; whether the MT6370 keeps charging with the
+  bootloader's settings is unknown.
+* The device role is forced through a PHY property no other board uses, with a
+  local follow-up patch; if it misbehaves, no USB device appears.
+
+== What this can and cannot show
+
+Success shows that a modern Linux kernel boots on the Titan from a generated
+image with a Titan device tree, with the eMMC enumerated and USB device mode
+working: the first native-route boot. It does not show display, input,
+charging, audio, radios, a NixOS userspace or anything about replacing the
+boot partition.

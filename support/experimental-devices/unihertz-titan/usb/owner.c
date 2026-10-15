@@ -33,6 +33,12 @@
 #define UDC_NAME "dummy_udc.0"
 #define UDC_DEVICE "/sys/devices/platform/dummy_udc.0"
 #define UDC_DRIVER "/sys/bus/platform/drivers/dummy_udc"
+#elif defined(TITAN_RESCUE_MODERN_KERNEL)
+/* Mainline mtu3 (native route): the UDC takes its controller's device name,
+ * and the controller sits on the soc bus (native-n0.adoc). */
+#define UDC_NAME "11201000.usb"
+#define UDC_DEVICE "/sys/devices/platform/soc/11201000.usb"
+#define UDC_DRIVER "/sys/bus/platform/drivers/mtu3"
 #else
 #define UDC_NAME "musb-hdrc"
 #define UDC_DEVICE "/sys/devices/platform/11201000.usb3"
@@ -269,7 +275,18 @@ int titan_usb_prepare(struct titan_usb *owner, const char **reason)
     struct timespec deadline;
     if (getpid() != 1 || owner == NULL || owner->tty_fd != -1 || owner->directory || owner->mounted || owner->gadget)
         return fail(reason, "usb-owner-state-invalid");
+#ifdef TITAN_RESCUE_MODERN_KERNEL
+    if (deadline_set(&deadline, 30) != 0) return fail(reason, "usb-baseline-or-udc-unavailable");
+    /* Mainline probes the controller asynchronously: wait for it within the
+     * same 30-second bound before the baseline check. */
+    while (!udc_identity() && remaining(&deadline) >= 0) {
+        struct timespec pause = { .tv_sec = 0, .tv_nsec = 100000000 };
+        (void)nanosleep(&pause, NULL);
+    }
+    if (titan_mount_inventory(TITAN_MOUNTS_BASELINE_6, reason) != 0 ||
+#else
     if (deadline_set(&deadline, 30) != 0 || titan_mount_inventory(TITAN_MOUNTS_BASELINE_6, reason) != 0 ||
+#endif
         !udc_identity() || !text_equals(UDC_FUNCTION, "") || !absent("/sys/class/tty/ttyGS0") || !absent(CONFIG_ROOT))
         return fail(reason, "usb-baseline-or-udc-unavailable");
     if (mkdir(CONFIG_ROOT, 0700) != 0) return fail(reason, "usb-config-directory-failed");

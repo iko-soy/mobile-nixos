@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
-This host helper writes only the `recovery` partition, and only one of four
+This host helper writes only the `recovery` partition, and only one of five
 pinned full-partition images: the USB probe envelope, the same probe with the
-repository-built kernel, or the offline control-region acquisition envelope,
-each padded with zeros to the partition size, or the preserved original
-recovery image that restores it. It
+repository-built kernel, the native route's first modern-kernel image, or the
+offline control-region acquisition envelope, each padded with zeros to the
+partition size, or the preserved original recovery image that restores it. It
 first sends fixed read-only identity queries, including the recovery
 partition's size and type, from a verified read-only private copy that it
 measures again afterwards. It never writes another partition and never issues
 erase, boot, oem, flashing, set_active or any other command. Running it changes
 the phone's storage and needs the owner's explicit authorization of the
-procedure in recovery-route-trial.adoc, control-acquisition-trial.adoc or
-repo-kernel-trial.adoc.
+procedure in recovery-route-trial.adoc, control-acquisition-trial.adoc,
+repo-kernel-trial.adoc or native-boot-trial.adoc.
 """
 
 import argparse
@@ -50,6 +50,14 @@ PROFILES = {
         "source_bytes": 9764864,
         "source_sha256": "35fb8d6427b3b32809b48789235158fda460b5d6e6ecbf4ed703ed0f3694050f",
         "sha256": "e59463888dae6b7db6c64bbd2c84965d2ffce2a76a5b51a6cb5f0c426a5fc251",
+    },
+    # The native route's first modern-kernel image (native-boot-trial.adoc):
+    # Linux 7.3-rc3, the Titan board tree and overlay and the modern probe,
+    # assembled in Nix by the pinned mkbootimg (nativeProbeImage).
+    "native-probe": {
+        "source_bytes": 15712256,
+        "source_sha256": "5945dad1ae4041224136a184e49f07abffdef14c63d3797cf43cb9191985da88",
+        "sha256": "35a45a98f06d1a5fca462a6f2540e370189a26346ec727b892e9776ca2ba63b3",
     },
     # The offline control-region acquisition envelope (control/README.adoc),
     # which restarts into the bootloader after the transfer or at its deadline,

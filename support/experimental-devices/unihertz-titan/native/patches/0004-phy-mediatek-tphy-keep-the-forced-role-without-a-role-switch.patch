@@ -1,0 +1,58 @@
+Subject: [PATCH] phy: mediatek: tphy: keep the forced role without a role switch
+
+Follow-up to the software role-switch patch (0003), for boards that force
+device mode without registering a USB role switch (native-n0.adoc):
+initialise the work only once and only after the graph lookup succeeds,
+schedule and cancel it only when it was initialised, and return after a
+retry instead of applying the role of a missing switch. Without a switch
+the PHY now keeps the role forced at init.
+---
+--- a/drivers/phy/mediatek/phy-mtk-tphy.c
++++ b/drivers/phy/mediatek/phy-mtk-tphy.c
+@@ -349,6 +349,7 @@
+ 	bool bc12_en;
+ 	bool type_force_mode;
+ 	bool software_role_switch;
++	bool dr_work_ready;
+ };
+ 
+ struct mtk_tphy {
+@@ -877,6 +878,8 @@
+ 
+ 		instance->sw_get_retries += 1;
+ 		schedule_delayed_work(&instance->dr_work, msecs_to_jiffies(500));
++		/* Keep the role forced at init until a role switch exists. */
++		return;
+ 	}
+ 
+ 	role = usb_role_switch_get_role(instance->role_switch);
+@@ -931,7 +934,10 @@
+ 	else
+ 		u2_phy_instance_role_set(instance, USB_ROLE_DEVICE);
+ 
+-	INIT_DELAYED_WORK(&instance->dr_work, u2_phy_role_switch_work);
++	if (!instance->dr_work_ready) {
++		INIT_DELAYED_WORK(&instance->dr_work, u2_phy_role_switch_work);
++		instance->dr_work_ready = true;
++	}
+ 
+ 	return 0;
+ }
+@@ -1016,7 +1022,7 @@
+ 			| P2C_FORCE_SESSEND);
+ 		mtk_phy_set_bits(com + U3P_U2PHYDTM1, P2C_RG_IDPULLUP | P2C_RG_BVALID);
+ 
+-		if (!instance->role_switch) {
++		if (instance->dr_work_ready && !instance->role_switch) {
+ 			schedule_delayed_work(&instance->dr_work, msecs_to_jiffies(100));
+ 		}
+ 	}
+@@ -1044,7 +1050,7 @@
+ 		mtk_phy_clear_bits(com + U3D_U2PHYDCR0, P2C_RG_SIF_U2PLL_FORCE_ON);
+ 	}
+ 
+-	if (instance->role_switch) {
++	if (instance->dr_work_ready) {
+ 		cancel_delayed_work_sync(&instance->dr_work);
+ 	}
+ 

@@ -10,8 +10,10 @@ let
     src = directory;
     filter = path: type: type == "regular" && lib.hasSuffix ".h" (baseNameOf path);
   };
-  mkInit = staticPkgs: vmTest: staticPkgs.stdenv.mkDerivation {
-    pname = "titan-usb-probe-init${lib.optionalString vmTest "-VM-TEST-ONLY"}";
+  # modern: the native route's kernel names its USB controller and storage
+  # differently (native-n0.adoc); the probe logic is unchanged.
+  mkInit = staticPkgs: vmTest: modern: staticPkgs.stdenv.mkDerivation {
+    pname = "titan-usb-probe-init${lib.optionalString vmTest "-VM-TEST-ONLY"}${lib.optionalString modern "-modern"}";
     version = "1";
     src = ./usb-probe/probe.c;
     dontUnpack = true;
@@ -21,6 +23,7 @@ let
       runHook preBuild
       $CC -std=c11 -O2 -Wall -Wextra -Werror -static \
         -DTITAN_USB_PROBE_PROFILE -DTITAN_USB_MOUNT_PROFILE \
+        ${lib.optionalString modern "-DTITAN_RESCUE_MODERN_KERNEL -DTITAN_RESCUE_DISCOVERY_SECONDS=30"} \
         ${lib.optionalString vmTest "-DTITAN_USB_PROBE_VM_TEST -DTITAN_USB_PIPELINE_VM_TEST -DTITAN_RESCUE_VM_TEST -DTITAN_RESCUE_DISCOVERY_SECONDS=5"} \
         -I ${headers ./rescue} -I ${headers ./usb} \
         ${./rescue/init.c} ${./usb/owner.c} ${./rescue/mount-policy.c} \
@@ -33,9 +36,10 @@ let
     '';
     meta = { platforms = lib.platforms.linux; hydraPlatforms = []; };
   };
-  init = mkInit target false;
-  vmInit = mkInit pkgs.pkgsStatic true;
-  ramdisk = pkgs.runCommand "titan-usb-probe-initramfs-aarch64" {
+  init = mkInit target false false;
+  modernInit = mkInit target false true;
+  vmInit = mkInit pkgs.pkgsStatic true false;
+  mkRamdisk = { name, init, extraCheck ? "", readme }: pkgs.runCommand name {
     nativeBuildInputs = [ pkgs.cpio pkgs.gzip pkgs.findutils pkgs.binutils ];
     meta = { platforms = [ "x86_64-linux" ]; hydraPlatforms = []; };
   } ''
@@ -59,6 +63,7 @@ let
       echo "VM fixture strings leaked into the probe init" >&2
       exit 1
     fi
+    ${extraCheck}
     find root -exec touch -h -d @1 -- {} +
     (cd root; find . -print0 | LC_ALL=C sort -z \
       | cpio --null -o -H newc --reproducible --owner=0:0 \
@@ -67,14 +72,38 @@ let
     (cd "$out"; sha256sum initramfs.cpio.gz) > "$out/SHA256SUMS"
     cp -r root "$out/root"
     cat > "$out/README" <<'EOF'
-    Build-only AArch64 USB probe experiment, not an Android boot image.
-    Rescue PID 1 guards every block device read-only, binds the fixed ACM
-    gadget, writes a bounded status line every two seconds and reboots at a
-    fixed deadline. No storage reads, input, acquisition or shell.
-    USB descriptors are for private in-house experiments.
-    No Titan boot, USB operation or return has been tested.
+    ${readme}
     EOF
   '';
+  ramdisk = mkRamdisk {
+    name = "titan-usb-probe-initramfs-aarch64";
+    inherit init;
+    readme = ''
+      Build-only AArch64 USB probe experiment, not an Android boot image.
+      Rescue PID 1 guards every block device read-only, binds the fixed ACM
+      gadget, writes a bounded status line every two seconds and reboots at a
+      fixed deadline. No storage reads, input, acquisition or shell.
+      USB descriptors are for private in-house experiments.
+      No Titan boot, USB operation or return has been tested.'';
+  };
+  # The same probe for the native route's modern kernel: mainline mtu3 names
+  # and no RPMB block device. The vendor names must be absent.
+  modernRamdisk = mkRamdisk {
+    name = "titan-usb-probe-modern-initramfs-aarch64";
+    init = modernInit;
+    extraCheck = ''
+      strings -n 3 root/init > "$out/init.strings3.txt"
+      if grep -Eq 'musb-hdrc|mtu3_phone|11201000\.usb3|mmcblk0rpmb' "$out/init.strings3.txt" \
+          || ! grep -qx '11201000.usb' "$out/init.strings3.txt"; then
+        echo "The modern probe still carries vendor-kernel names" >&2
+        exit 1
+      fi
+    '';
+    readme = ''
+      Build-only AArch64 USB probe for the native route's modern kernel.
+      Identical logic to the USB probe, with the mainline controller name
+      and without the RPMB block device. No Titan boot has been tested.'';
+  };
   vmRamdisk = import ./vm-initramfs.nix {
     inherit pkgs;
     name = "titan-usb-probe-VM-TEST-ONLY-initramfs";
@@ -107,5 +136,5 @@ let
     PY
   '';
 in {
-  inherit init ramdisk vmRamdisk vmTests toolTests;
+  inherit init modernInit ramdisk modernRamdisk vmRamdisk vmTests toolTests;
 }

@@ -40,8 +40,10 @@ Reference only, not build inputs: the
 `linux-mediatek/linux` branch `adomerle/mt6771-next` at
 `96fe48bed8ae4ac1d0d1e3a4b757113c2604a490` (V). Its FPlus T1100 tablet tree
 (MT8788, with the same MT6358 PMIC and MT6370 sub-PMIC as the Titan) runs USB
-in peripheral-only mode, powered from the MT6358 `vusb33` regulator, and the
-branch carries a T-PHY software role-switch fix described as needed on MT6771.
+in peripheral-only mode through its MT6370 USB-C controller, powered from the
+MT6358 `vusb33` regulator. The branch also adds a T-PHY software role switch
+for MT6771, enabled by a `mediatek,software-role-switch` property that no
+reference tree uses yet (V).
 The older Cosmo Communicator tree (`affenull2345/linux` at `212f7f9c`) has the
 same `mt6771.dtsi` and a board tree with explicit reserved regions (V).
 
@@ -90,11 +92,17 @@ memory (V) |Yes, with `/reserved-memory` present
 |eMMC |`mtk-sd` with the MT8183 compatible; works on the GS4 (V, wiki) |Yes,
 guarded read-only
 |USB device mode |Not working on the GS4 (V, wiki); peripheral-only on the T1100
-with the T-PHY fix and `vusb33` (V, source) |Yes: the only feedback channel
+through its USB-C controller (V, source); the T-PHY software role switch can
+force the device role without one, untested on any board (I) |Yes: the only
+feedback channel
 |MT6358 PMIC and regulators |Mainline (V); needed for `vusb33` |Yes, with
 unused regulators, clocks and power domains left on (I)
 |Watchdog and restart |MT8183 watchdog driver (V) |Yes; a plain restart, so the
 phone is expected to boot Ubuntu Touch rather than fastboot (I)
+|PMIC keys and long-press reset |Mainline's MT6358 entry uses bits 5, 6 and
+8-9 of `TOP_RST_MISC`; the Titan's vendor kernel defines bits 8 and 9 as the
+reset enables, 12-13 as the duration and 5 as the watchdog-reset debounce (V,
+sources) |No: the driver would rewrite persistent PMIC state
 |Display |GS4 uses simple-framebuffer only (V); the Titan's panel is in command
 mode, which refreshes only when frames are pushed, so a simple framebuffer is
 not expected to show anything (I) |No
@@ -142,9 +150,9 @@ link:repo-kernel-trial.adoc[repository-kernel trial] already plans for.
 
 == Next steps (N1, build-only first)
 
-. A pinned Nix build of the donor kernel with the T-PHY fix.
-. A Titan device tree and overlay, packaged as DT tables, with the stock GPIO
-  table.
-. A probe profile for modern device naming, with its VM checks.
-. An envelope profile for a non-installed kernel and DTB with the Titan
-  overlay, a flash profile, an independent review and a trial proposal.
+Built on 2026-10-15 (`native/`): the pinned donor kernel with the T-PHY fix
+(`nativeKernel`), the Titan device tree and minimal overlay, a probe profile for
+modern device naming (`usbProbe.modernRamdisk`) and the assembled image
+(`nativeProbeImage`), with a flash profile. The
+link:native-boot-trial.adoc[first native-route boot trial] proposes running
+it.

@@ -55,6 +55,15 @@ int titan_rescue_vm_test(void);
 #define TITAN_RESCUE_PARTITION_PREFIX "vda"
 #define TITAN_RESCUE_PARTITIONS 0u
 static const char *const titan_rescue_aux_devices[] = { NULL };
+#elif defined(TITAN_RESCUE_MODERN_KERNEL)
+/* The same eMMC under a modern kernel (native route): its RPMB area is a
+ * character device there, so only the two boot areas are block devices. */
+#define TITAN_RESCUE_DISK "mmcblk0"
+#define TITAN_RESCUE_PARTITION_PREFIX "mmcblk0p"
+#define TITAN_RESCUE_PARTITIONS 38u
+static const char *const titan_rescue_aux_devices[] = {
+    "mmcblk0boot0", "mmcblk0boot1", NULL
+};
 #else
 /* The measured original-Titan eMMC user area, its 38 GPT partitions and the
  * separately registered boot areas and RPMB node (block devices on 4.14). */

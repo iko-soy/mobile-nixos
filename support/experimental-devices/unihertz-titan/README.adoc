@@ -60,6 +60,10 @@ hardware works under NixOS.
 * The link:native-n0.adoc[native route's N0 record], after the owner chose the
   native route on 2026-10-15: the pinned postmarketOS MT6771 starting point,
   the Titan's hardware facts, a gap table and a bounded first-boot scope.
+* A build-only first native-route image and its
+  link:native-boot-trial.adoc[trial proposal]: Linux 7.3-rc3 with a Titan
+  device tree and bootloader overlay (`native/`) and the probe built for modern
+  device naming, started from the recovery partition. Not run.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
