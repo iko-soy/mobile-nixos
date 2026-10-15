@@ -174,11 +174,17 @@ not running in the bootloader, so the behavior there is unknown. Holding Power
 until the phone restarts is the only remaining fallback, and it may land in
 fastboot again. There is no verified emergency restore for macOS.
 
-*Manual fastboot entry (owner-reported, not yet observed).* On 2026-10-15 the
-owner reported that holding a volume button while the phone starts from the
-powered-off state enters fastboot. Together with a way to power the phone off,
-this would give a path into fastboot that does not depend on the running
-system; it has not been exercised in a trial.
+*Key entry (owner-observed, 2026-10-15).* Holding Volume Up while the phone
+starts from the powered-off state opens the installed recovery, which showed
+the stock Android "No command" screen; the owner returned with its normal
+reboot option, and the next boot reported `androidboot.bootreason=PowerKey`.
+The owner found no key combination that enters fastboot directly. The recovery
+is the stock Unihertz Android 10 recovery (`QP1A.190711.020`, built
+2022-11-21, `user/release-keys`); holding Power and tapping Volume Up shows its
+menu. Its "Reboot to bootloader" entry reached bootloader fastboot
+(`is-userspace: no`) on 2026-10-15, and the observation helper's `fastboot
+reboot` returned to Ubuntu Touch. This gives a manual path into fastboot that
+does not depend on Ubuntu Touch, as long as that recovery stays installed.
 
 == Residual risks
 
