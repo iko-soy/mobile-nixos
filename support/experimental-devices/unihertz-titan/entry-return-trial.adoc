@@ -20,8 +20,9 @@ observation completed. Each of the four questions was answered once:
 . *Variables.* 14 of 15 queries answered. `is-userspace` was `no`, so this is
   the bootloader's fastboot, not `fastbootd`. `unlocked` was `yes` and `secure`
   was `no`. `slot-count` was `0` and `current-slot` is unsupported, so the phone
-  has no A/B slots. `boot` and `recovery` reported `0x2000000` bytes and `dtbo`
-  `0x800000`, all `raw data`, matching the GPT. `max-download-size` was
+  has no A/B slots. `boot` and `recovery` reported sizes of `2000000` and `dtbo`
+  `800000`, hexadecimal without a prefix (32 and 8 MiB), all `raw data`,
+  matching the GPT. `max-download-size` was
   `0x8000000` (128 MiB). Product `g61v71c2k_dfl_tee`, bootloader
   `g61v71c2k_dfl_tee-c94b80d-20210414101510-20230204181955`, baseband
   `MOLY.LR12A.R3.MP.V158.3.P1`.

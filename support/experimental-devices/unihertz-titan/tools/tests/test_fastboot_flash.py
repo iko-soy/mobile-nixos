@@ -29,7 +29,7 @@ SIZE = 8192
 PROBE = b"ANDROID!" + bytes(range(256)) * 15 + b"\0" * 248
 ORIGINAL = bytes(reversed(range(256))) * (SIZE // 256)
 VARIABLES = {"product": "g61v71c2k_dfl_tee", "is-userspace": "no", "unlocked": "yes",
-             "max-download-size": "0x8000000", "partition-size:recovery": hex(SIZE),
+             "max-download-size": "0x8000000", "partition-size:recovery": format(SIZE, "x"),
              "partition-type:recovery": "raw data"}
 
 FAKE = r'''
@@ -116,6 +116,13 @@ class RecoveryFlashTests(unittest.TestCase):
     def record(self, name="flash"):
         return json.loads((self.root / name / "trial.json").read_text())
 
+    def test_identity_accepts_the_values_this_bootloader_reported(self):
+        # Recorded on 2026-10-15: bare-hex partition size, prefixed download limit.
+        real = load("titan_fastboot_flash_identity", HERE.parent / "flash-recovery.py")
+        real.check_identity({"product": "g61v71c2k_dfl_tee", "is-userspace": "no", "unlocked": "yes",
+                             "max-download-size": "0x8000000", "partition-size:recovery": "2000000",
+                             "partition-type:recovery": "raw data"})
+
     def test_pinned_profiles_match_the_reviewed_images(self):
         real = load("titan_fastboot_flash_constants", HERE.parent / "flash-recovery.py")
         self.assertEqual(set(real.PROFILES), {"rescue-probe", "original-recovery"})
@@ -188,8 +195,11 @@ class RecoveryFlashTests(unittest.TestCase):
                  "userspace": ({"is-userspace": "yes"}, "'is-userspace'"),
                  "locked": ({"unlocked": "no"}, "'unlocked'"),
                  "type": ({"partition-type:recovery": "ext4"}, "'partition-type:recovery'"),
-                 "size": ({"partition-size:recovery": hex(SIZE * 2)}, "size differs"),
-                 "size-smaller": ({"partition-size:recovery": hex(SIZE // 2)}, "size differs"),
+                 "size": ({"partition-size:recovery": format(SIZE * 2, "x")}, "size differs"),
+                 "size-smaller": ({"partition-size:recovery": format(SIZE // 2, "x")}, "size differs"),
+                 # Sizes are hexadecimal: the decimal spelling is a different size.
+                 "size-decimal": ({"partition-size:recovery": str(SIZE)}, "size differs"),
+                 "size-prefixed": ({"partition-size:recovery": hex(SIZE)}, None),
                  "size-missing": ({"partition-size:recovery": None}, "'partition-size:recovery'"),
                  "download-small": ({"max-download-size": hex(SIZE - 1)}, "exceeds"),
                  "download-decimal": ({"max-download-size": str(SIZE - 1)}, "exceeds"),

@@ -130,10 +130,12 @@ def check_identity(variables):
     for name, value in EXPECTED.items():
         if variables.get(name) != value:
             raise TrialError(f"Bootloader variable {name!r} did not match the recorded value; nothing was sent.")
+    # This bootloader reports partition sizes in hexadecimal without a prefix
+    # (`2000000` for 32 MiB) and the download limit with one (`0x8000000`).
     sizes = {}
-    for name in ("max-download-size", "partition-size:" + PARTITION):
+    for name, base in (("max-download-size", 0), ("partition-size:" + PARTITION, 16)):
         try:
-            sizes[name] = int(variables.get(name) or "", 0)
+            sizes[name] = int(variables.get(name) or "", base)
         except ValueError as error:
             raise TrialError(f"Bootloader variable {name!r} was not reported; nothing was sent.") from error
     if sizes["partition-size:" + PARTITION] != PARTITION_BYTES:

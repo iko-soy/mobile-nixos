@@ -60,7 +60,8 @@ storage. The recovery partition is the smallest such change:
   partition and only those two pinned contents. It builds and verifies a
   read-only private copy, then requires exactly one fastboot device reporting
   the recorded `product`, `is-userspace: no`, `unlocked: yes`, a
-  `partition-size:recovery` of `0x2000000`, `partition-type:recovery` of
+  `partition-size:recovery` of `2000000` (hexadecimal without a prefix, as this
+  bootloader reports it), `partition-type:recovery` of
   `raw data` and a sufficient maximum download size. It rechecks the copy,
   sends one `fastboot flash recovery` and measures the copy again afterwards.
   It refuses every other partition, image and command. Its synthetic tests use
