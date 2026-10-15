@@ -1,0 +1,212 @@
+= Offline control-region acquisition trial
+
+Status on 2026-10-15: proposal only. Nothing in it has run on the phone, and
+it authorizes no phone action. Each part needs the owner's explicit approval
+of this procedure, and that approval covers one run.
+
+The trial reuses the link:recovery-route-trial.adoc[recovery-partition route]:
+write a pinned image to recovery with `fastboot flash`, start it with Volume
+Up, let it restart into bootloader fastboot, and restore the original recovery
+there. The image is the link:control/README.adoc[offline control-region
+acquisition initramfs]. It copies the sixteen regions other than `userdata` to
+the Mac while nothing else runs on the phone. That is the offline copy that
+link:consistent-preservation.adoc[the preservation requirements] place before
+any rollback write.
+
+== Questions
+
+. Does the control image start from recovery with Volume Up and bind its USB
+  gadget, as the probe did?
+. Does the transfer complete, with every region matching its first-pass hash
+  on the Mac, and at what rate?
+. Do both passes agree for every region, and are the four ext4 regions clean
+  while Ubuntu Touch is not running?
+. Does the image restart into fastboot by itself after the transfer, and does
+  the restore work as before?
+
+== Basis
+
+* *Image.* The installed boot kernel and DTB, the control ramdisk (3773960
+  bytes, `14a573ef...`), the probe's command line and the stock recovery's
+  recovery-DTBO section, in the recovery layout: 13475840 bytes, SHA-256
+  `41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65`,
+  byte-identical to the pinned `mkbootimg`. Padded with zeros to the
+  partition's 33554432 bytes it has SHA-256
+  `6729b1463f208f0ac73d3b950e3f8c3599f3343f99ce0addad4d5272ba421155`. It
+  differs from the stock recovery in the same ways as the probe image, which
+  the bootloader started.
+* *What runs.* The probe's PID 1 path, which ran on the phone: storage guard,
+  gadget bind and restart into the bootloader. Then two programs that have run
+  only in VMs: the fixed region producer and the TTR1 sender. The producer
+  reads the sixteen regions twice through exclusive read-only claims, with the
+  kernel's volatile read-only flag set on every block device as in the probe
+  trial. Nothing is written to the phone's storage and nothing is mounted from
+  it.
+* *Restart.* About five seconds after the Mac acknowledges the transfer,
+  within about 35 seconds of a failure on the phone's side, and at the latest
+  1800 seconds after PID 1 starts (a backstop follows ten seconds later). The
+  producer stops after 1700 seconds and the sender after 1740, so a run without
+  a listening Mac ends in about 29 minutes.
+* *Duration.* The USB rate is unmeasured. At 1 MB/s the 771719168 bytes take
+  about 13 minutes; below about 0.45 MB/s the run cannot finish and the phone
+  restarts.
+* *Mac side.* `tools/receive-control-regions.py` waits for the gadget's fixed
+  strings, receives with the unchanged TTR1 receiver, and splits and checks
+  the regions; see the link:control/README.adoc[image record]. It needs about
+  1.6 GB of free space in the private evidence directory.
+* *Flash helper.* `tools/flash-recovery.py` gained the `control-acquisition`
+  profile; its identity checks and its single `fastboot flash recovery` are
+  unchanged from the recovery-route trial, where both worked.
+
+== Preconditions
+
+* The recovery-route trial's preconditions: the owner present, a direct cable
+  to the Mac, no system-image update pending or in progress and no command
+  file in `/android/cache/recovery` or `/cache/recovery`, as Ubuntu Touch sees
+  them. Battery at least 80%, because the run may take up to 30 minutes and
+  charging in this environment is untested.
+* The two private copies of the original recovery image (`4dd1c1f7...`), the
+  second made for the recovery-route trial, both verified by hash before step
+  5.
+* A normal-mode control-region copy taken right before the trial, with `para`
+  matching the latest copies (it still holds `bootonce-bootloader`), as in the
+  recovery-route trial.
+* At least 2 GB free on the Mac volume holding the private evidence directory.
+* From step 5 until step 13 passes: no system update, factory reset,
+  `reboot recovery` or Volume Up start other than step 9 and the rows below
+  that name one.
+
+== Procedure
+
+*Part 1: write the control image.*
+
+. *Baseline, normal mode, read-only*, as in the recovery-route trial, plus the
+  update check above.
+. *Check, owner-run:* `tools/acquire-partitions.py --sudo` into a new private
+  directory, and the control-region copy. Recovery must be `4dd1c1f7...`, with
+  boot (`6829a8bc...`), dtbo (`5b4e9f20...`) and `para` unchanged; otherwise
+  stop.
+. *Entry, owner-run:* `adb -d shell`, then `sudo /sbin/reboot bootloader`.
+. *Recognition, read-only:* `tools/observe-fastboot.py observe`.
+. *Write:*
++
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/flash-recovery.py \
+  --profile control-acquisition \
+  --image /absolute/private/usb-control-envelope-v2-recovery/UNTESTED-UNSIGNED-rescue.img \
+  --output /absolute/private/new-recovery-flash
+----
+. *Return:* `tools/observe-fastboot.py return`; the owner unlocks the screen.
+. *Check, owner-run:* `acquire-partitions.py` again. Recovery must be
+  `6729b146...`, with boot and dtbo unchanged.
+
+*Part 2: acquire.*
+
+[start=8]
+. *Receive:* start
+  `tools/receive-control-regions.py --output /absolute/private/new-control-offline`.
+  It waits up to 600 seconds for the image's USB device.
+. *Start, owner-run:* keep the USB cable connected. Power the phone off from
+  Ubuntu Touch. Hold Volume Up and press Power; release both once the
+  unlocked-state warning appears.
+. *Expected:* within about 30 seconds the receiver finds the device and the
+  transfer begins. When it finishes, the receiver prints a summary of the
+  sixteen regions, and about five seconds later the phone restarts into
+  fastboot. Then run `observe-fastboot.py observe` with a 600-second wait to
+  confirm fastboot. The screen may stay dark throughout.
+
+*Part 3: restore.*
+
+[start=11]
+. *Write:* `flash-recovery.py --profile original-recovery --image
+  /absolute/private/installed/recovery.img --output /absolute/private/new-recovery-restore`.
+. *Return:* `observe-fastboot.py return`; the owner unlocks the screen.
+. *Check, owner-run:* `acquire-partitions.py` again. Recovery must be
+  `4dd1c1f7...`, with boot and dtbo unchanged.
+
+*Part 4: compare, Mac only.* Compare each offline region with the latest
+normal-mode copies and record which regions differ. This needs no phone.
+
+== Stop conditions
+
+The recovery-route trial's stop conditions apply, with its precedence rule:
+whenever the phone is in bootloader fastboot while recovery holds the control
+image or a partial image, run Part 3 there. Part 3 may be retried once. The
+changes for this image:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|Step 2 does not match
+|Stop before writing anything.
+|The flash helper refuses before sending
+|Nothing was written. Return with `observe-fastboot.py return`.
+|`fastboot flash` in step 5 fails, is refused, times out or crashes the bootloader
+|Return to Ubuntu Touch, or let the crash fallback return it, and read recovery
+first. If it is still `4dd1c1f7...`, stop: nothing was written. Otherwise go
+to Part 3.
+|Step 7 does not match
+|Go to Part 3.
+|Ubuntu Touch starts instead of the image in step 9
+|One retry of step 9 is allowed if the boot reason is not `lk_crash`. Then
+enter fastboot from Ubuntu Touch and go to Part 3.
+|The receiver finds no device within 600 seconds
+|Wait: without a listening Mac the image restarts into fastboot by itself
+about 29 minutes after it starts. Then run `observe-fastboot.py observe` and go
+to Part 3.
+|The transfer stops or the receiver reports an error
+|Keep the receiver's private output. If the phone's side failed, it restarts
+into fastboot within about 35 seconds. If only the Mac's side failed, the phone
+may wait for its time limits, about 29 minutes after it started; wait, or use
+the physical fallback below and continue from Ubuntu Touch. Then go to Part 3.
+Before Part 3, Part 2 may be repeated once if the owner approves the repeat
+then: from fastboot, `observe-fastboot.py return`, then steps 8 to 10 again.
+This overrides the precedence rule for that one repeat.
+|The summary shows a region that changed between passes or an ext4 region that
+is not clean
+|Not a failure: keep the copy and record it. Go to Part 3.
+|Neither fastboot nor Ubuntu Touch appears within 35 minutes of step 9
+|Physical fallback: hold Power about ten seconds to force a restart, without
+Volume Up, as in the recovery-route trial. From Ubuntu Touch, enter fastboot
+and go to Part 3.
+|The phone starts the image again instead of fastboot
+|It runs and restarts again; if it repeats, use the physical fallback without
+Volume Up.
+|Ubuntu Touch cannot be reached while the image is installed
+|Use the image's own route: start it with Volume Up and wait for its restart
+into fastboot, with or without the receiver; then run Part 3.
+|Step 13 does not match, or Part 3 fails twice
+|Stop in the recovery-route trial's end state: avoid Volume Up starts,
+`reboot recovery`, system updates and factory resets.
+|Any step would write another partition, erase, or use `fastboot boot`
+|Never do it; the helpers refuse.
+|===
+
+== Residual risks
+
+* The producer and the sender have run only in VMs. On the vendor kernel an
+  identity check, the exclusive claim or an ioctl may behave differently; the
+  producer then refuses before streaming and the phone restarts.
+* The phone's gadget enumerated on the Mac in the recovery-route trial, but no
+  data has crossed it yet. A long transfer may stall or reset the link; the
+  time limits end the run and the phone restarts.
+* The run is long. Battery use, heat and charging during up to 30 minutes in
+  this environment are untested.
+* A vendor kernel crash during the run would restart through `panic=5` or the
+  watchdog; so far such restarts have booted Ubuntu Touch, from which Part 3
+  proceeds.
+* The image's success path restarts from PID 1 instead of from the deadline
+  process; both use the same restart call, which reached fastboot in the
+  recovery-route trial.
+
+== What this can and cannot show
+
+Success gives a copy of the sixteen regions in which each region was read
+twice through exclusive read-only claims, with the kernel read-only flag set
+and no Ubuntu Touch, Android or modem software running, its identity checked
+before and after, its ext4 state recorded where it has one, and its transfer
+verified on the Mac before the acknowledgement. That meets the conditions of a
+consistent copy except retention, since the Mac holds the only copy. It does
+not rule out firmware or kernel writers outside the run, restore any region or
+boot NixOS. `userdata` is excluded by the owner's decision.

@@ -85,17 +85,15 @@ during the reads, not absence of writers before or after them.
 == Gaps in the current build-only tooling
 
 * The integrated link:usb-pipeline/README.adoc[USB acquisition profile] selects
-  only `userdata`, which is no longer to be preserved. No fixed raw-region
-  producer exists yet for the sixteen calibration and control regions in the
-  same offline environment; that is now the producer the offline boot needs.
-* No rescue image has been accepted or booted by the installed bootloader, and
-  the USB ACM path has not been recognized by the Mac. Entry to bootloader
-  fastboot and the return from it worked once in the
-  link:entry-return-trial.adoc[entry and return trial]; a rescue boot and its
-  return remain unverified.
-* The four mounted ext4 regions need a clean-state check like the userdata
-  guard; raw copies of them are small, so a sparse filesystem image is not
-  required.
+  only `userdata`, which is no longer to be preserved. A fixed producer for the
+  sixteen calibration and control regions now exists as the build-only
+  link:control/README.adoc[offline control-region acquisition image]. It reads
+  each region twice through exclusive read-only claims, checks identity before
+  and after, records the primary-superblock state of the four ext4 regions and
+  sends raw copies over TTR1. It has passed its VM checks and has not run on
+  the phone.
+* The second-version probe ran from the recovery partition on 2026-10-15 and
+  the Mac saw its USB device, but no data has crossed the gadget yet.
 
 == Ordering
 
@@ -116,5 +114,7 @@ This sequence keeps the dependencies one-directional:
   2026-10-15 a probe written to recovery ran on the phone, restarted into
   fastboot, and the original recovery was restored.
 . A reviewed offline acquisition boot that meets the conditions above for the
-  sixteen regions other than `userdata`, with a demonstrated return.
+  sixteen regions other than `userdata`, with a demonstrated return. Proposed
+  as the link:control-acquisition-trial.adoc[offline control-region acquisition
+  trial].
 . Only then any rollback write, separately authorized.

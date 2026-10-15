@@ -1,0 +1,215 @@
+= Offline control-region acquisition initramfs
+
+`usbControl.ramdisk` is a separate, build-only AArch64 initramfs for an offline
+copy of the sixteen GPT regions other than `userdata` that
+link:../consistent-preservation.adoc[the preservation requirements] still
+list. It starts from the recovery partition, as the
+link:../usb-probe/README.adoc[USB probe] did in the
+link:../recovery-route-trial.adoc[recovery-partition trial]. It streams the
+regions to the Mac over the probe's USB gadget and then restarts into
+bootloader fastboot by itself. It has not run on the Titan. Building it does
+not authorize writing or starting it; see
+link:../control-acquisition-trial.adoc[the trial proposal].
+
+[source,sh]
+----
+# Run on the x86_64 Linux builder, from the repository root.
+nix-build support/experimental-devices/unihertz-titan -A usbControl.ramdisk --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbControl.vmTests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbControl.toolTests --no-out-link
+----
+
+== Behavior
+
+The ramdisk holds three static programs: the rescue PID 1 built with the probe
+and control profiles, the fixed region producer `/bin/titan-control-produce`
+(`producer.c`) and the TTR1 sender `/bin/titan-rescue-send`, byte-identical to
+the reviewed sender in the USB acquisition ramdisk. There is no shell.
+
+Up to the gadget bind, PID 1 behaves as the second-version probe: a separate
+deadline process restarts the phone with the `bootloader` argument 1800 seconds
+after PID 1 started, by `CLOCK_BOOTTIME`, and PID 1's own backstop follows ten
+seconds later; PID 1 mounts only the virtual filesystems, sets and verifies the
+kernel read-only flag on every block device, waits for the complete measured
+eMMC set and binds the fixed ACM gadget with the same identity strings. It
+writes no status lines. Instead it starts the producer and the sender with
+fixed arguments and the environment `PATH=/bin LC_ALL=C`, keeping open only the
+descriptors each one is given:
+
+* the producer writes the region stream into a pipe and its eight-byte status
+  record into a second pipe;
+* the sender reads the stream and a relayed copy of the status record, and
+  sends both over the gadget TTY under the label `control-regions-raw`, with a
+  1 GiB cap.
+
+PID 1 relays the status record, reaps both programs and ticks its backstop
+every 10 ms. The run succeeds only if the producer exits 0 with status 0 and
+the sender exits 0, which it does only after the Mac's acknowledgement, which
+the Mac sends after its own count, hash, sync and readback checks. PID 1 then
+waits five seconds and restarts into the bootloader. If the sender fails, PID 1
+stops the producer at once; if the producer fails, the sender has 20 seconds to
+report the error to a listening Mac before PID 1 stops it. PID 1 reaps both
+within five seconds, or proceeds without them, then waits ten seconds and
+restarts the same way. The producer gives up after 1700 seconds and the sender
+after 1740, so the deadline process is the last resort.
+
+== Producer
+
+The producer reads exactly the regions in its compiled table, the measured
+original-Titan GPT entries (`verify-backup-catalog.py`), in this order:
+
+[cols="1,1,2,2,1",options="header"]
+|===
+|Label |Node |Start sector |Bytes |Kind
+|`boot_para` |`p1` |64 |1048576 |raw
+|`para` |`p3` |67648 |524288 |raw
+|`expdb` |`p4` |68672 |20971520 |raw
+|`frp` |`p5` |109632 |1048576 |raw
+|`nvcfg` |`p6` |111680 |33554432 |ext4
+|`nvdata` |`p7` |177216 |67108864 |ext4
+|`metadata` |`p8` |308288 |33554432 |raw
+|`protect1` |`p9` |373824 |8388608 |ext4
+|`protect2` |`p10` |390208 |9928704 |ext4
+|`seccfg` |`p11` |409600 |8388608 |raw
+|`sec1` |`p12` |425984 |2097152 |raw
+|`proinfo` |`p13` |430080 |3145728 |raw
+|`nvram` |`p25` |829440 |67108864 |raw
+|`cache` |`p35` |9142272 |452984832 |raw
+|`otp` |`p37` |244164544 |45088768 |raw
+|`flashinfo` |`p38` |244252608 |16777216 |raw
+|===
+
+The total is 771719168 bytes. No argument or peer input selects a region.
+The producer refuses to start unless its parent is PID 1, the sealed
+seven-mount set is in place and both descriptors it is given are pipes.
+
+Before reading, for each region it checks the sysfs partition number, start,
+size and read-only flag, the `PARTNAME` label, the parent disk `mmcblk0`, the
+device number and an empty holders list. It then opens `/dev/mmcblk0pN`
+read-only with `O_EXCL`, an exclusive claim that fails while the partition is
+mounted or claimed elsewhere, compares the node with the sysfs device number,
+and checks the size, the 512-byte sector size and the kernel read-only flag
+with the corresponding `GET` ioctls. It holds all sixteen claims until it
+finishes. Every read uses `O_DIRECT`, bypassing the page cache, so both passes
+and the superblock rereads come from the eMMC. For the four ext4 regions it
+reads the primary superblock and records one of `clean`, `unclean-state` (not
+cleanly unmounted, or errors recorded),
+`journal-recovery-pending`, `orphans-pending` or `not-ext4`. It never mounts,
+replays or repairs them.
+
+The first pass streams every region in table order while hashing it with
+SHA-256. A second pass rehashes the same claims. Then every identity check and
+ext4 state is repeated; any difference fails the run. Finally the producer
+appends a text manifest:
+
+[source,text]
+----
+TITAN-CONTROL-REGIONS v1 regions=16 bytes=771719168
+region <label> <number> <start> <sectors> <bytes> <first-pass sha256> <second-pass sha256> <raw|ext4> <state or ->
+...
+end
+----
+
+A region whose two passes differ, or an ext4 region that is not clean, does not
+fail the run: its bytes are still kept, and the manifest and the Mac report
+mark it as not consistent. The status record is `TPST` followed by a
+big-endian 32-bit code: 0 success, 2 wrong environment, 3 identity mismatch,
+4 read error, 5 output error, 6 identity or ext4 state changed during the run.
+
+== Mac side
+
+`tools/receive-control-regions.py --output <new private directory>` waits up
+to 600 seconds for exactly one USB device with the gadget's fixed strings,
+using the probe listener's matching; Ubuntu Touch's own gadget shares the
+USB ID. It runs the unchanged TTR1 receiver on that device's modem port with
+the fixed label and cap and an overall 1800-second limit, so the payload is
+counted, hashed, synced and read back before the acknowledgement. It then
+splits the payload into one private file per region (`regions/<label>.img`)
+and `regions/report.json`. Each file must match the producer's first-pass
+hash, and its geometry and kind must match the fixed table; the report marks a
+region stable when both passes agree, and consistent when it is stable and
+either raw or a clean ext4. Zero runs are written sparsely. The tool writes
+only TTR1 protocol frames to the phone.
+
+== Disposable VM checks
+
+The VM build substitutes the virtio disk `vda` with sixteen small partitions
+under the same labels (16 sectors raw, 512 sectors ext4, contiguous), the
+`dummy_udc` controller, a 180-second deadline, a 60-second producer and a
+90-second sender limit, and a relay from the guest's own `cdc_acm` host port to
+a QEMU UART. The real TTR1 receiver and the Mac splitter run on the host, which
+answers on a second UART. Each case must end with the guest's own restart with
+the command `bootloader`, at least five seconds before its deadline by the
+kernel's timestamp and after a VM-only marker from the pipeline, with the
+expected markers and an unchanged disk image. In the two cases that complete,
+each partition's read-sector counter must show at least two full reads, so
+both passes reached the disk.
+
+[cols="1,3",options="header"]
+|===
+|Case |Required observation
+|`valid`
+|All sixteen regions received, each equal to the disk; all ext4 regions
+`clean`, all stable and consistent; restart after the acknowledgement.
+|`dirty-calibration`
+|`nvdata` has its superblock state cleared: the transfer completes, `nvdata`
+is reported `unclean-state` and not consistent, the rest consistent.
+|`wrong-label`
+|One partition label differs: the producer refuses with status 3 before
+streaming, the receiver records no payload and the guest restarts.
+|`host-absent`
+|No host answers: the producer's own time limit ends it, PID 1 stops the
+waiting sender 20 seconds later and the guest restarts by itself.
+|`receiver-limit`
+|The host accepts only 64 KiB: the sender fails at that limit, the blocked
+producer is stopped and the guest restarts by itself.
+|===
+
+The production build check rejects dynamic dependencies and VM-only strings,
+such as `dummy_udc`, `ttyACM0`, the UART names, the receipt protocol, the VM
+markers or the VM disk name `vda`, in PID 1 and the producer, and requires the
+phone's disk names `mmcblk0` and `mmcblk0p` in both. qemu-user checks confirm that
+the AArch64 PID 1 refuses to run as anything but PID 1, and that the producer
+refuses outside the offline environment without streaming anything.
+
+== Image
+
+The ramdisk is 3773960 bytes with SHA-256
+`14a573ef702b5bf1a85abcbdd634cf780d9403c64e8bc5829708810964757d48`; its
+payloads are `init` (`de6e87d9...`), the producer (`accbe847...`) and the sender
+(`3d7c2e1b...`). `tools/prepare-rescue-image.py --ramdisk-profile usb-control
+--recovery` packages it in the stock recovery's layout with the probe's
+command line (`panic=5`): 13475840 bytes, SHA-256
+`41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65`,
+byte-identical to the pinned `mkbootimg`. Padded with zeros to the recovery
+partition's 33554432 bytes for `tools/flash-recovery.py --profile
+control-acquisition`, it has SHA-256
+`6729b1463f208f0ac73d3b950e3f8c3599f3343f99ce0addad4d5272ba421155`.
+
+== Known limitations
+
+An independent review on 2026-10-15 found no high-severity problem. Its medium
+finding, that the second pass would be served from the page cache, and its
+five low findings (the sender was not stopped after a producer failure, an
+unbounded reap on the failure path, a skipped table check in the Nix tests, the
+VM harness's attribution of the restart, and the phone build's table check)
+are fixed, and a second review confirmed the fixes. The `host-absent` and
+`receiver-limit` cases close its remaining gap, VM coverage of both ways PID 1
+stops a worker. These limits remain:
+
+* The USB rate of the phone's ACM gadget is unmeasured. The transfer needs an
+  average of about 0.45 MB/s to finish within the producer's limit; otherwise
+  the run fails and the phone restarts.
+* The ext4 check reads only the primary superblock; it does not inspect the
+  journal or the filesystem.
+* Two reads in one boot show stability during the run, not the absence of
+  firmware or kernel writers outside it.
+* The Mac copy is the only copy; the requirement for two copies on separate
+  storage stays open.
+
+== Hardware boundary
+
+The x86_64 VM kernel does not exercise the Titan's vendor 4.14 kernel, its
+eMMC driver, the MTU3 USB controller, macOS enumeration, the vendor restart
+path, watchdogs or charging during a long transfer. A guarded storage set does
+not establish quiescence of firmware or kernel writers.

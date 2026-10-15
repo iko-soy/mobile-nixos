@@ -248,6 +248,42 @@ class RamdiskTests(unittest.TestCase):
         with self.assertRaises(ramdisk.RamdiskFormatError):
             ramdisk.inspect_ramdisk(compressed(archive(extra)), "usb-probe")
 
+    def test_control_profile_is_exact_and_separate(self):
+        paths = (".", "bin", "bin/titan-control-produce", "bin/titan-rescue-send", "dev", "init",
+                 "proc", "run", "sys", "tmp")
+        files = {"bin/titan-control-produce": elf(b"producer"), "bin/titan-rescue-send": elf(b"sender"),
+                 "init": elf(b"control")}
+        records = [record(path, files.get(path, b""), inode=index, directory=path not in files)
+                   for index, path in enumerate(paths)]
+        data = compressed(archive(records))
+        report = ramdisk.inspect_ramdisk(data, "usb-control")
+        self.assertEqual(report["format"], "titan-usb-control-initramfs-v1")
+        self.assertEqual([entry["path"] for entry in report["entries"]], list(paths))
+        sums = f"{hashlib.sha256(data).hexdigest()}  initramfs.cpio.gz\n".encode()
+        payload = "".join(f"{hashlib.sha256(files[name]).hexdigest()}  {name}\n"
+                          for name in ("init", "bin/titan-control-produce", "bin/titan-rescue-send")).encode()
+        self.assertTrue(ramdisk.verify_manifests(report, sums, payload, "usb-control"))
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "ramdisk.gz"
+            path.write_bytes(data)
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                self.assertEqual(ramdisk.main([str(path), "--profile", "usb-control"]), 0)
+            self.assertEqual(stdout.getvalue().splitlines()[0],
+                             "Exact USB control ramdisk profile: 10 entries, three static AArch64 executables.")
+        for profile in ("usb-acquisition", "usb-probe"):
+            with self.subTest(profile=profile), self.assertRaises(ramdisk.RamdiskFormatError):
+                ramdisk.inspect_ramdisk(data, profile)
+        with self.assertRaises(ramdisk.RamdiskFormatError):
+            ramdisk.inspect_ramdisk(fixture()[0], "usb-control")
+        with self.assertRaises(ramdisk.RamdiskFormatError):
+            ramdisk.verify_manifests(report, sums, payload, "usb-probe")
+        # A shell or any additional program is not part of the profile.
+        extra = records[:3] + [record("bin/sh", elf(b"shell"), inode=3)] + [
+            record(path, files.get(path, b""), inode=index + 1, directory=path not in files)
+            for index, path in enumerate(paths[3:], 3)]
+        with self.assertRaises(ramdisk.RamdiskFormatError):
+            ramdisk.inspect_ramdisk(compressed(archive(extra)), "usb-control")
+
     def test_changed_file_during_read_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "input"

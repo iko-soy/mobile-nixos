@@ -2,8 +2,9 @@
 """Inspect an exact build-only Titan USB initramfs without extracting.
 
 This deliberately accepts less than Linux's general initramfs grammar: one
-gzip member, one newc archive and one fixed production file set, either the
-USB acquisition profile (the default) or the USB probe profile. It verifies
+gzip member, one newc archive and one fixed production file set: the USB
+acquisition profile (the default), the USB probe profile or the offline
+control-region acquisition profile. It verifies
 structure and optional build manifests, not code provenance or bootability.
 Format references: docs.kernel.org/driver-api/early-userspace/buffer-format.html
 and refspecs.linuxfoundation.org/elf/gabi4+/ch5.pheader.html.
@@ -35,6 +36,8 @@ PROFILES = {
                         "format": "titan-usb-acquisition-initramfs-v1"},
     "usb-probe": {"files": ("init",), "directories": (".", "dev", "proc", "run", "sys", "tmp"),
                   "format": "titan-usb-probe-initramfs-v1"},
+    "usb-control": {"files": ("init", "bin/titan-control-produce", "bin/titan-rescue-send"),
+                    "directories": DIRECTORIES, "format": "titan-usb-control-initramfs-v1"},
 }
 GZIP_HEADER = bytes.fromhex("1f8b0800000000000203")
 TRAILER = (0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 11, 0)
@@ -248,10 +251,10 @@ def main(argv=None):
         if args.json:
             print(json.dumps(report, indent=2, sort_keys=True))
         else:
-            if args.profile == "usb-acquisition":
-                print("Exact USB acquisition ramdisk profile: 13 entries, six static AArch64 executables.")
-            else:
-                print("Exact USB probe ramdisk profile: 7 entries, one static AArch64 executable.")
+            print({"usb-acquisition": "Exact USB acquisition ramdisk profile: 13 entries, six static AArch64 executables.",
+                   "usb-probe": "Exact USB probe ramdisk profile: 7 entries, one static AArch64 executable.",
+                   "usb-control": "Exact USB control ramdisk profile: 10 entries, three static AArch64 executables."}
+                  [args.profile])
             if args.sha256sums is not None:
                 print("Archive and payload SHA-256 manifests agree.")
             print("Structural validation only; code provenance and bootability are not verified.")

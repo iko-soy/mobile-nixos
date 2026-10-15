@@ -28,6 +28,11 @@ superseded. For the probe only, `--recovery` with the preserved stock recovery
 (`4dd1c1f7...`) selects the recovery-partition layout: the helper copies that
 image's 47545-byte recovery-DTBO section (`0da3565a...`, identical to the dtbo
 partition's table) into the new image, as the stock recovery carries it.
+With `--ramdisk-profile usb-control`, the helper accepts only the 3773960-byte
+link:control/README.adoc[offline control-region acquisition ramdisk] with
+SHA-256 `14a573ef702b5bf1a85abcbdd634cf780d9403c64e8bc5829708810964757d48`,
+checked by the inspector's `usb-control` profile; it uses the probe's command
+line and may use the same recovery layout.
 These constants select reviewed inputs; there is no runtime hash, source-profile
 or command-line override. A future ramdisk build requires a reviewed profile
 update. Matching a digest establishes byte identity, not hardware suitability.

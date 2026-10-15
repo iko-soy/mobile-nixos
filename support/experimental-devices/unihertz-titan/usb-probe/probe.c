@@ -5,7 +5,9 @@
  * deadline counted from PID 1 start, whether or not the earlier steps
  * succeeded. It reads no storage contents, accepts no input and starts no
  * acquisition, shell or service. The VM-only branch reads the report back
- * through dummy_hcd, adds faults and prints restart markers.
+ * through dummy_hcd, adds faults and prints restart markers. The separate
+ * control profile replaces the report loop with the fixed control-region
+ * acquisition in control/pipeline.c and lengthens the deadline.
  */
 #define _GNU_SOURCE
 #if !defined(TITAN_USB_PROBE_PROFILE) || !defined(TITAN_USB_MOUNT_PROFILE)
@@ -39,7 +41,13 @@
  * disk and partition set. */
 int titan_rescue_guard_storage(void);
 
-#ifdef TITAN_USB_PROBE_VM_TEST
+#if defined(TITAN_USB_CONTROL_PROFILE) && defined(TITAN_USB_PROBE_VM_TEST)
+#define DEADLINE_SECONDS 180
+#elif defined(TITAN_USB_CONTROL_PROFILE)
+/* The control acquisition transfers about 736 MiB at an unmeasured USB rate;
+ * restart regardless after thirty minutes. */
+#define DEADLINE_SECONDS 1800
+#elif defined(TITAN_USB_PROBE_VM_TEST)
 #define DEADLINE_SECONDS 45
 #else
 #define DEADLINE_SECONDS 150
@@ -163,7 +171,17 @@ static void sanitized(char *text)
         if (!isalnum((unsigned char)*p) && *p != '.' && *p != '+' && *p != '-' && *p != '_') *p = '_';
 }
 
-#ifdef TITAN_USB_PROBE_VM_TEST
+#ifdef TITAN_USB_CONTROL_PROFILE
+int titan_usb_control_run(struct titan_usb *usb);
+
+/* The control pipeline's way out: the same restart into the bootloader. */
+_Noreturn void titan_usb_probe_restart(void)
+{
+    restart_now();
+}
+#endif
+
+#if defined(TITAN_USB_PROBE_VM_TEST) && !defined(TITAN_USB_CONTROL_PROFILE)
 static const char *selected_case(void)
 {
     static const char *const cases[] = { "valid", "stuck", "child-killed", NULL };
@@ -208,6 +226,8 @@ static void vm_receive(int fd, char *buffer, size_t *used, unsigned *received)
     }
 }
 
+#endif
+#ifdef TITAN_USB_PROBE_VM_TEST
 int titan_rescue_vm_test(void);
 #endif
 
@@ -218,7 +238,7 @@ int titan_usb_probe_run(void)
     struct utsname kernel;
     char release[sizeof(kernel.release)];
     if (getpid() != 1 || !armed) fail_wait(reason);
-#ifdef TITAN_USB_PROBE_VM_TEST
+#if defined(TITAN_USB_PROBE_VM_TEST) && !defined(TITAN_USB_CONTROL_PROFILE)
     const char *name = selected_case();
     if (name == NULL) fail_wait("vm-case-invalid");
     printf("TITAN_PROBE_VM_START %s\n", name);
@@ -237,6 +257,10 @@ int titan_usb_probe_run(void)
     if (titan_usb_prepare(&usb, &reason) != 0 || titan_usb_bind_and_seal(&usb, &reason) != 0)
         fail_wait(reason);
     puts("TITAN_PROBE_USB_BOUND");
+#ifdef TITAN_USB_CONTROL_PROFILE
+    (void)titan_usb_control_run(&usb);
+    fail_wait("control-returned");
+#else
 #ifdef TITAN_USB_PROBE_VM_TEST
     if (strcmp(name, "stuck") == 0) {
         /* A PID 1 that never returns to its loop: only the separate deadline
@@ -277,6 +301,7 @@ int titan_usb_probe_run(void)
 #endif
         wait_milliseconds(REPORT_MILLISECONDS);
     }
+#endif
 }
 
 #ifdef TITAN_USB_PROBE_VM_TEST

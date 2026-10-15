@@ -63,6 +63,15 @@ USB device the Mac saw; its restart reached fastboot
 |The probe's status lines; offline acquisition; repeatability; see
 link:recovery-route-trial.adoc[the trial record]
 
+|Offline control-region acquisition image
+|Linux 6.18.38 VM cases (5): success, an unclean calibration filesystem, a
+wrong partition label, no listening host, a host byte limit below the stream;
+disk-read counters for both passes; qemu-user refusal checks; Mac splitter
+tests
+|Builder runs on 2026-10-15
+|Any Titan run, the phone's USB rate, the vendor kernel's claims and ioctls;
+see link:control/README.adoc[the image record]
+
 |USB probe profile and its deadline reboot
 |Linux 6.18.38 VM cases (4): success, stuck PID 1, killed deadline process,
 missing storage; qemu-user refusal check; Mac report-reader tests

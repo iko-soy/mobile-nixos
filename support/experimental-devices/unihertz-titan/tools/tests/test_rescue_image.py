@@ -401,6 +401,42 @@ class RescueImageTests(unittest.TestCase):
                 prepare.prepare(boot, ramdisk, output, "usb-probe", stock)
                 self.assertEqual(json.loads((output / prepare.MANIFEST_NAME).read_text())["layout"], "recovery")
 
+    def test_control_profile_uses_its_own_pin_and_the_recovery_layout(self):
+        probe, dtbo, recovery, pins = self.probe_fixture()
+        paths = (".", "bin", "bin/titan-control-produce", "bin/titan-rescue-send", "dev", "init",
+                 "proc", "run", "sys", "tmp")
+        files = {"bin/titan-control-produce": b"producer", "bin/titan-rescue-send": b"sender", "init": b"control"}
+        control = test_rescue_ramdisk.compressed(test_rescue_ramdisk.archive([
+            test_rescue_ramdisk.record(path, test_rescue_ramdisk.elf(files[path]) if path in files else b"",
+                                       inode=index, directory=path not in files)
+            for index, path in enumerate(paths)]))
+        pins.update({"CONTROL_RAMDISK_BYTES": len(control),
+                     "CONTROL_RAMDISK_SHA256": hashlib.sha256(control).hexdigest()})
+        with patch.multiple(prepare, **pins):
+            image, report = prepare.assemble_image(self.boot, control, "usb-control", dtbo)
+            info = prepare.boot_inspector.inspect_image(image)
+            self.assertEqual((report["ramdisk_profile"], report["layout"]), ("usb-control", "recovery"))
+            self.assertEqual(report["inputs"]["usb_ramdisk"]["format"], "titan-usb-control-initramfs-v1")
+            # It restarts by itself, so it shares the probe's command line.
+            self.assertEqual(info["cmdline"], prepare.PROBE_CMDLINE)
+            self.assertEqual(prepare.payload(image, info, "ramdisk"), control)
+            self.assertEqual(prepare.payload(image, info, "recovery_dtbo"), dtbo)
+            self.assertEqual(prepare.payload(image, info, "kernel"), self.kernel)
+            # Each ramdisk is accepted only under its own profile and pin.
+            for data, profile in ((control, "usb-probe"), (control, "usb-acquisition"), (probe, "usb-control")):
+                with self.subTest(profile=profile), self.assertRaises(prepare.PreparationError):
+                    prepare.assemble_image(self.boot, data, profile)
+            with self.private_inputs() as (parent, boot, ramdisk, output):
+                ramdisk.write_bytes(control)
+                stock = parent / "recovery.img"
+                stock.write_bytes(recovery)
+                stock.chmod(0o600)
+                prepare.prepare(boot, ramdisk, output, "usb-control", stock)
+                written = json.loads((output / prepare.MANIFEST_NAME).read_text())
+                self.assertEqual((written["ramdisk_profile"], written["layout"]), ("usb-control", "recovery"))
+        self.assertEqual(prepare.ramdisk_pin("usb-control"),
+                         (3773960, "14a573ef702b5bf1a85abcbdd634cf780d9403c64e8bc5829708810964757d48"))
+
     @unittest.skipUnless(os.environ.get("TITAN_MKBOOTIMG_SOURCE"), "pinned mkbootimg source required for independent assembly comparison")
     def test_recovery_layout_byte_identical_to_pinned_mkbootimg(self):
         probe, dtbo, recovery, pins = self.probe_fixture()

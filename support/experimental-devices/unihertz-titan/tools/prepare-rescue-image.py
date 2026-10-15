@@ -2,7 +2,8 @@
 """Prepare a private, unsigned Titan rescue envelope locally; never contact a phone.
 
 Only the reviewed installed boot and the reviewed USB ramdisk hashes are accepted:
-the USB acquisition ramdisk by default, or the USB probe ramdisk.
+the USB acquisition ramdisk by default, the USB probe ramdisk or the offline
+control-region acquisition ramdisk.
 No private input is submitted to Nix, an external executable, or a repository.
 The output has no AVB metadata and is not evidence of bootloader acceptance,
 hardware bootability, storage consistency or a working recovery procedure.
@@ -35,7 +36,13 @@ RAMDISK_SHA256 = "0ed6d547c282b8a93d206d747cdb2b5535a7175726265f04e8085fb62671eb
 # (65652 bytes, 8b45b35e...), sent in the temporary boot trial, is superseded.
 PROBE_RAMDISK_BYTES = 65825
 PROBE_RAMDISK_SHA256 = "cdb87d510caffe98fca0c009cecd31016e0cc85b9fd08c7cd41d7a8c6bad3a99"
-RAMDISK_PROFILES = ("usb-acquisition", "usb-probe")
+# 2026-10-15 offline control-region acquisition (control/README.adoc): the probe
+# profile's PID 1 with the fixed region producer and the reviewed TTR1 sender.
+CONTROL_RAMDISK_BYTES = 3773960
+CONTROL_RAMDISK_SHA256 = "14a573ef702b5bf1a85abcbdd634cf780d9403c64e8bc5829708810964757d48"
+RAMDISK_PROFILES = ("usb-acquisition", "usb-probe", "usb-control")
+# Profiles that restart by themselves and may use the recovery-partition layout.
+SELF_RESTARTING = ("usb-probe", "usb-control")
 # The preserved stock recovery (recovery-preparation.adoc) and its 47545-byte
 # recovery-DTBO section, which equals the dtbo partition's table. The probe's
 # recovery-partition layout carries the same section as the stock recovery.
@@ -55,8 +62,9 @@ RESCUE_CMDLINE = (
     "bootopt=64S3,32N2,64N2 buildvariant=user security=apparmor rodata=0 "
     "rdinit=/init init=/init panic=0"
 )
-# The probe restarts by itself, so it keeps the kernel's own panic restart as a
-# fallback behind the vendor exception handler's watchdog reset.
+# The probe and control profiles restart by themselves, so they keep the
+# kernel's own panic restart as a fallback behind the vendor exception
+# handler's watchdog reset.
 PROBE_CMDLINE = (
     "bootopt=64S3,32N2,64N2 buildvariant=user security=apparmor rodata=0 "
     "rdinit=/init init=/init panic=5"
@@ -152,13 +160,14 @@ def validate_boot(data):
 
 def profile_cmdline(profile):
     require(profile in RAMDISK_PROFILES, "Unknown USB ramdisk profile.")
-    return RESCUE_CMDLINE if profile == "usb-acquisition" else PROBE_CMDLINE
+    return PROBE_CMDLINE if profile in SELF_RESTARTING else RESCUE_CMDLINE
 
 
 def ramdisk_pin(profile):
     require(profile in RAMDISK_PROFILES, "Unknown USB ramdisk profile.")
-    return (RAMDISK_BYTES, RAMDISK_SHA256) if profile == "usb-acquisition" else (
-        PROBE_RAMDISK_BYTES, PROBE_RAMDISK_SHA256)
+    return {"usb-acquisition": (RAMDISK_BYTES, RAMDISK_SHA256),
+            "usb-probe": (PROBE_RAMDISK_BYTES, PROBE_RAMDISK_SHA256),
+            "usb-control": (CONTROL_RAMDISK_BYTES, CONTROL_RAMDISK_SHA256)}[profile]
 
 
 def validate_ramdisk(data, profile="usb-acquisition"):
@@ -191,11 +200,12 @@ def assemble_image(boot, ramdisk, profile="usb-acquisition", recovery_dtbo=b""):
     """Return (raw envelope bytes, private manifest); no filesystem or subprocess I/O."""
     original, kernel, dtb = validate_boot(boot)
     ramdisk_report = validate_ramdisk(ramdisk, profile)
-    # Only the probe may use the recovery-partition layout, and only with the
-    # pinned stock section.
-    require(not recovery_dtbo or (profile == "usb-probe" and len(recovery_dtbo) == RECOVERY_DTBO_BYTES
+    # Only the self-restarting profiles may use the recovery-partition layout,
+    # and only with the pinned stock section.
+    require(not recovery_dtbo or (profile in SELF_RESTARTING and len(recovery_dtbo) == RECOVERY_DTBO_BYTES
                                   and sha256(recovery_dtbo) == RECOVERY_DTBO_SHA256),
-            "The recovery-DTBO section is allowed only for the probe and must be the reviewed copy.")
+            "The recovery-DTBO section is allowed only for the probe and control profiles "
+            "and must be the reviewed copy.")
     # Rebuild the narrow v2 envelope explicitly. No inherited padding, AVB or
     # authentication bytes are copied. Only reviewed payloads and fixed fields.
     header = bytearray(PAGE_SIZE)
@@ -347,7 +357,8 @@ def write_private(directory_fd, name, data):
 def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition", recovery_path=None):
     output = private_path(output_path)
     require(not os.path.lexists(output), "Output must be a new private directory.")
-    require(recovery_path is None or profile == "usb-probe", "The recovery layout is only for the probe.")
+    require(recovery_path is None or profile in SELF_RESTARTING,
+            "The recovery layout is only for the probe and control profiles.")
     boot = ramdisk = recovery = None
     directory_fd = parent_fd = -1
     owned = {}
@@ -447,7 +458,7 @@ def main(argv=None):
                         help="reviewed ramdisk profile (default: usb-acquisition)")
     parser.add_argument("--recovery", type=Path,
                         help="private preserved stock recovery copy; adds its recovery-DTBO section "
-                             "for the recovery-partition layout (usb-probe only)")
+                             "for the recovery-partition layout (usb-probe and usb-control only)")
     args = parser.parse_args(argv)
     try:
         report = prepare(args.boot, args.ramdisk, args.output, args.ramdisk_profile, args.recovery)

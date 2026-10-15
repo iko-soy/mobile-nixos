@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
-This host helper writes only the `recovery` partition, and only one of two
-pinned full-partition images: the USB probe envelope padded with zeros to the
-partition size, or the preserved original recovery image that restores it. It
+This host helper writes only the `recovery` partition, and only one of three
+pinned full-partition images: the USB probe envelope or the offline
+control-region acquisition envelope, each padded with zeros to the partition
+size, or the preserved original recovery image that restores it. It
 first sends fixed read-only identity queries, including the recovery
 partition's size and type, from a verified read-only private copy that it
 measures again afterwards. It never writes another partition and never issues
 erase, boot, oem, flashing, set_active or any other command. Running it changes
 the phone's storage and needs the owner's explicit authorization of the
-procedure in recovery-route-trial.adoc.
+procedure in recovery-route-trial.adoc or control-acquisition-trial.adoc.
 """
 
 import argparse
@@ -40,6 +41,14 @@ PROFILES = {
         "source_bytes": 9768960,
         "source_sha256": "f37dd3b159226e7c9955ee87246a570b8075d6e95187d4f1406d456f5c0ce59d",
         "sha256": "a97cb154eb82a7241e155fbdb5c6bc804404ab1bb8082739aaa63835f1d96080",
+    },
+    # The offline control-region acquisition envelope (control/README.adoc),
+    # which restarts into the bootloader after the transfer or at its deadline,
+    # in the same recovery layout; padded with zeros like the probe.
+    "control-acquisition": {
+        "source_bytes": 13475840,
+        "source_sha256": "41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65",
+        "sha256": "6729b1463f208f0ac73d3b950e3f8c3599f3343f99ce0addad4d5272ba421155",
     },
     # The installed stock recovery as preserved on 2026-10-14
     # (recovery-preparation.adoc); restores the partition byte for byte.

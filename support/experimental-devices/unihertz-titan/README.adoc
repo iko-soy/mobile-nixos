@@ -45,6 +45,11 @@ hardware works under NixOS.
   on 2026-10-15 with the owner's approval: `fastboot flash` wrote the probe
   into recovery, a Volume Up start ran it on the phone, its deadline restart
   reached fastboot, and the original recovery was restored byte for byte.
+* A build-only link:control/README.adoc[offline control-region acquisition
+  image] and its link:control-acquisition-trial.adoc[trial proposal]. Started
+  from the recovery partition, it copies the sixteen regions other than
+  `userdata` to the Mac with two hash passes and restarts into fastboot. It has
+  passed its VM checks and has not run on the phone.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1146,3 +1151,34 @@ ignored it on every normal boot since.
 
 Validation on 2026-10-15: the host suite (345 tests, two comparisons skipped
 outside Nix) and the Mac Nix `tests` target (345) passed after both fixes.
+
+=== Follow-up: offline control-region acquisition image
+
+The next step in link:consistent-preservation.adoc[the preservation order] is
+an offline copy of the sixteen regions other than `userdata`. The build-only
+link:control/README.adoc[control image] provides it on the recovery-partition
+route: the probe profile's PID 1 starts a fixed region producer and the
+reviewed TTR1 sender, then restarts into the bootloader after the Mac's
+acknowledgement, soon after any failure, or at an 1800-second deadline. The
+producer reads each region twice with `O_DIRECT` through exclusive read-only
+claims, checks its identity before and after, records the primary-superblock
+state of the four ext4 regions and appends a manifest with both hashes.
+`tools/receive-control-regions.py` receives the stream on the Mac and splits and
+checks the regions. The envelope, inspector and flash helpers gained
+`usb-control` and `control-acquisition` profiles, and the
+link:control-acquisition-trial.adoc[trial proposal] describes a run. Nothing
+has run on the phone.
+
+An independent review found no high-severity problem. It found one medium
+problem, that the second pass would have been served from the page cache, and
+five low ones; all were fixed, and a second review confirmed the fixes. It
+noted one remaining gap, VM coverage of both stop branches, which two added VM
+cases now close.
+
+Validation on 2026-10-15: on x86_64 Linux the five control VM cases passed,
+with every restart coming from the pipeline well before the deadline and each
+fixture partition read from disk exactly twice; the qemu-user refusal checks
+passed; the plain probe ramdisk stayed byte-identical (`cdb87d51...`); and the
+`tests` target (354) passed. On the Mac, the host suite (354 tests, two
+comparisons skipped outside Nix) and the Nix `tests` target (354) passed. The
+control envelope is byte-identical to the pinned `mkbootimg`.

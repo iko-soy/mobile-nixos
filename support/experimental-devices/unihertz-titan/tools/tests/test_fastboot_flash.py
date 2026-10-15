@@ -125,7 +125,7 @@ class RecoveryFlashTests(unittest.TestCase):
 
     def test_pinned_profiles_match_the_reviewed_images(self):
         real = load("titan_fastboot_flash_constants", HERE.parent / "flash-recovery.py")
-        self.assertEqual(set(real.PROFILES), {"rescue-probe", "original-recovery"})
+        self.assertEqual(set(real.PROFILES), {"rescue-probe", "control-acquisition", "original-recovery"})
         self.assertEqual(real.PARTITION_BYTES, 33554432)
         self.assertEqual(real.PARTITION, "recovery")
         # The probe is the second version, not the first-version envelope that
@@ -135,6 +135,10 @@ class RecoveryFlashTests(unittest.TestCase):
         self.assertNotEqual(probe["source_sha256"], boot.PROFILES["rescue-probe"]["sha256"])
         self.assertLess(probe["source_bytes"], real.PARTITION_BYTES)
         self.assertRegex(probe["sha256"], "^[0-9a-f]{64}$")
+        control = real.PROFILES["control-acquisition"]
+        self.assertEqual((control["source_bytes"], control["source_sha256"], control["sha256"]),
+                         (13475840, "41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65",
+                          "6729b1463f208f0ac73d3b950e3f8c3599f3343f99ce0addad4d5272ba421155"))
         original = real.PROFILES["original-recovery"]
         self.assertEqual((original["source_bytes"], original["source_sha256"]),
                          (33554432, original["sha256"]))

@@ -17,6 +17,7 @@ let
   mountPolicy = import ./mount-policy.nix { inherit pkgs; };
   usbAcquisition = import ./usb-acquisition.nix { inherit pkgs rescue transport; };
   usbProbe = import ./usb-probe.nix { inherit pkgs; };
+  usbControl = import ./usb-control.nix { inherit pkgs transport; };
   # This pin's Darwin libffi trampoline dylib aborts on macOS 27 when ctypes
   # loads. Backport the targeted upstream fix for the host test interpreter:
   # https://github.com/NixOS/nixpkgs/commit/31ac410db37503704af446f2cad40811fabe0b04
@@ -55,7 +56,7 @@ let
   };
 in
 {
-  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition usb mountPolicy usbAcquisition usbProbe;
+  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition usb mountPolicy usbAcquisition usbProbe usbControl;
 
   tests = pkgs.runCommand "titan-tools-and-boot-packaging-tests" {
     nativeBuildInputs = [ testPython ];
@@ -64,6 +65,8 @@ in
     # The rescue repacker is compared against the pinned independent assembler
     # using synthetic inputs only. Private phone images never enter the store.
     export TITAN_MKBOOTIMG_SOURCE=${sources.mkbootimg}
+    # The control producer's compiled region table, compared with the Mac's.
+    export TITAN_CONTROL_SOURCE=${./control/producer.c}
     # The inventory collector intentionally rejects output in Git checkouts.
     # Nix's private build directory also keeps temporary inventory fixtures out
     # of the source tree, even when the caller builds from a checkout.
