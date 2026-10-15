@@ -1,0 +1,128 @@
+= Installed bootloader preservation
+
+The current recovery gap includes the actual installed bootloader's identity,
+image acceptance policy, supported boot commands and return path. A private
+copy of its partitions can support passive inspection before any mode change.
+It does not establish which copy executes or demonstrate a recovery route.
+
+== Fixed scope
+
+The preserved GPT and a fresh normal-mode USB metadata check on 2026-10-15 agree
+on these two regions of the original Titan's eMMC user area:
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Label |Block node |Start sector |Sectors |Bytes
+|`lk` |`mmcblk0p26` |960512 |2048 |1048576
+|`lk2` |`mmcblk0p27` |962560 |2048 |1048576
+|===
+
+Sectors are 512 bytes. The parent is non-removable MMC, with 244285440 sectors
+and 512-byte logical/physical sectors. The observed device numbers are `179:26`
+and `179:27`. Both have no observed holders and are unreadable to `phablet`.
+Their `ro` attributes are zero; the acquisition must use read-only descriptors
+without changing these flags. This scope excludes eMMC boot areas, RPMB,
+security/configuration partitions, calibration and userdata.
+
+== Read-only acquisition
+
+`tools/acquire-bootloaders.py` accepts only this fixed pair, not an arbitrary
+block path or partition list. It revalidates geometry and read safety, saves
+exactly 2 MiB in total, and compares transferred bytes, saved-file readback and
+independent phone rereads. Matching hashes establish agreement across those
+observations; they do not establish atomicity or absence of raw firmware writers.
+
+Each read checks the complete 38-entry kernel partition map for unambiguous,
+non-overlapping ranges, known layout anchors and the fixed LK targets. It checks
+block-node device numbers, label resolution, sysfs parents, holders/slaves and
+the shell/PID 1 mount tables. Held read-only descriptors supply the size and
+sector-size ioctls. Metadata is checked again before the bounded bytes or digest
+are emitted. This does not reread GPT contents or prove quiescence in every
+mount namespace or firmware component.
+
+Run it from the Mac's local terminal after reviewing the scope:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/acquire-bootloaders.py \
+  --sudo --output /absolute/private/new-bootloader-copies
+----
+
+The existing phone sudo password belongs only in its hidden local prompt, never
+in chat, a command argument, an environment variable or a file. The normal-mode
+ADB transport and existing phone Python are checked first. No software is
+installed; no boot mode, block flag, mount or partition is changed.
+
+The fixed phone program uses `/usr/bin/python3 -I -S -B`: isolated operation,
+no site initialization and no bytecode writes. A local no-sudo run on the Titan
+passed its metadata/transport checks and stopped at the expected read-permission
+boundary before creating an output directory or reading partition contents.
+
+The Mac's Nix test target passed all 206 host tools tests and the existing
+boot-packaging fixture. Twenty LK tests exercise the actual fixed remote guard
+with synthetic devices and descriptors, bounded content reads and post-read
+checks, mismatched stream/repeat hashes, changed maps, private publication
+failures and credential ordering. These tests use no phone partition contents.
+
+Keep the images, full hashes, manifest and diagnostics outside Git and the Nix
+store, with directory mode `0700` and file mode `0600`. Preserve partial attempts
+as incomplete evidence. Successful acquisition is not authorization to write
+either copy or to enter fastboot.
+
+== Completed private acquisition
+
+The owner ran the reviewed helper from the Mac terminal on 2026-10-15. Both
+1048576-byte copies passed transfer hashing, saved-file readback, independent
+phone rereads and the repeated kernel-map checks. A separate Mac inspection
+rehashed both completed files, checked the manifest and verified directory mode
+`0700`, file mode `0600` and unchanged reviewed helper sources.
+
+The two complete partition copies are byte-for-byte identical. Their binaries,
+full hashes, source metadata and detailed inspection output remain private.
+This preserves observed installed bytes; neither copy was executed, restored,
+authenticated against an OEM package or demonstrated as a fallback.
+
+== Passive inspection and remaining limits
+
+Inspect copies as data, without executing their contents. Record bounded image
+headers, component ranges, version/build evidence and whether the pair agrees.
+Look for identifiable command dispatch and image-verification paths relevant to
+temporary boot, normal boot and modem loading. A command name in a string table
+does not prove reachable support, permission, lock-state behavior or successful
+execution. Missing strings cannot rule out functionality or storage writes.
+
+Do not infer that the second partition is a usable fallback or that changing
+one copy leaves the other bootable. Bootloader selection and secure-boot policy
+remain unverified. Keep any device identifiers, credentials or opaque private
+data out of public findings, even if adjacent to useful build strings.
+
+The completed copies contain six consecutive entries consistent with the
+https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe/drivers/misc/mediatek/ccci_util/ccci_util_lib_load_img.c#L1144[pinned kernel's MediaTek image-header definition].
+Each has a 512-byte header and 16-byte payload alignment. In order, the payloads
+are `lk` (707792 bytes), two certificate-labeled entries (1709 and 957 bytes),
+`lk_main_dtb` (112071 bytes), and another pair of certificate-labeled entries
+(1709 and 957 bytes). All entries and padding fit within the captured partition;
+the final 220288 bytes are zero. These labels do not verify certificate contents,
+signatures or the bootloader's trust policy, and a matching header definition is
+not matching LK source provenance.
+
+The raw FDT is byte-for-byte identical to the FDT inside the preserved installed
+boot image's Android DT table. The existing software-board clue
+`g61v71c2k_dfl_tee` also occurs in the image. No unambiguous LK version/build date
+or runtime load address was established. DTB equality does not show which DTB
+the bootloader selects or modifies at runtime.
+
+Bounded string inspection found literals including `getvar:`, `boot`,
+`continue`, `reboot-bootloader`, `download:`, `flash:` and `erase:`, alongside
+verified-boot/AVB/rollback diagnostics and modem-image loading references.
+This records embedded text only; no reachable command-dispatch table or active
+verification policy was established. In particular, the `boot` literal is not
+evidence of working temporary boot, and modem-loading text does not establish
+modem state or calibration quiescence. Full strings and offsets remain private.
+
+After passive inspection, the next hardware gate remains a separately
+authorized, narrowly scoped entry-and-return trial with the Mac and phone
+present. The unsigned rescue envelope must not be used to test connectivity.
+Consistent userdata/calibration preservation and matching vendor/firmware
+dependencies remain separate requirements in
+link:recovery-preparation.adoc[the recovery record].

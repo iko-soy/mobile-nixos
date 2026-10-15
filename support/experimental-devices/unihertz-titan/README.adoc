@@ -29,6 +29,9 @@ hardware works under NixOS.
   acquisition tools, bounded GPT capture/validation, and a host-only sparse ext4
   archive verifier, with
   automated tests.
+* A separate fixed-scope link:bootloader-preservation.adoc[LK partition reader]
+  for private passive bootloader inspection. It does not enter fastboot or
+  establish that either bootloader copy is a working fallback.
 
 The reference image retains Ubuntu Touch's command line and userspace contract.
 It is not a NixOS initramfs or root filesystem. Current Mobile NixOS uses a

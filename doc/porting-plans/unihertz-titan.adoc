@@ -58,6 +58,11 @@ invocation of the pinned Android assembler. It has no AVB metadata and has not
 been sent to or booted on the phone; bootloader acceptance and a return path
 remain prerequisites for any separately authorized hardware trial.
 
+The installed `lk` and `lk2` bootloader partitions have also been preserved
+privately with saved-file and independent phone hashes. Their 1 MiB copies are
+identical. Passive inspection can narrow bootloader questions, but does not
+establish executed-copy selection, command support or a recovery route.
+
 toc::[]
 
 == Objective and recommended approach

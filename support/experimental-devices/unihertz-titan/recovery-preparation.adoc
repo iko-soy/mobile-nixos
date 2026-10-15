@@ -258,6 +258,48 @@ do not establish an atomic snapshot with writable userdata or calibration state.
 Home, Nix, Android data and other writable state still require consistent
 preservation. Neither image has been restored or boot-tested from its copy.
 
+==== Remaining vendor and system dependencies
+
+A later coverage review matched all 38 entries in the completed GPT capture to
+the saved kernel map and compared the preserved files with the saved mount
+inventory. The two OS image files do not cover these separate partitions:
+
+[cols="1,1,3",options="header"]
+|===
+|Partition |Bytes |Saved mount evidence and preservation requirement
+|`vendor`, `mmcblk0p33`
+|897581056
+|Mounted ext4 read-only at `/android/vendor` and the LXC vendor path. Some files
+are overlaid from the Ubuntu image, but the vendor base is a separate dependency
+not contained in either saved OS image.
+|`system`, `mmcblk0p34`
+|3221225472
+|No mount of this partition appears in the saved inventory. The active Android
+system comes from `loop1` and the preserved Android root image. This does not
+establish that the separate system partition is empty, unnecessary or preserved.
+|===
+
+Together these two partitions occupy 4118806528 bytes. Neither has a completed
+partition-copy manifest. Any later acquisition needs fresh geometry and mount
+checks, bounded reads, independent repeat hashes and private saved-file
+verification. A read-only mount and matching hashes do not establish atomicity.
+Other firmware, calibration/control, cache and opaque state partitions also
+remain outside the completed boot/recovery/dtbo capture set. Label-based role
+classifications do not establish their contents or whether writers exist.
+
+==== Installed bootloader evidence
+
+The separate link:bootloader-preservation.adoc[LK preservation procedure]
+targets only the two 1 MiB `lk`/`lk2` partitions, whose geometry was rechecked
+through normal-mode ADB. Private copies can support passive identification and
+review of command/image-verification paths before a hardware transition. They
+do not demonstrate which copy executes, temporary-boot support or a usable
+fallback. No bootloader copy is implied by the existing boot-image backups.
+The owner subsequently completed this separate acquisition: both 1 MiB files
+passed saved-file and independent phone hashes, and a separate Mac check found
+the pair byte-identical. They remain private; this does not demonstrate
+bootloader selection, command availability or image acceptance.
+
 === Bounded partition acquisition
 
 `tools/acquire-partitions.py` is a read-only helper for this measured eMMC layout.
