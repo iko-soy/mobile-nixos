@@ -63,10 +63,11 @@ privately with saved-file and independent phone hashes. Their 1 MiB copies are
 identical. Passive inspection can narrow bootloader questions, but does not
 establish executed-copy selection, command support or a recovery route.
 
-The remaining separate vendor/system partitions now have a fixed, read-only
-acquisition helper with guarded process mount views and sparse Mac output.
-The procedure preserves their complete logical bytes; it does not replace
-consistent userdata/calibration preservation or establish a recovery route.
+The separate vendor/system partitions have since been preserved by a fixed,
+read-only helper with guarded process mount views and sparse Mac output.
+Their complete logical bytes passed independent Mac/phone hashes, and both saved
+ext4 filesystems passed read-only checking. This does not replace consistent
+userdata/calibration preservation or establish a recovery route.
 
 toc::[]
 

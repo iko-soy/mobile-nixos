@@ -431,6 +431,10 @@ are verified by exact sizes, saved-file hashes and independent phone hashes.
 Installed boot exactly matches the documented CI candidate; installed recovery
 is different and has been preserved separately. Data/calibration backup and a
 second copy on separate storage remain outstanding.
+Separate LK and vendor/system captures have since brought the completed private
+partition set to seven images. The vendor/system files retain their complete
+partition tails, have matching Mac/phone hashes and pass read-only ext4 checks;
+see link:os-partition-preservation.adoc[the preservation results].
 The downloaded recovery candidate automatically mounts userdata writable and
 contains enabled migration machinery; it is unsuitable for passive offline
 preservation. None of these findings establishes a tested restore path.

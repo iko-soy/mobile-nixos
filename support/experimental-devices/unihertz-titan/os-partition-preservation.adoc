@@ -105,6 +105,50 @@ bounded remote/local streams, sparse logical-byte accuracy, repeated hashes,
 space exhaustion, deadlines and incomplete-publication handling. Synthetic
 fixtures contain no private phone data and do not establish hardware recovery.
 
+== Completed private acquisition
+
+The owner ran the reviewed helper from the Mac terminal on 2026-10-15. Both
+complete partition copies passed exact byte counts, transfer hashing, saved-file
+readback and independent phone SHA-256 rereads. All repeated guards passed;
+vendor appeared twice in the reader and host PID 1 views and once in the
+selected Android init view, with both read-only flags in every observed row.
+
+A separate Mac check rehashed the completed files, checked their manifest and
+private modes, and confirmed the helper sources still matched the tested
+versions. No partial files remain in the completed output directory. Full
+hashes, binaries, process identities and diagnostics remain outside Git.
+
+Both copies contain ext4 filesystems smaller than their complete partitions:
+
+[cols="1,1,1",options="header"]
+|===
+|Partition |Ext4 bytes |Preserved bytes after ext4
+|vendor |883331072 |14249984
+|system |3170316288 |50909184
+|===
+
+Read-only `e2fsck -f -n` completed with exit status `0` for both saved images.
+Read-only `debugfs` inspection found the same Android 10 build fingerprint in
+vendor's `/build.prop` and system's `/system/build.prop`:
+`Unihertz/Titan/Titan:10/QP1A.190711.020/root.20221121.182739:user/release-keys`.
+Both report security patch `2022-12-05`. Vendor agrees with the runtime vendor
+property. The separate system partition differs from the active Halium system
+fingerprint recorded in the inventory; it contains a full Android system image
+alongside the active loop backing file. Build strings do not
+authenticate an OEM restore package.
+
+Each raw partition ends in an AVB footer with version `1.0` and a bounded
+1536-byte vbmeta region beginning with `AVB0`. The footer's original image size
+matches the corresponding ext4 size above. This is structural evidence only;
+no AVB signature, trust policy or bootloader acceptance was verified. The full
+partition tails were retained. Both image hashes remained unchanged after all
+local inspection.
+
+At verification, the two sparse files occupied about 3.41 GiB physically on the
+Mac for 3.84 GiB of logical partition bytes. The system filesystem itself has
+749611 of 774003 blocks in use, independently of personal files in userdata.
+Sparse allocation is an observed saving, not an estimate of userdata backup size.
+
 == Inspection and recovery limits
 
 After acquisition, independently verify file sizes, manifest hashes, source
