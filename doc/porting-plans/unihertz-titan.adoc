@@ -69,6 +69,13 @@ Their complete logical bytes passed independent Mac/phone hashes, and both saved
 ext4 filesystems passed read-only checking. This does not replace consistent
 userdata/calibration preservation or establish a recovery route.
 
+A further fixed read-only acquisition preserved fourteen firmware/boot-asset
+partitions and both separate eMMC boot areas, totaling 225 MiB with exact lengths
+and matching independent hashes. The private copies now cover 21 of 38 GPT
+partitions plus both boot areas. The remaining writable, control and opaque
+regions, active boot selection and an exercised restoration route remain
+unresolved; these additional copies do not close M0 or authorize a boot trial.
+
 toc::[]
 
 == Objective and recommended approach

@@ -94,6 +94,29 @@ matched to the owner's vendor fingerprint ending `root.20221121.182739`.
 The board string `g61v71c2k_dfl_tee` is a software-reported clue to the TEE
 variant, not confirmation of a compatible OEM region/package.
 
+A follow-up on 2026-10-15 reached the historical Drive collection's anonymous
+folder listings. The
+https://drive.google.com/drive/folders/1j8YHTlqlx1kgQ93xuyo8EdN1WKAujf-0[TEE full-ROM folder]
+listed `2020080711_g61v71c2k_dfl_tee.zip`, while the
+https://drive.google.com/drive/folders/11nSNmC4KW6OuswkCYZUS_YEtB-RtVect[EEA folder]
+listed `2020081015_g61v71c2k_dfl_eea.zip`. The corresponding Android 10 OTA
+listings contained
+https://drive.google.com/drive/folders/1DNbUuRJTZJ359rmNEj6R0y0Ur1w6Ndvs[TEE 2021020509]
+and
+https://drive.google.com/drive/folders/19RHgvjKmz2vxpq52joiFfOCRWMEuk0X9[EEA 2021020416].
+No firmware ZIP was downloaded or matched to the now-preserved
+`root.20221121.182739` vendor/system build. These older listings are not verified
+restore candidates, and the historical community-link provenance does not
+authenticate an OEM package.
+
+The linked six-page
+https://drive.google.com/file/d/1AKXzJo_n5TP3qA7Xjih9YCzaUdzrf6Os/view[flash tutorial]
+was readable. It specifies Windows XP or later, mentions Linux as possible but
+uses Windows instructions, and invokes `SPMultiPortFlashDownloadProject.exe`
+with VCOM drivers. It supplies neither a macOS restoration procedure nor
+demonstrated emergency recovery for this eMMC Titan. The public guide was
+inspected as a document; no installer, driver or flash tool was run.
+
 The current official link:https://www.unihertz.com/pages/contact-us[Unihertz contact page]
 lists `service@unihertz.com` for technical inquiries. A future owner inquiry
 should request the matching original-Titan eMMC firmware, exact variant/build,
@@ -288,10 +311,17 @@ remained unchanged after inspection. Their sparse output preserves every logical
 byte, including unused space and partition tails. Matching Android 10 build
 strings identify the copied vendor/system pair but do not authenticate an OEM
 restore package. A read-only mount and matching hashes do not establish atomicity.
-Other firmware, calibration/control, cache and opaque state partitions also
-remain outside the seven completed boot/recovery/dtbo/lk/lk2/vendor/system
-partition copies. Label-based role classifications do not establish their
-contents or whether writers exist.
+
+The subsequent link:firmware-preservation.adoc[firmware and eMMC boot-area
+acquisition] completed on 2026-10-15: fourteen further GPT regions plus both
+separate 4 MiB boot areas, totaling 225 MiB. Exact byte counts, saved-file and
+independent phone hashes agree; an independent Mac rehash also passed. Repeated
+metadata checks retained the required boot-area read-only flags and found no
+target mounts in the three guarded process views. The completed set now covers
+21 of the 38 GPT partitions plus both boot areas. The linked record enumerates
+the remaining 17 GPT partitions. Calibration, userdata, control/security state
+and RPMB remain outside this acquisition. Label-based roles and matching hashes
+do not establish immutability, a complete restore set or active boot selection.
 
 ==== Installed bootloader evidence
 
@@ -436,8 +466,8 @@ writers; establish quiescence before a consistency claim.
 |Other recovery dependencies
 |Retain the preserved GPT metadata and inventory `para`/bootloader control state,
 vendor/firmware and any additional unique partitions. eMMC `boot0`/`boot1` are
-distinct from GPT `boot`; leave their write protection intact. The GPT helper
-does not acquire their contents.
+distinct from GPT `boot`; leave their write protection intact. Their contents
+are now preserved by the separate firmware reader, not by the GPT helper.
 |===
 
 The Mac had approximately 32 GiB free during this session, insufficient for an
@@ -815,32 +845,47 @@ This is a staged procedure with explicit unresolved prerequisites, not a tested
 restore recipe. No flashing commands are supplied until their target and
 transport have been verified on this exact phone.
 
-. Retain the verified boot/recovery/dtbo originals and make a second verified
-  copy on separate storage; finish consistent data/calibration preservation.
-  Record the installed image hashes, full partition
-  map, OTA identity and matching firmware dependencies.
-. Audit the actual installed and candidate recovery ramdisks before choosing an
-  offline backup environment. The pinned adaptation's
-  link:{ut-src}/ramdisk-recovery-overlay/system/bin/setup-fake-cache[setup-fake-cache]
-  mounts userdata without `ro`, creates a cache directory and can process a
-  staged command. Its link:{ut-src}/ramdisk-recovery-overlay/prop.halium[prop.halium]
-  enables LVM use; its comments describe migration. The
-  link:{ut-src}/ramdisk-recovery-overlay/system/etc/recovery.fstab[recovery fstab]
-  maps `para` to `/misc` and uses userdata `check,quota` options. Source settings
-  alone do not establish when migration occurs, but this recovery cannot be
-  presumed to leave data untouched.
-. With separate owner authorization, record physical bootloader entry and exit,
-  Mac recognition, product, partition sizes, lock state and whether the endpoint
-  is bootloader fastboot or userspace fastboot. Unsupported queries remain
-  unknown. Verify a return to the existing Ubuntu Touch system before proposing
-  a write. Do not assume temporary boot or partition readback works.
-. Prepare a boot-only rollback using the exact preserved boot artifact and
+. Retain all verified private copies and their manifests, partition map, OTA
+  identity and firmware evidence. Make and independently verify a second copy
+  on separate storage when a destination is available; the owner currently has
+  none. Record outstanding coverage explicitly. Additional firmware copies do
+  not replace consistent userdata/calibration preservation.
+. Resolve the exact proposed entry and return procedures before requesting a
+  trial. Trace the installed normal-mode command or physical route, orderly
+  shutdown, possible boot-control/RTC changes and modem effects. Document the
+  expected exit mechanism and failure fallback for review. These questions
+  remain open; bootloader strings do not establish reachable commands. A route
+  through recovery must account for that image's startup writes.
+. With separate owner authorization, perform only the reviewed entry,
+  recognition and return trial. Record Mac recognition, product, relevant
+  partition sizes and lock state; distinguish bootloader fastboot from userspace
+  fastbootd. Unsupported queries remain unknown. Send no image and issue no
+  flash, erase or configuration commands. Verify return to the existing Ubuntu
+  Touch installation. This trial is a prerequisite to an offline boot proposal,
+  not a claim that consistent data preservation has already been achieved.
+. Separately review an offline preservation environment and its entry/exit
+  contract. Audit the actual image's startup behavior; neither the public
+  recovery candidate nor the different installed recovery is presumed passive.
+  A rescue boot requires explicit authorization, reviewed image acceptance,
+  transport readiness, failure behavior and a demonstrated return route. The
+  unsigned build-only artifact and VM results do not establish these hardware
+  properties. Resolve the missing independent backup copy in that review.
+. Before acquiring userdata or calibration, establish the required writer
+  quiescence, unmounted targets, identities and filesystem geometry. Account for
+  every required calibration/control region and any filesystem tail. The current
+  producer selects userdata only and requires its filesystem geometry to match
+  the partition, with clean state and no pending recovery or orphan cleanup.
+  An abrupt reset of the live filesystem does not establish those conditions.
+  Do not bypass guards or repair the source to make acquisition succeed.
+  Validate the resulting archives and metadata and retain two verified copies.
+. Only after the required preservation and entry/return gates are satisfied,
+  prepare a boot-only rollback using the exact preserved boot artifact and
   verified partition target. Obtain separate authorization for that concrete
   write and subsequent normal boot; retain logs and verify essential behavior.
-  This demonstrates only the exercised rollback, not a full reinstall or
+  Success demonstrates only the exercised rollback, not a full reinstall or
   recovery from damaged bootloader/storage metadata.
-. Obtain the matching OEM eMMC package and documented emergency restoration
-  method separately: variant/build, hashes, scatter layout, download-agent and
+. In parallel, obtain the matching OEM eMMC package and documented emergency
+  restoration method: variant/build, hashes, scatter layout, download-agent and
   authentication requirements, host OS, drivers/tool version and physical entry.
   No verified macOS MediaTek emergency path is available in this record.
 

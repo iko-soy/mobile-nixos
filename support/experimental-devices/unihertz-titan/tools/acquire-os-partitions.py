@@ -543,10 +543,18 @@ class SparseSink:
 
 class PrivateOutput(bootloaders.PrivateOutput):
     """Reuse anchored creation/privacy; replace LK's whole-file readback/pair."""
-    def __init__(self, requested):
+    def __init__(self, requested, size_mapping=None):
+        # Internal fixed-profile callers may publish a different bounded set.
+        # No command-line input supplies this mapping. Preserve the OS default.
+        self.image_sizes = (dict(size_mapping) if size_mapping is not None else
+                            {label: target_bytes(label) for label in TARGETS})
+        require(0 < len(self.image_sizes) <= 16 and all(
+            type(label) is str and re.fullmatch(r"[a-z][a-z0-9_]{0,31}", label)
+            and type(size) is int and 0 < size <= DISK_BYTES
+            for label, size in self.image_sizes.items()), "Invalid fixed private image set.")
         super().__init__(requested)
         try:
-            self.budget = SpaceBudget(self.fd, sum(target_bytes(label) for label in TARGETS))
+            self.budget = SpaceBudget(self.fd, sum(self.image_sizes.values()))
         except BaseException:
             self.close()
             raise
@@ -578,7 +586,7 @@ class PrivateOutput(bootloaders.PrivateOutput):
     def publish(self):
         self.recheck(); self.budget.check()
         try:
-            for name in (*(label + ".img" for label in TARGETS), "manifest.json"):
+            for name in (*(label + ".img" for label in self.image_sizes), "manifest.json"):
                 pending = name + ".part"
                 os.link(pending, name, src_dir_fd=self.fd, dst_dir_fd=self.fd, follow_symlinks=False)
                 self.owned[name] = self.owned[pending]

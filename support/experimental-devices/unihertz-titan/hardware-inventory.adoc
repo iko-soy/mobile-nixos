@@ -321,6 +321,23 @@ the reported vendor build above, while the separate system image differs from
 the active Halium system. This does not authenticate a firmware package or
 establish a restoration route.
 
+A further metadata probe exposed both separate eMMC boot areas as 4194304-byte
+block devices: `mmcblk0boot0` at `179:32` and `mmcblk0boot1` at `179:64`.
+Both are canonical children of the measured `mmcblk0`, with 512-byte
+logical/physical sectors, `ro=1`, `force_ro=1` and empty holders/slaves.
+They are unreadable to `phablet`. Active boot-area selection remains unknown.
+The same probe revalidated fourteen remaining firmware/boot-asset
+regions totaling 217 MiB, with no mounts in the complete reader/PID 1 views;
+see link:firmware-preservation.adoc[the fixed preservation scope]. No block
+contents or RPMB interface were read by this metadata probe.
+The subsequent privileged fixed acquisition preserved all sixteen images,
+totaling 225 MiB, with matching transfer, saved-file and independent phone hashes.
+Independent Mac rehashing confirmed the complete set and private permissions.
+All three process mount-view guards passed during acquisition, and the existing
+boot-area read-only flags remained required. This brings coverage to 21 GPT
+partitions plus both separate boot areas, without establishing an atomic
+snapshot, active-bank selection or recovery capability.
+
 === Direct userdata source geometry
 
 A later normal-mode ADB probe revalidated the original eMMC layout without
@@ -736,7 +753,7 @@ by itself proves the bootloader state or a usable restore procedure.
 |Recovery host/tools |Mac Platform-Tools `37.0.1-15733141`; normal-mode ADB confirmed. Bootloader connectivity and low-level restore remain unverified.
 |Enter recovery/bootloader |Unknown; record exact verified procedure for this phone.
 |Temporary boot support |Unknown; do not assume `fastboot boot` or kexec is available.
-|Restore method and artifacts |Private installed boot/recovery/dtbo and GPT metadata retained; verified restoration transport/commands and matching OEM package remain unavailable.
+|Restore method and artifacts |Private copies cover 21 GPT partitions plus both separate eMMC boot areas; GPT metadata and root-filesystem backing files are also retained. Consistent writable-state preservation, verified restoration transport/commands and a matching OEM package remain unavailable.
 |Restoration demonstrated |No evidence yet; record date, result and subsequent normal boot.
 |===
 

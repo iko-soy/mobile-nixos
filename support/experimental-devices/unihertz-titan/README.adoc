@@ -34,6 +34,8 @@ hardware works under NixOS.
   establish that either bootloader copy is a working fallback.
 * A fixed-scope link:os-partition-preservation.adoc[vendor/system reader] with
   guarded process mount views, bounded streaming and sparse private Mac output.
+* A fixed 225 MiB link:firmware-preservation.adoc[firmware/boot-area reader]
+  covering fourteen further GPT regions and both separate eMMC boot areas.
 
 The reference image retains Ubuntu Touch's command line and userspace contract.
 It is not a NixOS initramfs or root filesystem. Current Mobile NixOS uses a
@@ -431,10 +433,15 @@ are verified by exact sizes, saved-file hashes and independent phone hashes.
 Installed boot exactly matches the documented CI candidate; installed recovery
 is different and has been preserved separately. Data/calibration backup and a
 second copy on separate storage remain outstanding.
-Separate LK and vendor/system captures have since brought the completed private
-partition set to seven images. The vendor/system files retain their complete
+Separate LK and vendor/system captures brought the private partition set to
+seven images. The vendor/system files retain their complete
 partition tails, have matching Mac/phone hashes and pass read-only ext4 checks;
 see link:os-partition-preservation.adoc[the preservation results].
+The subsequent link:firmware-preservation.adoc[225 MiB firmware acquisition]
+preserved fourteen further GPT partitions and both separate eMMC boot areas,
+with exact lengths and matching independent hashes. The completed set now covers
+21 of 38 GPT partitions plus both boot areas; consistent writable-state
+preservation and the remaining control/security regions are still outstanding.
 The downloaded recovery candidate automatically mounts userdata writable and
 contains enabled migration machinery; it is unsuitable for passive offline
 preservation. None of these findings establishes a tested restore path.

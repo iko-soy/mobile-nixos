@@ -1,0 +1,173 @@
+= Firmware and eMMC boot-area preservation
+
+The earlier seven partition copies left several firmware and boot-asset
+dependencies uncovered. A fresh normal-mode USB metadata probe on 2026-10-15
+matched the following remaining GPT regions to the preserved map. Their labels
+suggest roles; they do not establish their formats, immutability, active-bank
+selection or compatibility with a replacement OS.
+
+== Fixed acquisition scope
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Label |Block node |Start sector |Sectors |Bytes
+|`md1img` |`mmcblk0p14` |436224 |204800 |104857600
+|`spmfw` |`mmcblk0p15` |641024 |2048 |1048576
+|`scp1` |`mmcblk0p16` |643072 |12288 |6291456
+|`scp2` |`mmcblk0p17` |655360 |12288 |6291456
+|`sspm_1` |`mmcblk0p18` |667648 |2048 |1048576
+|`sspm_2` |`mmcblk0p19` |669696 |2048 |1048576
+|`cam_vpu1` |`mmcblk0p20` |671744 |30720 |15728640
+|`cam_vpu2` |`mmcblk0p21` |702464 |30720 |15728640
+|`cam_vpu3` |`mmcblk0p22` |733184 |30720 |15728640
+|`gz1` |`mmcblk0p23` |763904 |32768 |16777216
+|`gz2` |`mmcblk0p24` |796672 |32768 |16777216
+|`logo` |`mmcblk0p29` |1030144 |16384 |8388608
+|`tee1` |`mmcblk0p31` |1062912 |10240 |5242880
+|`tee2` |`mmcblk0p32` |1073152 |24576 |12582912
+|===
+
+All sectors are 512 bytes. The 14 partitions total 227540992 bytes (217 MiB).
+Each target reports `ro=0`, empty holders and no read permission for `phablet`.
+None appears mounted in the complete reader or host PID 1 mount views. These
+observations do not prove absence of raw firmware writers. The unequal measured
+`tee1`/`tee2` sizes are intentional profile values, not a reason to trim or pad
+either copy.
+
+Two additional eMMC boot areas are exposed separately from the GPT user area:
+
+[cols="1,1,1,1",options="header"]
+|===
+|Block node |Device number |Sectors |Bytes
+|`mmcblk0boot0` |`179:32` |8192 |4194304
+|`mmcblk0boot1` |`179:64` |8192 |4194304
+|===
+
+Both are block devices and canonical sysfs children of the measured `mmcblk0`.
+They report 512-byte logical/physical sectors, `ro=1`, `force_ro=1`, empty
+holders/slaves and no read permission for `phablet`. These flags must remain
+unchanged. Their active boot-area selection has not been established.
+Their names do not establish that either contains a usable preloader or fallback.
+The combined fixed scope is 235929600 bytes (225 MiB), across 16 outputs.
+
+The https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe/Documentation/mmc/mmc-dev-parts.txt[pinned kernel documentation]
+describes boot-area read access with writes disabled by default. Its
+https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe/drivers/mmc/core/block.c#L265[`force_ro` implementation]
+controls a kernel block-device restriction. The observed flags do not establish
+permanent hardware protection or which boot area the eMMC is configured to use.
+
+== Acquisition requirements
+
+`tools/acquire-firmware.py` implements only this fixed set. It reuses the
+reviewed OS reader's parent-map, process-identity, bounded transport and private
+sparse-output code, and adds the firmware exclusions and boot-area guards.
+The OS reader's existing vendor/system defaults remain unchanged.
+
+Use normal-mode ADB and the existing phone Python only. Revalidate the complete
+38-entry user-area map, parent MMC identity and geometry, target label/device
+identity, boot-area relationships and read-only flags, holders/slaves and the
+reader, host PID 1 and identified Android init mount views. Every target must be
+unmounted in those views. Do not change a block flag, mount, namespace, service
+or boot mode to make a guard pass.
+
+Hold read-only descriptors and check their identities and geometry before
+bounded transfers. Require exact bytes, independent phone rereads, private Mac
+saved-file hashes and repeated metadata checks before publishing the complete
+set. Preserve full raw bytes, including padding; zero-only sparse holes may
+reduce physical Mac allocation without changing the logical images. Matching
+reads remain observations, not proof of an atomic device-wide snapshot.
+
+Store images, hashes, manifests and raw diagnostics outside Git and the Nix
+store with directories `0700` and files `0600`. Enter any required phone sudo
+password only at a hidden local Terminal prompt. Do not execute captured code.
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/acquire-firmware.py \
+  --sudo --output /absolute/private/new-firmware-copies
+----
+
+The output parent must exist and the output directory must be new. Normal-mode
+ADB binary/status checks and unprivileged metadata checks precede any password
+prompt. A live no-sudo run passed those checks and stopped at the expected
+permission boundary without creating output or reading block contents. A
+separate `sudo -n` check also found no reusable noninteractive credentials.
+The phone program uses `/usr/bin/python3 -I -S -B`; no software is installed.
+
+The Mac Nix test target passed all 247 tests and the boot-packaging fixture.
+Thirteen new synthetic tests cover the actual added guards, every target in
+all three mount views, boot-area flags/identity and GET-only ioctls, bounded
+streams, full space reservation, hashes, publication failures and credential
+ordering. These are software tests, not boot or restoration evidence.
+
+This scope excludes calibration, userdata, control/security-state partitions,
+cache, OTP-labeled user-area data and RPMB. The helper opens no RPMB node and
+issues no MMC control ioctl, boot-selection change or write-protection command.
+Ordinary boot-area reads still use the kernel's
+https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe/drivers/mmc/core/block.c#L1276[hardware-partition access switch]:
+it selects the accessed area in `EXT_CSD_PART_CONFIG` while preserving the bits
+outside the access mask. This internal I/O operation is distinct from changing
+which area the eMMC boots or clearing its write protection.
+Consistent writable-state preservation and a demonstrated recovery route remain
+separate requirements in link:recovery-preparation.adoc[the recovery record].
+
+== Completed private acquisition
+
+The fixed acquisition completed on 2026-10-15. All sixteen complete images have
+the exact lengths above, totaling 235929600 logical bytes. Transfer, saved-file
+readback and independent bounded phone SHA-256 values agree for every image.
+A subsequent independent Mac pass rehashed all images, checked the complete
+manifest and confirmed the private directory/file modes (`0700`/`0600`), regular
+files, ownership and single links. The acquisition sources match the frozen
+versions that passed the 247-test suite and packaging fixture.
+
+The completed manifest records all guards passing: the full 38-partition map,
+held descriptor geometry, empty holders/slaves, boot-area read-only flags and
+complete reader, host PID 1 and identified Android init mount views. No target
+was mounted in those views. These observations do not exclude other namespaces
+or raw kernel/firmware writers. The helper requested no block-flag changes,
+boot-selection changes, phone software installation or reboot.
+
+Zero-only sparse holes reduced the observed Mac allocation to 154861568 bytes
+(147.6875 MiB), while retaining all 225 MiB of logical image contents. This is a
+measurement of these files, not a promised compression ratio or evidence that
+filesystem-free blocks are zero. Raw images, hashes and manifests remain private.
+
+== Passive structure inspection
+
+Read-only inspection of the saved bytes found complete bounded MediaTek header
+chains in twelve of the fourteen GPT images. Their 512-byte version-1 headers
+and 16-byte alignment agree with the field layout in the
+https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe/drivers/misc/mediatek/ccci_util/ccci_util_lib_load_img.c#L1144[pinned kernel image reader].
+Both `gz1` and `gz2` are entirely zero. `md1img`, `sspm_1` and `sspm_2` contain
+additional nonzero bytes after their parsed chains; those bytes must not be
+discarded or assumed to be padding.
+
+The complete `scp1`/`scp2`, `sspm_1`/`sspm_2`, `gz1`/`gz2` and `boot0`/`boot1`
+pairs are byte-identical. The first 5 MiB of `tee2` equals all of `tee1`, and its
+additional 7 MiB is zero; their complete files still have different lengths.
+Each boot area contains `EMMC_BOOT` at offset 0, `BRLYT` at offset 512 and the
+four bytes `4d 4d 4d 01` at offset 2048. These are format clues, not proof of
+authenticated firmware, a usable preloader or a bootable fallback. All saved
+image hashes remained unchanged; no captured code was executed.
+
+== Remaining preservation coverage
+
+Together with the earlier boot/recovery/dtbo, LK and vendor/system captures,
+the private set now covers 21 of the 38 GPT partitions, plus the two separate
+eMMC boot areas. Their combined logical size is 4432330752 bytes. This count
+excludes the separately preserved GPT windows and root-filesystem backing files.
+The boot areas are not GPT partitions, and matching copies do not establish
+which boot area or redundant firmware bank is used.
+
+The 17 GPT partitions still outside the completed set are `boot_para`, `para`,
+`expdb`, `frp`, `nvcfg`, `nvdata`, `metadata`, `protect1`, `protect2`, `seccfg`,
+`sec1`, `proinfo`, `nvram`, `cache`, `userdata`, `otp` and `flashinfo`. Labels do
+not establish their formats or whether they contain unique data. In particular,
+mounted writable userdata/calibration regions need a consistent preservation
+environment; unmounted regions are not automatically free of raw writers.
+RPMB remains outside this acquisition and has not been opened.
+
+The Mac remains the only backup destination. These additional copies narrow the
+preservation gap but do not authenticate an OEM package, form an atomic snapshot
+or demonstrate restoration. No generated image has booted on the Titan.
