@@ -82,6 +82,16 @@ full hashes, source metadata and detailed inspection output remain private.
 This preserves observed installed bytes; neither copy was executed, restored,
 authenticated against an OEM package or demonstrated as a fallback.
 
+A later live vendor/system preflight exposed a procfs short-read bug shared by
+the original LK metadata reader: one unbuffered read could end at a newline
+before the end of mountinfo. Full mount-table coverage was therefore not
+established by that earlier implementation. Both readers now continue to actual
+EOF within their fixed limits, with regressions for unsafe mounts in later
+chunks. A subsequent normal-mode LK metadata probe passed the corrected full
+shell/PID 1 mount checks without reading partition contents. This correction
+does not invalidate the saved-byte counts or independent hash agreement above;
+it does not retroactively prove the earlier mount state.
+
 == Passive inspection and remaining limits
 
 Inspect copies as data, without executing their contents. Record bounded image

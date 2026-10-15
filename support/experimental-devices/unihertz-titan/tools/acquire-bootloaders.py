@@ -55,11 +55,24 @@ def require(condition):
     if not condition:
         raise ValueError("fixed guard rejected")
 
+def bounded_text(stream, limit):
+    # A short proc seq_file/sysfs read is not EOF; later mount records must not
+    # disappear just because the first short chunk happens to end in a newline.
+    chunks, total = [], 0
+    while True:
+        chunk = stream.read(min(65536, limit + 1 - total))
+        require(isinstance(chunk, bytes))
+        if not chunk: break
+        total += len(chunk)
+        require(total <= limit)
+        chunks.append(chunk)
+    data = b"".join(chunks)
+    require(data.endswith(b"\n") and b"\0" not in data)
+    return data.decode("ascii")[:-1]
+
 def text(path, limit=4096):
     with open(path, "rb", buffering=0) as stream:
-        data = stream.read(limit + 1)
-    require(len(data) <= limit and data.endswith(b"\n") and b"\0" not in data)
-    return data.decode("ascii")[:-1]
+        return bounded_text(stream, limit)
 
 def number(value, maximum=DISK_SECTORS):
     require(re.fullmatch(r"0|[1-9][0-9]{0,14}", value) is not None)

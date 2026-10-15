@@ -32,6 +32,8 @@ hardware works under NixOS.
 * A separate fixed-scope link:bootloader-preservation.adoc[LK partition reader]
   for private passive bootloader inspection. It does not enter fastboot or
   establish that either bootloader copy is a working fallback.
+* A fixed-scope link:os-partition-preservation.adoc[vendor/system reader] with
+  guarded process mount views, bounded streaming and sparse private Mac output.
 
 The reference image retains Ubuntu Touch's command line and userspace contract.
 It is not a NixOS initramfs or root filesystem. Current Mobile NixOS uses a

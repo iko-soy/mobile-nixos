@@ -1,0 +1,120 @@
+= Installed vendor and system preservation
+
+The saved Ubuntu and Android root image files do not contain the separate
+`vendor` and `system` partitions. Preserving those partitions closes a specific
+gap in the installed OS materials; it does not supply an atomic userdata backup,
+a complete firmware set or a tested restoration procedure.
+
+== Fixed scope and live evidence
+
+A normal-mode USB metadata probe on 2026-10-15 confirmed the following geometry,
+agreeing with the preserved GPT and kernel map. Sectors are 512 bytes.
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Label |Block node |Start sector |Sectors |Bytes
+|`vendor` |`mmcblk0p33` |1097728 |1753088 |897581056
+|`system` |`mmcblk0p34` |2850816 |6291456 |3221225472
+|===
+
+The parent is non-removable MMC with 244285440 sectors and 512-byte
+logical/physical sectors. Device numbers are `259:1` and `259:2`. Both target
+nodes report `ro=0`, no observed holders and no read permission for `phablet`.
+The reader does not change their flags or permissions.
+
+The shell and host PID 1 mount views show vendor as ext4 at `/android/vendor`
+and `/var/lib/lxc/android/rootfs/vendor`, with both per-mount and superblock
+options read-only. Neither view shows the separate system partition mounted.
+The active Android system instead comes from the previously preserved loop
+backing file. Absence of a system mount does not mean the partition is empty.
+
+The Android container uses global process IDs in the observed `NSpid` fields.
+Three processes named `init` belong to the exact `0::/lxc.payload.android`
+cgroup; only one has a parent named `lxc-start` in
+`0::/lxc.monitor.android`. The other two are its children. This relationship
+provides a dynamic selector for the observed Android init mount view without
+hardcoding process IDs or assuming a nested PID namespace. Raw process
+inventory and device identifiers remain private.
+
+== Bounded read-only acquisition
+
+`tools/acquire-os-partitions.py` accepts only this fixed pair. It validates the
+complete 38-entry kernel partition map, label resolution, device numbers,
+sysfs parents, geometry and empty holders/slaves. Held read-only block
+descriptors provide size and sector-size checks. It does not reread GPT contents.
+
+The guarded mount views are the reader itself, host PID 1 and the dynamically
+identified Android init. System and whole-disk mounts are rejected by device
+number. Any observed vendor mount must be ext4 with both per-mount and superblock
+options read-only, and the reader's own view must contain at least one such
+vendor mount. Android init and its monitor have their process identity,
+ancestry and mount namespace identity retained and checked around acquisition;
+the reader and host PID 1 mount views are repeatedly sampled.
+These are specific process mount views:
+mountinfo visibility also depends on each process's root. They are not an
+exhaustive view of all mount namespaces or proof that raw firmware writers are
+absent.
+
+The phone streams each exact partition length in bounded chunks, checks the
+guards again, and later computes a separate bounded SHA-256 reread. The Mac
+hashes the transfer and independently rereads the saved file. Both images are
+published only when byte counts, all three hashes and repeated guards agree.
+Agreement describes those observations, not an atomic snapshot.
+
+The 4118806528 logical bytes total about 3.84 GiB. Entirely zero chunks are
+stored as holes where the Mac filesystem supports sparse files; all nonzero
+bytes, unused space and partition tails remain intact. The helper does not
+interpret filesystem allocation or discard free blocks. Physical savings depend
+on the actual bytes, so it checks room for the entire remaining logical size
+plus a 64 MiB reserve and rechecks available space during transfer. Sparse
+storage reduces physical allocation without reducing bytes read from the phone.
+
+Run the reviewed helper from a local Mac terminal:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/acquire-os-partitions.py \
+  --sudo --output /absolute/private/new-os-partition-copies
+----
+
+The output parent must already exist. The output directory must be new and
+outside Git, jj and the Nix store. Directories are `0700` and files `0600`.
+Keep all images, complete hashes, manifests and diagnostics private. Retained
+`.part` files are incomplete evidence, not completed backups.
+
+The normal-mode ADB binary/status checks and unprivileged metadata checks precede
+any password prompt. Enter the phone's existing sudo password only at the hidden
+local terminal prompt. The fixed phone program uses `/usr/bin/python3 -I -S -B`;
+it installs no software and changes no mount, block flag, boot mode or partition.
+
+The live no-sudo preflight passed the ADB transport and complete reader/PID 1
+mount checks, then stopped at missing block/Android-view read permissions before
+creating an output directory or reading partition contents. Full privileged
+checks remain mandatory immediately before acquisition.
+
+That preflight exposed a procfs short-read issue: a single unbuffered read
+returned a newline-terminated prefix of mountinfo, omitting the vendor records.
+Metadata readers now continue to actual EOF within the fixed limit, including
+the shared pattern in the LK helper. Tests exercise late writable mounts,
+short-read boundaries and overflow; the existing LK-copy evidence caveat is
+recorded in link:bootloader-preservation.adoc[the bootloader record].
+
+The Mac Nix test target passed all 234 host tests and the boot-packaging fixture.
+The 28 new tests cover actual metadata guards and process identity checks,
+bounded remote/local streams, sparse logical-byte accuracy, repeated hashes,
+space exhaustion, deadlines and incomplete-publication handling. Synthetic
+fixtures contain no private phone data and do not establish hardware recovery.
+
+== Inspection and recovery limits
+
+After acquisition, independently verify file sizes, manifest hashes, source
+identity and private permissions. Inspect saved images as data. If an ext4
+filesystem is recognized, a read-only `e2fsck -f -n` check can assess the saved
+filesystem without repairing it. Retain the complete raw partition even when
+the filesystem occupies less space, and verify the image hash after inspection.
+
+Consistent userdata and calibration preservation, remaining firmware/control
+regions, a second independent backup destination and a demonstrated boot/return
+path remain separate requirements in
+link:recovery-preparation.adoc[the recovery record]. These captures do not
+authorize a boot test or prove that a restore would succeed.

@@ -306,6 +306,14 @@ permission for `phablet`. No partition contents were read by this probe and no
 block flags changed. See link:bootloader-preservation.adoc[the bounded LK
 preservation plan] for the separate acquisition and interpretation limits.
 
+A later normal-mode metadata check confirmed `vendor` as `mmcblk0p33`, start
+1097728, length 1753088 sectors, and `system` as `mmcblk0p34`, start 2850816,
+length 6291456 sectors. Vendor is ext4 with both per-mount and superblock
+read-only options in the shell and host PID 1 views; system has no observed
+mount there. The Android init selector and separate bounded acquisition scope
+are recorded in link:os-partition-preservation.adoc[the OS partition procedure].
+This metadata check read no partition contents and did not change phone state.
+
 === Direct userdata source geometry
 
 A later normal-mode ADB probe revalidated the original eMMC layout without

@@ -280,9 +280,12 @@ establish that the separate system partition is empty, unnecessary or preserved.
 |===
 
 Together these two partitions occupy 4118806528 bytes. Neither has a completed
-partition-copy manifest. Any later acquisition needs fresh geometry and mount
-checks, bounded reads, independent repeat hashes and private saved-file
-verification. A read-only mount and matching hashes do not establish atomicity.
+partition-copy manifest. The separate
+link:os-partition-preservation.adoc[vendor/system acquisition procedure] adds
+fresh geometry and mount checks, bounded reads, independent repeat hashes and
+private saved-file verification. Its sparse output preserves every logical byte,
+including unused space and partition tails. A read-only mount and matching
+hashes do not establish atomicity.
 Other firmware, calibration/control, cache and opaque state partitions also
 remain outside the completed boot/recovery/dtbo capture set. Label-based role
 classifications do not establish their contents or whether writers exist.
