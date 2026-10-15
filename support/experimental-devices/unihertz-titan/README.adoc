@@ -60,10 +60,12 @@ hardware works under NixOS.
 * The link:native-n0.adoc[native route's N0 record], after the owner chose the
   native route on 2026-10-15: the pinned postmarketOS MT6771 starting point,
   the Titan's hardware facts, a gap table and a bounded first-boot scope.
-* A build-only first native-route image and its
-  link:native-boot-trial.adoc[trial proposal]: Linux 7.3-rc3 with a Titan
-  device tree and bootloader overlay (`native/`) and the probe built for modern
-  device naming, started from the recovery partition. Not run.
+* The link:native-boot-trial.adoc[first native-route boot], run on
+  2026-10-15 with the owner's approval: Linux 7.3-rc3 with a Titan device tree
+  and bootloader overlay (`native/`) booted from the recovery partition, and
+  the probe, built for modern device naming, reported kernel `7.3.0-rc3` after
+  guarding the eMMC and binding USB device mode. The phone then restarted into
+  Ubuntu Touch, and the original recovery was restored.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1233,3 +1235,19 @@ bootloader fastboot, the preserved original recovery was written back and read
 back byte for byte, and boot and dtbo never changed. This is the first kernel
 built by this repository to run on the Titan, and it passes M1's hardware gate
 for the kernel.
+
+=== Follow-up: first native-route boot
+
+After the owner chose the native route, the link:native-n0.adoc[N0 record]
+pinned the postmarketOS MT6771 kernel package as the starting point, and N1
+built Linux 7.3-rc3 with its patches, a vendored T-PHY role-switch patch and a
+local hardening follow-up, a Titan device tree and minimal bootloader overlay,
+and the probe built for modern device naming. An independent review caught a
+mainline PMIC keys register layout that disagrees with the Titan's vendor
+kernel and would have rewritten persistent PMIC state; that driver stays off.
+The owner approved and ran the link:native-boot-trial.adoc[first native-route
+boot trial] on 2026-10-15: the bootloader started the modern image from
+recovery, the probe reported kernel `7.3.0-rc3` after guarding the eMMC and
+binding USB device mode, the phone restarted into Ubuntu Touch, and the
+original recovery was restored byte for byte, with boot and dtbo unchanged.
+This is the first mainline-based kernel to run on the Titan.

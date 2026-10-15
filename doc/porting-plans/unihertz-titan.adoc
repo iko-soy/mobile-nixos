@@ -119,6 +119,9 @@ M0 remains open for firmware/restore provenance and outstanding hardware
 details. On 2026-10-15 the owner chose the native route (decision D1); its
 link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/experimental-devices/unihertz-titan/native-n0.adoc[N0 record]
 pins a postmarketOS MT6771 starting point and bounds a first modern boot.
+That boot ran the same day: Linux 7.3-rc3 with a Titan device tree and
+bootloader overlay started from the recovery partition, enumerated the eMMC and
+reported over USB device mode, then restarted into Ubuntu Touch.
 
 toc::[]
 

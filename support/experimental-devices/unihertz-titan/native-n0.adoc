@@ -153,6 +153,7 @@ link:repo-kernel-trial.adoc[repository-kernel trial] already plans for.
 Built on 2026-10-15 (`native/`): the pinned donor kernel with the T-PHY fix
 (`nativeKernel`), the Titan device tree and minimal overlay, a probe profile for
 modern device naming (`usbProbe.modernRamdisk`) and the assembled image
-(`nativeProbeImage`), with a flash profile. The
-link:native-boot-trial.adoc[first native-route boot trial] proposes running
-it.
+(`nativeProbeImage`), with a flash profile. On 2026-10-15 the
+link:native-boot-trial.adoc[first native-route boot trial] ran it: the modern
+kernel booted, the eMMC enumerated, USB device mode worked and the phone
+restarted into Ubuntu Touch.

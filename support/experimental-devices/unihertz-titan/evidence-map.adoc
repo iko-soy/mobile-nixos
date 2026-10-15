@@ -89,6 +89,15 @@ restart into fastboot; byte-exact restore of the original recovery
 |The UBports initramfs, any NixOS userspace, other builds of the recipe; see
 link:repo-kernel-trial.adoc[the trial record]
 
+|First native-route boot
+|One owner-approved trial: Linux 7.3-rc3 with the Titan tree and overlay booted
+from recovery; the probe reported kernel `7.3.0-rc3` after guarding the eMMC
+and binding USB device mode; a plain restart booted Ubuntu Touch; byte-exact
+restore of the original recovery
+|2026-10-15
+|Display, input, charging, audio, radios, NixOS userspace; which overlay the
+bootloader applied; see link:native-boot-trial.adoc[the trial record]
+
 |Second copy of the rollback set
 |The owner's remote copy of the six cataloged sets and the offline region
 copy, all 57 files matching a SHA-256 list made on the Mac

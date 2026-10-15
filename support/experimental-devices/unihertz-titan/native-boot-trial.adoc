@@ -1,14 +1,53 @@
 = First native-route boot trial
 
-Status on 2026-10-15: proposal only. Nothing in it has run on the phone, and
-it authorizes no phone action. Running it needs the owner's explicit approval
-of this procedure, and that approval covers one run.
+Status on 2026-10-15: *run once with the owner's explicit approval; all four
+questions were answered yes. See <<result,the result>>.* Each repetition needs
+the owner's explicit approval of this exact procedure.
 
 This is N1's first hardware step on the native route (link:native-n0.adoc[N0
 record]): a modern kernel with a Titan device tree, started from the recovery
 partition with the link:usb-probe/README.adoc[USB probe] built for modern
 device naming, then the original recovery restored. Ubuntu Touch's boot and
 `dtbo` partitions are never written.
+
+[[result]]
+== Result (2026-10-15)
+
+The owner approved the procedure and ran the partition reads, the entries and
+the Volume Up start; watchers ran the fastboot steps and the listener.
+
+* *Preconditions.* Step 2 found boot, recovery and dtbo identical to their
+  preserved copies and `para` unchanged; of the control regions only `expdb`
+  had changed. The battery was full.
+* *Part 1.* `fastboot flash recovery` reported `Writing 'recovery' OKAY`, and
+  step 7 read recovery back as `35a45a98...`, with boot and dtbo unchanged.
+* *Question 1, yes.* After the Volume Up start the MediaTek boot ROM and
+  preloader devices passed through for a few seconds each, as on every start,
+  and then the probe's USB device appeared. The bootloader therefore started
+  the modern image with the Titan tree and the overlay in its recovery-DTBO
+  section. Which overlay it applied was not observed.
+* *Question 2, yes.* The listener recorded five valid status lines, with no
+  fragments, reporting kernel `7.3.0-rc3` at uptimes of 0 to 8 seconds and a
+  restart deadline at 150 seconds. The probe binds its gadget only after
+  finding and guarding the complete eMMC set, so on Linux 7.3 the eMMC driver
+  enumerated all 38 partitions and both boot areas, and USB device mode worked
+  with the role forced at the PHY.
+* *Question 3, yes.* The probe's device disappeared at its deadline, the
+  preloader passed through, and Ubuntu Touch booted normally
+  (`bootreason=reboot`), as predicted for a restart without the vendor's
+  bootloader-mode marker.
+* *Question 4, yes.* From Ubuntu Touch, `sudo /sbin/reboot bootloader` reached
+  fastboot, `fastboot flash recovery` wrote the preserved original (`Writing
+  'recovery' OKAY`), and Ubuntu Touch returned. Step 13 read recovery back as
+  `4dd1c1f7...`, with boot and dtbo unchanged throughout.
+* *Part 4.* Of the twelve control regions copied in normal mode, only `expdb`
+  differed after the run, as after every boot.
+
+A modern mainline-based Linux kernel therefore boots on the original Titan from
+a generated image with a Titan device tree and bootloader overlay, with the eMMC
+enumerated and USB device mode working: the first native-route boot. Not shown:
+display, input, charging, audio, radios, a NixOS userspace, or a change to the
+boot partition.
 
 == Questions
 
