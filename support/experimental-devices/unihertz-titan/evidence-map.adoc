@@ -55,6 +55,13 @@ preflight, publication commit point)
 |Current revision; fixture from 2026-10-14
 |Any Titan userdata archive
 
+|USB probe profile and its deadline reboot
+|Linux 6.18.38 VM cases (4): success, stuck PID 1, killed deadline process,
+missing storage; qemu-user refusal check; Mac report-reader tests
+|Builder runs on 2026-10-15
+|Titan 4.14 runtime, MTU3 gadget operation, macOS enumeration, the vendor
+restart path; see link:usb-probe/README.adoc[the probe record]
+
 |Rescue PID 1, source guard, block producer, USB pipeline
 |Linux 6.18.38 VM cases (36) plus 4.14-numbering parser fixtures;
 qemu-user refusal checks of the AArch64 builds
@@ -88,6 +95,15 @@ trial on 2026-10-15
 |Repeatability; an ordinary reboot afterwards; how the bootloader handles the
 marker; the physical fallback; see link:entry-return-trial.adoc[the trial
 record]
+
+|Temporary (RAM) boot
+|Stages A and B, owner-approved: the full installed image and the compact
+probe image were each accepted, then the bootloader crashed
+(`bootreason=lk_crash`) and reset into a normal boot; an ordinary reboot was
+normal. Pinned-image helper with host tests (15)
+|2026-10-15
+|Any route that starts a new ramdisk on the phone; see
+link:temporary-boot-trial.adoc[the trial record]
 
 |Kernel/userspace compatibility
 |Live read-only API probes; configuration comparison; upstream systemd

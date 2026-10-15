@@ -104,7 +104,10 @@ link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/e
 ran once on 2026-10-15 with the owner's approval: the phone entered bootloader
 fastboot, the Mac recognized it, and `fastboot reboot` returned to Ubuntu Touch.
 Normal-mode copies of the twelve unmounted control regions before and after
-differed only in `expdb`. M0 remains open.
+differed only in `expdb`. Stage A of a temporary-boot trial then showed that
+the bootloader accepts a `fastboot boot` download of the installed image but
+crashes and resets into a normal boot instead of starting it; a compact probe
+image crashed it the same way. M0 remains open.
 
 toc::[]
 

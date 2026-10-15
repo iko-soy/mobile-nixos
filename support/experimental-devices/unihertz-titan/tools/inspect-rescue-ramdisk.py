@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Inspect the exact build-only Titan USB acquisition initramfs without extracting.
+"""Inspect an exact build-only Titan USB initramfs without extracting.
 
 This deliberately accepts less than Linux's general initramfs grammar: one
-gzip member, one newc archive and the fixed production file set. It verifies
+gzip member, one newc archive and one fixed production file set, either the
+USB acquisition profile (the default) or the USB probe profile. It verifies
 structure and optional build manifests, not code provenance or bootability.
 Format references: docs.kernel.org/driver-api/early-userspace/buffer-format.html
 and refspecs.linuxfoundation.org/elf/gabi4+/ch5.pheader.html.
@@ -27,6 +28,14 @@ FILES = ("init", "bin/busybox", "bin/e2image", "bin/titan-block-produce",
          "bin/titan-rescue-send", "bin/zstd")
 DIRECTORIES = (".", "bin", "dev", "proc", "run", "sys", "tmp")
 EXPECTED = tuple(sorted(FILES + DIRECTORIES))
+# Each profile names its exact file and directory set; FILES and DIRECTORIES
+# above remain the acquisition profile.
+PROFILES = {
+    "usb-acquisition": {"files": FILES, "directories": DIRECTORIES,
+                        "format": "titan-usb-acquisition-initramfs-v1"},
+    "usb-probe": {"files": ("init",), "directories": (".", "dev", "proc", "run", "sys", "tmp"),
+                  "format": "titan-usb-probe-initramfs-v1"},
+}
 GZIP_HEADER = bytes.fromhex("1f8b0800000000000203")
 TRAILER = (0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 11, 0)
 
@@ -97,8 +106,11 @@ def static_aarch64(data):
             "interpreter": False, "dynamic_segment": False, "executable_stack": False}
 
 
-def inspect_ramdisk(data):
-    """Return structural evidence for the exact production profile; never extract."""
+def inspect_ramdisk(data, profile="usb-acquisition"):
+    """Return structural evidence for one exact production profile; never extract."""
+    require(profile in PROFILES, "Unknown ramdisk profile.")
+    directories = PROFILES[profile]["directories"]
+    expected = tuple(sorted(PROFILES[profile]["files"] + directories))
     require(isinstance(data, bytes), "Ramdisk input must be bytes.")
     require(18 <= len(data) <= MAX_COMPRESSED, "Compressed ramdisk exceeds its byte bound or is truncated.")
     require(data[:10] == GZIP_HEADER, "Expected the reproducible gzip -n -9 header.")
@@ -111,7 +123,7 @@ def inspect_ramdisk(data):
     require(decoder.eof and not decoder.unconsumed_tail and not decoder.unused_data,
             "Ramdisk must contain exactly one complete gzip member without trailing data.")
     entries, payloads, offset = [], {}, 0
-    for index in range(len(EXPECTED) + 1):
+    for index in range(len(expected) + 1):
         bounded(offset, 110, len(archive), "Truncated newc header.")
         header = archive[offset:offset + 110]
         require(header[:6] == b"070701" and re.fullmatch(b"[0-9a-fA-F]{104}", header[6:]),
@@ -133,13 +145,13 @@ def inspect_ramdisk(data):
         following = (content + size + 3) & ~3
         bounded(content + size, following - content - size, len(archive), "Truncated newc data padding.")
         require(not any(archive[content + size:following]), "Nonzero newc data padding.")
-        if index == len(EXPECTED):
+        if index == len(expected):
             require(name == "TRAILER!!!" and fields == TRAILER, "Missing or invalid final newc trailer.")
             require(len(archive) % 512 == 0 and len(archive) - following < 512 and
                     not any(archive[following:]), "Extra archive, overlay or invalid final padding.")
             break
-        require(name == EXPECTED[index], "Unexpected, duplicated, unsafe or out-of-order ramdisk entry.")
-        directory = name in DIRECTORIES
+        require(name == expected[index], "Unexpected, duplicated, unsafe or out-of-order ramdisk entry.")
+        directory = name in directories
         expected_mode = (stat.S_IFDIR | (0o1777 if name == "tmp" else 0o755)) if directory else stat.S_IFREG | 0o555
         require(mode == expected_mode and uid == gid == 0 and mtime == 1,
                 "Ramdisk ownership, permissions, file type or timestamp differs from the fixed profile.")
@@ -156,7 +168,7 @@ def inspect_ramdisk(data):
             payloads[name] = item["sha256"]
         entries.append(item)
         offset = following
-    return {"format": "titan-usb-acquisition-initramfs-v1", "compressed_bytes": len(data),
+    return {"format": PROFILES[profile]["format"], "compressed_bytes": len(data),
             "uncompressed_bytes": len(archive), "sha256": sha256(data),
             "uncompressed_sha256": sha256(archive), "entries": entries, "payload_sha256": payloads,
             "validation": {"single_gzip_member": True, "exact_profile": True, "static_aarch64": True,
@@ -178,10 +190,12 @@ def parse_manifest(data, expected):
     return hashes
 
 
-def verify_manifests(report, archive_manifest, payload_manifest):
+def verify_manifests(report, archive_manifest, payload_manifest, profile="usb-acquisition"):
     """Check both external build manifests against parsed bytes; mutate no report."""
+    require(profile in PROFILES and report.get("format") == PROFILES[profile]["format"],
+            "Manifests are checked against a report of a different profile.")
     archives = parse_manifest(archive_manifest, ("initramfs.cpio.gz",))
-    payloads = parse_manifest(payload_manifest, FILES)
+    payloads = parse_manifest(payload_manifest, PROFILES[profile]["files"])
     require(archives["initramfs.cpio.gz"] == report["sha256"], "Archive manifest SHA-256 mismatch.")
     require(payloads == report["payload_sha256"], "Payload manifest SHA-256 mismatch.")
     return True
@@ -220,18 +234,24 @@ def main(argv=None):
     parser.add_argument("--sha256sums", type=Path, help="external archive SHA256SUMS")
     parser.add_argument("--payload-sha256sums", type=Path, help="external payload-SHA256SUMS")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="usb-acquisition",
+                        help="exact ramdisk profile to require (default: usb-acquisition)")
     args = parser.parse_args(argv)
     if (args.sha256sums is None) != (args.payload_sha256sums is None):
         parser.error("provide both SHA-256 manifests or neither")
     try:
-        report = inspect_ramdisk(read_regular(args.ramdisk, MAX_COMPRESSED))
+        report = inspect_ramdisk(read_regular(args.ramdisk, MAX_COMPRESSED), args.profile)
         if args.sha256sums is not None:
             report["validation"]["manifests_verified"] = verify_manifests(report,
-                read_regular(args.sha256sums, MAX_MANIFEST), read_regular(args.payload_sha256sums, MAX_MANIFEST))
+                read_regular(args.sha256sums, MAX_MANIFEST), read_regular(args.payload_sha256sums, MAX_MANIFEST),
+                args.profile)
         if args.json:
             print(json.dumps(report, indent=2, sort_keys=True))
         else:
-            print("Exact USB acquisition ramdisk profile: 13 entries, six static AArch64 executables.")
+            if args.profile == "usb-acquisition":
+                print("Exact USB acquisition ramdisk profile: 13 entries, six static AArch64 executables.")
+            else:
+                print("Exact USB probe ramdisk profile: 7 entries, one static AArch64 executable.")
             if args.sha256sums is not None:
                 print("Archive and payload SHA-256 manifests agree.")
             print("Structural validation only; code provenance and bootability are not verified.")

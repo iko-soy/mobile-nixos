@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Prepare a private, unsigned Titan rescue envelope locally; never contact a phone.
 
-Only the reviewed installed boot and USB rescue ramdisk hashes are accepted.
+Only the reviewed installed boot and the reviewed USB ramdisk hashes are accepted:
+the USB acquisition ramdisk by default, or the USB probe ramdisk.
 No private input is submitted to Nix, an external executable, or a repository.
 The output has no AVB metadata and is not evidence of bootloader acceptance,
 hardware bootability, storage consistency or a working recovery procedure.
@@ -29,6 +30,11 @@ DTB_SHA256 = "51a6baed284c9caaec627cf402c4925db133856a4eecbaa87cfefe070915ce69"
 # (3054712 bytes 27d2a3da..., 3055165 bytes 65ac5adf...) must not be repackaged.
 RAMDISK_BYTES = 3055279
 RAMDISK_SHA256 = "0ed6d547c282b8a93d206d747cdb2b5535a7175726265f04e8085fb62671eb74"
+# 2026-10-15 USB probe build for a first temporary boot: guards storage
+# read-only, reports over ACM and reboots itself at a fixed deadline.
+PROBE_RAMDISK_BYTES = 65652
+PROBE_RAMDISK_SHA256 = "8b45b35e4606c03b483e630136385eaca09ce19d554189e77268a382d6f464bd"
+RAMDISK_PROFILES = ("usb-acquisition", "usb-probe")
 SOURCE_CMDLINE = (
     "bootopt=64S3,32N2,64N2 buildvariant=user "
     "systempart=/dev/disk/by-partlabel/system halium_lvm_vg=ubports "
@@ -130,20 +136,27 @@ def validate_boot(data):
     return info, kernel, dtb
 
 
-def validate_ramdisk(data):
-    require(type(data) is bytes and len(data) == RAMDISK_BYTES, "USB rescue ramdisk byte count differs from the reviewed build.")
-    require(sha256(data) == RAMDISK_SHA256, "USB rescue ramdisk SHA-256 differs from the reviewed build.")
+def ramdisk_pin(profile):
+    require(profile in RAMDISK_PROFILES, "Unknown USB ramdisk profile.")
+    return (RAMDISK_BYTES, RAMDISK_SHA256) if profile == "usb-acquisition" else (
+        PROBE_RAMDISK_BYTES, PROBE_RAMDISK_SHA256)
+
+
+def validate_ramdisk(data, profile="usb-acquisition"):
+    size, digest = ramdisk_pin(profile)
+    require(type(data) is bytes and len(data) == size, "USB rescue ramdisk byte count differs from the reviewed build.")
+    require(sha256(data) == digest, "USB rescue ramdisk SHA-256 differs from the reviewed build.")
     inspector = load_tool("inspect-rescue-ramdisk.py", "titan_private_rescue_ramdisk_inspector")
     try:
-        return inspector.inspect_ramdisk(data)
+        return inspector.inspect_ramdisk(data, profile)
     except inspector.RamdiskFormatError as error:
         raise PreparationError("USB rescue ramdisk archive validation failed.") from error
 
 
-def assemble_image(boot, ramdisk):
+def assemble_image(boot, ramdisk, profile="usb-acquisition"):
     """Return (raw envelope bytes, private manifest); no filesystem or subprocess I/O."""
     original, kernel, dtb = validate_boot(boot)
-    ramdisk_report = validate_ramdisk(ramdisk)
+    ramdisk_report = validate_ramdisk(ramdisk, profile)
     # Rebuild the narrow v2 envelope explicitly. No inherited padding, AVB or
     # authentication bytes are copied. Only reviewed payloads and fixed fields.
     header = bytearray(PAGE_SIZE)
@@ -173,6 +186,7 @@ def assemble_image(boot, ramdisk):
     manifest = {
         "format": "titan-private-usb-rescue-envelope-v1",
         "status": "prepared-build-only",
+        "ramdisk_profile": profile,
         "inputs": {
             "installed_boot": {"bytes": len(boot), "sha256": sha256(boot)},
             "kernel": {"bytes": len(kernel), "sha256": sha256(kernel)},
@@ -284,7 +298,7 @@ def write_private(directory_fd, name, data):
     return metadata.st_dev, metadata.st_ino
 
 
-def prepare(boot_path, ramdisk_path, output_path):
+def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition"):
     output = private_path(output_path)
     require(not os.path.lexists(output), "Output must be a new private directory.")
     boot = ramdisk = None
@@ -292,8 +306,8 @@ def prepare(boot_path, ramdisk_path, output_path):
     owned = {}
     try:
         boot = PrivateInput(boot_path, BOOT_BYTES)
-        ramdisk = PrivateInput(ramdisk_path, RAMDISK_BYTES)
-        image, manifest = assemble_image(boot.data, ramdisk.data)
+        ramdisk = PrivateInput(ramdisk_path, ramdisk_pin(profile)[0])
+        image, manifest = assemble_image(boot.data, ramdisk.data, profile)
         boot.recheck()
         ramdisk.recheck()
         parent_fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
@@ -372,9 +386,11 @@ def main(argv=None):
     parser.add_argument("--boot", required=True, type=Path, help="private reviewed installed boot copy (0400/0600)")
     parser.add_argument("--ramdisk", required=True, type=Path, help="private exact reviewed USB ramdisk copy (0400/0600)")
     parser.add_argument("--output", required=True, type=Path, help="new private directory outside Git/jj and /nix")
+    parser.add_argument("--ramdisk-profile", choices=RAMDISK_PROFILES, default="usb-acquisition",
+                        help="reviewed ramdisk profile (default: usb-acquisition)")
     args = parser.parse_args(argv)
     try:
-        report = prepare(args.boot, args.ramdisk, args.output)
+        report = prepare(args.boot, args.ramdisk, args.output, args.ramdisk_profile)
     except PreparationError as error:
         print(f"Preparation refused: {error}", file=sys.stderr)
         return 1

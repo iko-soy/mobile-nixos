@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT
  * Build-only rescue PID 1. The default profile has no acquisition or transport;
- * a separate explicit USB pipeline profile supplies its own lifecycle callback.
+ * a separate explicit USB pipeline profile supplies its own lifecycle callback,
+ * and a separate USB probe profile reports status and reboots at a deadline.
  * No profile mounts storage filesystems or starts an interactive shell.
  * BLKROSET changes the kernel's volatile block-device flag, not storage bytes.
  * This does not prevent kernel/firmware writers or establish hardware safety.
@@ -29,6 +30,15 @@
 #endif
 #ifdef TITAN_USB_PIPELINE_PROFILE
 int titan_usb_pipeline_run(void);
+#endif
+#ifdef TITAN_USB_PROBE_PROFILE
+#ifdef TITAN_USB_PIPELINE_PROFILE
+#error The USB probe and USB acquisition profiles are exclusive
+#endif
+void titan_usb_probe_arm(void);
+void titan_usb_probe_announce(void);
+void titan_usb_probe_tick(void);
+int titan_usb_probe_run(void);
 #endif
 
 #ifndef TITAN_RESCUE_DISCOVERY_SECONDS
@@ -83,14 +93,21 @@ static void reap_children(void) {
 
 static void wait_one_second(void) {
     struct timespec left = { .tv_sec = 1, .tv_nsec = 0 };
+#ifdef TITAN_USB_PROBE_PROFILE
+    titan_usb_probe_tick();
+#endif
     while (nanosleep(&left, &left) < 0 && errno == EINTR)
         reap_children();
     reap_children();
+#ifdef TITAN_USB_PROBE_PROFILE
+    titan_usb_probe_tick();
+#endif
 }
 
 static _Noreturn void failed(const char *reason) {
     printf("TITAN_RESCUE_FAILED %s\n", reason);
-    /* Never return from PID 1, invoke reboot, or fall through to another init. */
+    /* Never return from PID 1 or fall through to another init. Only the probe
+     * profile's deadline reboot or its backstop in wait_one_second ends this. */
     for (;;)
         wait_one_second();
 }
@@ -278,7 +295,7 @@ static int storage_complete(const struct block_scan *scan) {
         && scan->aux == aux_device_count();
 }
 
-#ifdef TITAN_USB_PIPELINE_PROFILE
+#if defined(TITAN_USB_PIPELINE_PROFILE) || defined(TITAN_USB_PROBE_PROFILE)
 /* Re-guard immediately before USB setup; the USB profile does not rescan.
  * Devices still registering get the same bounded retry as discovery. */
 int titan_rescue_guard_storage(void) {
@@ -306,6 +323,10 @@ int main(void) {
     signal(SIGTERM, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
+#ifdef TITAN_USB_PROBE_PROFILE
+    /* Arm the independent deadline reboot before anything that can fail. */
+    titan_usb_probe_arm();
+#endif
     umask(0077);
     if (chdir("/") < 0)
         failed("root-directory-unavailable");
@@ -317,6 +338,9 @@ int main(void) {
     mount_virtual("devtmpfs", "/dev", MS_NOSUID | MS_NOEXEC, "mode=0755");
     open_console();
     puts("TITAN_RESCUE_START v1");
+#ifdef TITAN_USB_PROBE_PROFILE
+    titan_usb_probe_announce();
+#endif
     mount_virtual("proc", "/proc", restricted | MS_RDONLY, "");
     mount_virtual("sysfs", "/sys", restricted | MS_RDONLY, "");
     mount_virtual("tmpfs", "/run", restricted, "size=16m,mode=0700");
@@ -340,6 +364,10 @@ int main(void) {
 #ifdef TITAN_USB_PIPELINE_PROFILE
     (void)titan_usb_pipeline_run();
     failed("usb-pipeline-returned");
+#endif
+#ifdef TITAN_USB_PROBE_PROFILE
+    (void)titan_usb_probe_run();
+    failed("usb-probe-returned");
 #endif
     for (unsigned pending_scans = 0;;) {
         struct block_scan scan;

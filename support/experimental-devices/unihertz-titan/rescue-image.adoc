@@ -18,6 +18,10 @@ and the corrected 3055279-byte USB acquisition ramdisk with SHA-256
 3054712-byte build (`27d2a3da...`) contains the mount-ID-0 and zram defects found
 by the 2026-10-15 audit; an intermediate corrected build (`65ac5adf...`) lacked
 the later readiness and re-guard changes. Neither is accepted.
+With `--ramdisk-profile usb-probe`, the helper instead accepts only the 65652-byte
+link:usb-probe/README.adoc[USB probe ramdisk] with SHA-256
+`8b45b35e4606c03b483e630136385eaca09ce19d554189e77268a382d6f464bd`, checked by
+the archive inspector's separate one-executable `usb-probe` profile.
 These constants select reviewed inputs; there is no runtime hash, source-profile
 or command-line override. A future ramdisk build requires a reviewed profile
 update. Matching a digest establishes byte identity, not hardware suitability.
@@ -121,6 +125,11 @@ the pinned LineageOS `mkbootimg.py` at revision
 `40a19c4c5ffe8b86c6c61318c8aa4ffe35d6e7ad` produced identical bytes from the
 same preserved kernel, DTB and ramdisk. Independent readback verified the image
 hash, unchanged input hashes, directory mode `0700` and file mode `0600`.
+The same day the helper packaged the probe ramdisk into a 9719808-byte envelope
+with SHA-256
+`e6da06fc1f6c47d4c4ae0edc8c1888e9dc628dbef9b8f8a01ae37768065704c8`; the pinned
+`mkbootimg` again produced identical bytes. The
+link:temporary-boot-trial.adoc[temporary boot proposal] pins it for Stage B.
 The generic inspector accepted its geometry; the reference-profile check
 rejected only the intentionally absent AVB footer/vbmeta. Both build manifests
 also matched the independently parsed ramdisk and its six ELF payloads.
@@ -147,3 +156,9 @@ Writer quiescence and consistent userdata/calibration preservation are what the
 booted environment must then establish and check; rollback writes stay gated on
 them. Building or inspecting this envelope supplies none of those permissions
 or runtime results.
+
+This envelope is not proposed for a first boot: its ramdisk copies userdata,
+which the owner decided on 2026-10-15 not to preserve, and it never reboots by
+itself. The link:temporary-boot-trial.adoc[temporary boot proposal] starts
+with the installed image and defers new ramdisks to a self-rebooting probe
+profile.

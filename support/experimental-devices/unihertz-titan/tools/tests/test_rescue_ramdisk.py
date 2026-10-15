@@ -200,6 +200,15 @@ class RamdiskTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(json.loads(stdout.getvalue())["validation"]["manifests_verified"])
             self.assertEqual(len(list(root.iterdir())), 3)
+            # The default text output keeps its confirmation and caveat lines.
+            with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                code = ramdisk.main([str(root / "ramdisk.gz"), "--sha256sums", str(root / "SHA256SUMS"),
+                                     "--payload-sha256sums", str(root / "payload-SHA256SUMS")])
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout.getvalue().splitlines(), [
+                "Exact USB acquisition ramdisk profile: 13 entries, six static AArch64 executables.",
+                "Archive and payload SHA-256 manifests agree.",
+                "Structural validation only; code provenance and bootability are not verified."])
 
     def test_nonregular_symlink_and_oversized_inputs_reject_before_open(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -212,6 +221,32 @@ class RamdiskTests(unittest.TestCase):
                     with self.assertRaises(ramdisk.RamdiskFormatError):
                         ramdisk.read_regular(path, 3)
                     opened.assert_not_called()
+
+    def test_probe_profile_is_exact_and_separate(self):
+        probe_paths = (".", "dev", "init", "proc", "run", "sys", "tmp")
+        records = [record(path, elf(b"probe") if path == "init" else b"", inode=index,
+                          directory=path != "init") for index, path in enumerate(probe_paths)]
+        data = compressed(archive(records))
+        report = ramdisk.inspect_ramdisk(data, "usb-probe")
+        self.assertEqual(report["format"], "titan-usb-probe-initramfs-v1")
+        self.assertEqual([entry["path"] for entry in report["entries"]], list(probe_paths))
+        sums = f"{hashlib.sha256(data).hexdigest()}  initramfs.cpio.gz\n".encode()
+        payload = f"{hashlib.sha256(elf(b'probe')).hexdigest()}  init\n".encode()
+        self.assertTrue(ramdisk.verify_manifests(report, sums, payload, "usb-probe"))
+        # Neither profile accepts the other's archive, and manifests stay bound to their profile.
+        with self.assertRaises(ramdisk.RamdiskFormatError):
+            ramdisk.inspect_ramdisk(data)
+        with self.assertRaises(ramdisk.RamdiskFormatError):
+            ramdisk.inspect_ramdisk(fixture()[0], "usb-probe")
+        with self.assertRaises(ramdisk.RamdiskFormatError):
+            ramdisk.verify_manifests(report, sums, payload)
+        with self.assertRaises(ramdisk.RamdiskFormatError):
+            ramdisk.inspect_ramdisk(data, "rescue")
+        extra = records[:2] + [record("bin", inode=2, directory=True)] + [
+            record(path, elf(b"probe") if path == "init" else b"", inode=index + 1, directory=path != "init")
+            for index, path in enumerate(probe_paths[2:], 2)]
+        with self.assertRaises(ramdisk.RamdiskFormatError):
+            ramdisk.inspect_ramdisk(compressed(archive(extra)), "usb-probe")
 
     def test_changed_file_during_read_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

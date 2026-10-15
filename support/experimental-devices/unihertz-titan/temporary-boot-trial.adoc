@@ -1,0 +1,247 @@
+= Temporary (RAM) boot trial
+
+Status on 2026-10-15: *Stage A and Stage B each ran once with the owner's
+explicit approval. In both, the bootloader accepted the image and then crashed
+instead of starting it; see <<stage-a-result,Stage A>> and
+<<stage-b-result,Stage B>>. Temporary boot through `fastboot boot` is not
+available on this bootloader.* Each stage changed the phone's boot mode and
+sent an image to the bootloader, so each needed the owner's explicit approval. Nothing is flashed or erased,
+and neither the helper nor the commands it sends write a partition. In Stage A
+the image that starts is Ubuntu Touch itself, which writes storage as any
+normal boot does. Neither stage boots NixOS.
+
+== Why two stages
+
+The existing private link:rescue-image.adoc[rescue envelope] (`52f48e74...`) is
+not a suitable first image. Its ramdisk copies userdata, which the owner decided
+on 2026-10-15 not to preserve, and after a session it keeps USB open
+indefinitely without rebooting. The only way back would then be the untested
+power-button fallback. Its kernel and DTB are the installed Ubuntu Touch ones;
+its ramdisk and header command line are new, and it carries no AVB footer or
+vbmeta.
+
+Stage A boots the phone's own installed boot image from RAM. It answers whether
+the installed bootloader supports `fastboot boot` and starts an image received
+over USB, without any new code on the phone. Stage B would boot a new probe
+image that reports over USB and then reboots by itself. That image is built,
+VM-tested and pinned. Stage B ran after Stage A at the owner's request, while
+the probe code's review was still running.
+
+== Stage A: the installed boot image from RAM
+
+[[stage-a-result]]
+=== Result (2026-10-15)
+
+The owner started the entry; the watcher ran the observation step and then the
+boot helper. All four questions were answered once:
+
+. *Accepted.* The bootloader received the 33554432-byte image in 0.8 seconds
+  and replied `Booting OKAY`. The private copy was unchanged afterwards.
+. *Not started from RAM.* The bootloader crashed instead: the following boot's
+  command line reports `androidboot.bootreason=lk_crash`, where every earlier
+  boot reported `reboot`. The phone reset and started Ubuntu Touch from storage.
+  The earliest boot stage ran again, `bootprof.lk_t` was a normal 7563 ms, the
+  owner saw the unlocked-state warning again, and the kernel started about 38
+  seconds after the command.
+. *Command line.* Identical to the baseline apart from the boot reason and the
+  timing values.
+. *Ordinary reboot.* Step 7's `sudo /sbin/reboot` gave a normal boot
+  (`bootreason=reboot`, `bootprof.lk_t` 7515 ms) with the same kernel and
+  command line. An ordinary reboot after these fastboot exits boots normally.
+
+A later owner-run control-region copy matched the one taken after the entry
+trial in eleven regions, including `para`, `boot_para` and `seccfg`; only
+`expdb` differed, in 70 blocks of 4 KiB. The crash record itself was not
+inspected.
+
+So `fastboot boot` of the full 32 MiB partition image does not start it on this
+bootloader; it crashes the bootloader, which then resets into a normal boot.
+Stage B then tested a compact image without the partition padding and AVB
+footer.
+
+=== Questions
+
+. Does the bootloader accept `fastboot boot` with the 33554432-byte installed
+  boot image?
+. Does the bootloader then start that RAM copy directly? Step 6 says how this
+  is told apart from a reset followed by a normal boot from storage.
+. Does the bootloader pass the same boot command line as for a normal boot,
+  apart from timing values? The two are compared privately.
+. Does an ordinary reboot after a RAM boot start Ubuntu Touch from the boot
+  partition rather than fastboot? Step 2 sets the fastboot marker again and the
+  phone leaves fastboot by `fastboot boot`, not `fastboot reboot`, so this
+  tests a different exit route from the entry trial's. It also shows whether an
+  ordinary reboot boots normally afterwards.
+
+=== Basis
+
+* *Image.* The private installed boot copy: 33554432 bytes, SHA-256
+  `6829a8bcaa696a6fe283184a874450357dd81e7e203eedaf79329bdc55745e83`, identical
+  to the documented CI candidate and to the boot partition as read on
+  2026-10-14. The partition is not rehashed at trial time.
+* *Bootloader.* Entry to bootloader fastboot and the return from it worked once
+  on 2026-10-15. It reported `unlocked: yes`, no A/B slots and a 128 MiB
+  maximum download size. Normal boots pass `bootprof.lk_t` values of about
+  7.5 seconds on the kernel command line.
+* *Helper.* `tools/boot-fastboot-image.py` pins each image by size and SHA-256.
+  It copies the image into a new private directory, verifies the copy and makes
+  it read-only. It then requires exactly one fastboot device reporting the
+  recorded `product`, `is-userspace: no`, `unlocked: yes` and a sufficient
+  maximum download size, rechecks the copy and sends one `fastboot boot`.
+  Afterwards it measures the copy again and records the result; a change while
+  fastboot read it makes the run incomplete. It refuses any other image or
+  command and keeps the device serial out of terminal output. Its 15 synthetic
+  tests use a fake executable; it has never run against the phone.
+
+=== Preconditions
+
+The entry trial's preconditions apply: the owner present, a direct cable to the
+Mac, battery at least 60% and no system-image update in progress. The owner
+decides the stop conditions below before starting.
+
+=== Procedure
+
+. *Baseline, normal mode, read-only*, as in the entry trial.
+. *Entry, owner-run:* `adb -d shell`, then `sudo /sbin/reboot bootloader`.
+. *Recognition, read-only:* `tools/observe-fastboot.py observe`.
+. *Temporary boot:*
++
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/boot-fastboot-image.py \
+  --profile installed-boot \
+  --image /absolute/private/installed/boot.img \
+  --output /absolute/private/new-temporary-boot
+----
++
+The owner notes whether the power-on logo or the unlocked-state warning appears
+again after this command.
+. *Return check.* Wait up to five minutes for Ubuntu Touch. The owner unlocks
+  the screen; `adb -d get-state` must report `device`.
+. *After the RAM boot, read-only.* Repeat the baseline and compare the boot ID,
+  kernel and command line privately. Record `bootprof.lk_t`. A value on the
+  order of the time spent in fastboot, from the observation record to the boot
+  record, indicates that the bootloader started the kernel directly from
+  fastboot. A value near the normal 7.5 seconds suggests a reset and a normal
+  boot from storage, or a counter the bootloader restarts; Question 2 then
+  stays open.
+. *Ordinary reboot, owner-run:* `adb -d shell`, then `sudo /sbin/reboot` with no
+  argument. Wait for ADB again and repeat the baseline. Expected: a normal boot
+  from the boot partition with a normal `bootprof.lk_t`.
+. *Optional:* rerun the
+  link:control-region-preservation.adoc[control-region reader] and compare.
+  Without a copy taken right before entry, a difference cannot be attributed to
+  this trial.
+
+=== Stop conditions
+
+The link:entry-return-trial.adoc[entry trial's] stop conditions also apply to
+steps 2 and 3 and to every return, including: do not retry a failed entry
+another way, and if Ubuntu Touch does not finish booting, do not flash or erase.
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The helper refuses before sending (identity, image or device check)
+|Nothing was sent. Return with `tools/observe-fastboot.py return`.
+|`fastboot boot` fails or is refused
+|Return with `observe-fastboot.py return` and record the error. Do not retry
+another way.
+|The download completes but the phone stays in fastboot
+|Return with `observe-fastboot.py return`; if fastboot reappears, run
+`return --command continue` once.
+|A return command fails or times out
+|Stop and issue no other command. Use the physical fallback only as described
+below.
+|A recovery screen appears
+|Choose only the option that reboots the system normally.
+|No sign of Ubuntu Touch and no fastboot device after five minutes
+|Physical fallback (unverified): hold Power until the phone restarts. A sign of
+Ubuntu Touch is the boot animation, the lock screen, or an RNDIS or ADB device
+on the Mac. While any of those is present, wait instead: Ubuntu Touch may be
+checking or resizing userdata, and a forced reset then could damage it.
+|The ordinary reboot in step 7 lands in fastboot
+|Return with `observe-fastboot.py return`; if fastboot reappears, run
+`return --command continue` once, then stop and issue no other command. Record
+that the marker persisted after a RAM boot.
+|Battery below 30%
+|Stop after returning and charge in normal mode.
+|===
+
+=== Residual risks
+
+* The bootloader may handle a RAM boot differently from a normal boot: other
+  command-line arguments, boot-state handling or log writes, for example to
+  `expdb`.
+* The RAM-booted Ubuntu Touch writes userdata, including its filesystem check
+  and possible resize, and mounts the calibration filesystems read-write, like
+  any normal boot.
+* If the bootloader accepts the download but fails to start it, the way back
+  depends on fastboot still responding or on the unverified power-button
+  fallback.
+* Success with this image does not show that the bootloader starts a modified
+  image; that is Stage B's question.
+
+== Stage B: probe image
+
+[[stage-b-result]]
+=== Result (2026-10-15)
+
+The owner approved Stage B while the independent review of the probe code was
+still running. The same watcher sequence ran with the `rescue-probe` profile
+and a Mac listener. The bootloader received the 9719808-byte image and replied
+`Booting OKAY`, then crashed exactly as in Stage A. The following boot reported
+`androidboot.bootreason=lk_crash` with normal `bootprof` timing, and the kernel
+started about 39 seconds after the command; Ubuntu Touch came up from storage
+with the same kernel and command line. The probe never ran: no device with its
+descriptors appeared.
+
+During the reset a different USB serial port appeared for a few seconds,
+consistent with the MediaTek preloader's port at every power-on. The first
+listener took any new modem port, opened that one read-only and stopped on
+unframed data; it sent nothing. The listener now opens only a device with the
+probe's fixed manufacturer, product and serial strings. Vendor and product IDs
+alone do not identify the probe: Ubuntu Touch's own gadget on this phone also
+uses the pid.codes test ID `1209:0005`, as manufacturer `A-gold` with product
+`Titan`.
+
+Both images, with and without the partition padding and AVB footer, crash this
+bootloader's `fastboot boot`. A different route is needed to run a new ramdisk
+on the phone.
+
+=== Image and remaining relevance
+
+The link:usb-probe/README.adoc[USB probe profile] provides the image's new
+ramdisk. Its PID 1 guards every block device read-only as the rescue PID 1
+does, binds the fixed ACM gadget and writes one bounded status line every two
+seconds: kernel release, guard result and its deadline. It accepts no input,
+runs no acquisition or shell, and reboots by itself 150 seconds after it
+starts, from a separate process, whether or not the earlier steps succeeded;
+PID 1 itself reboots ten seconds later as a backstop. Disposable VM cases show
+the deadline reboot after success, with PID 1 stuck and with storage missing,
+and the backstop reboot with the deadline process killed. On the Mac,
+`tools/read-probe-report.py` listens without writing, and only to a USB device
+with the probe's fixed strings.
+
+The envelope combines the installed kernel and DTB with that 65652-byte
+ramdisk (`8b45b35e...`): 9719808 bytes, SHA-256
+`e6da06fc1f6c47d4c4ae0edc8c1888e9dc628dbef9b8f8a01ae37768065704c8`, byte-identical
+to the pinned `mkbootimg`. The boot helper's `rescue-probe` profile pins it. Like
+the earlier envelope, it changes the header command line and carries no AVB
+footer or vbmeta, so Stage B also tests whether the bootloader starts such an
+image.
+
+The probe image is unchanged by this result. It remains the intended first new
+ramdisk for any other route, for example a separately reviewed write to the
+recovery partition, whose original is preserved. Such a route needs its own
+proposal: the probe's deadline restart would then be the way back, and a
+persistent recovery-boot flag could make every restart return to the probe.
+
+== What Stage A can and cannot show
+
+Stage A showed that this bootloader accepts a `fastboot boot` download of the
+installed image but crashes instead of starting it, and that an ordinary reboot
+then boots normally. Stage B showed the same crash for a compact image. It does not show acceptance of a modified or unsigned
+image, rescue-image behavior, USB gadget operation, offline acquisition, a
+restore path or anything about NixOS. Keep raw output, serials and command
+lines private; publish only sanitized findings.

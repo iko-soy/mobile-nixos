@@ -973,7 +973,10 @@ since. Normal-mode copies of the twelve unmounted control regions before and
 after differed only in `expdb`. One run demonstrates neither a reliable return
 nor the absence of boot-control writes. Consistent writable-state preservation
 remains required before later rollback writes, in the staged sequence below,
-and the trial authorizes no temporary boot or write.
+and the trial authorizes no temporary boot or write. Stage A of the later
+link:temporary-boot-trial.adoc[temporary boot trial] showed that `fastboot boot`
+of the full installed image crashes this bootloader, which then resets into a
+normal boot; Stage B showed the same for a compact probe image.
 
 ==== Modem and calibration consistency source audit
 
@@ -1057,7 +1060,8 @@ transport have been verified on this exact phone.
   not a claim that consistent data preservation has already been achieved.
   Done once on 2026-10-15; the trial record lists what it did not show.
 . Separately review an offline preservation environment and its entry/exit
-  contract. Audit the actual image's startup behavior; neither the public
+  contract. The staged link:temporary-boot-trial.adoc[temporary boot proposal]
+  tests `fastboot boot` with the installed image before any new ramdisk. Audit the actual image's startup behavior; neither the public
   recovery candidate nor the different installed recovery is presumed passive.
   A rescue boot requires explicit authorization, reviewed image acceptance,
   transport readiness, failure behavior and a demonstrated return route. The

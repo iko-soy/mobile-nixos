@@ -107,9 +107,12 @@ This sequence keeps the dependencies one-directional:
   link:control-region-preservation.adoc[normal-mode reads of the twelve
   unmounted regions]. Only `expdb` differed afterwards. These are not
   consistent copies.
-. A reviewed and separately authorized temporary boot of the rescue image,
-  loaded into RAM only, to establish acceptance, USB recognition and the return
-  path.
+. A reviewed and separately authorized
+  link:temporary-boot-trial.adoc[temporary boot], loaded into RAM only, to
+  establish acceptance, USB recognition and the return path. Both stages
+  crashed the bootloader, which reset into a normal boot each time, so this
+  route is unavailable. A reviewed write to the preserved recovery partition is
+  the alternative, with its own proposal.
 . A reviewed offline acquisition boot that meets the conditions above for the
   sixteen regions other than `userdata`, with a demonstrated return.
 . Only then any rollback write, separately authorized.

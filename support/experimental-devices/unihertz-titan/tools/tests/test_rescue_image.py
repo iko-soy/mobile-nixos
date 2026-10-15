@@ -319,6 +319,36 @@ class RescueImageTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "")
         self.assertNotIn("/secret/name", stderr.getvalue())
 
+    def test_probe_profile_uses_its_own_pin_and_archive_profile(self):
+        paths = (".", "dev", "init", "proc", "run", "sys", "tmp")
+        probe = test_rescue_ramdisk.compressed(test_rescue_ramdisk.archive([
+            test_rescue_ramdisk.record(path, test_rescue_ramdisk.elf(b"probe") if path == "init" else b"",
+                                       inode=index, directory=path != "init")
+            for index, path in enumerate(paths)]))
+        pins = {"PROBE_RAMDISK_BYTES": len(probe), "PROBE_RAMDISK_SHA256": hashlib.sha256(probe).hexdigest()}
+        with patch.multiple(prepare, **pins):
+            image, report = prepare.assemble_image(self.boot, probe, "usb-probe")
+            self.assertEqual(report["ramdisk_profile"], "usb-probe")
+            self.assertEqual(report["inputs"]["usb_ramdisk"]["format"], "titan-usb-probe-initramfs-v1")
+            info = prepare.boot_inspector.inspect_image(image)
+            self.assertEqual(prepare.payload(image, info, "ramdisk"), probe)
+            self.assertEqual(prepare.payload(image, info, "kernel"), self.kernel)
+            # Each ramdisk is accepted only under its own profile.
+            for data, profile in ((probe, "usb-acquisition"), (self.ramdisk, "usb-probe")):
+                with self.subTest(profile=profile), self.assertRaises(prepare.PreparationError):
+                    prepare.assemble_image(self.boot, data, profile)
+            with self.assertRaisesRegex(prepare.PreparationError, "Unknown"):
+                prepare.assemble_image(self.boot, probe, "rescue")
+            with self.private_inputs() as (parent, boot, ramdisk, output):
+                ramdisk.write_bytes(probe)
+                report = prepare.prepare(boot, ramdisk, output, "usb-probe")
+                self.assertEqual(json.loads((output / prepare.MANIFEST_NAME).read_text())["ramdisk_profile"], "usb-probe")
+        _, default = prepare.assemble_image(self.boot, self.ramdisk)
+        self.assertEqual(default["ramdisk_profile"], "usb-acquisition")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
+            prepare.main(["--boot", "b", "--ramdisk", "r", "--output", "o", "--ramdisk-profile", "rescue"])
+
     @unittest.skipUnless(os.environ.get("TITAN_MKBOOTIMG_SOURCE"), "pinned mkbootimg source required for independent assembly comparison")
     def test_byte_identical_to_pinned_mkbootimg(self):
         source = Path(os.environ["TITAN_MKBOOTIMG_SOURCE"])

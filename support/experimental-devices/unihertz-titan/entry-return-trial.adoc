@@ -174,11 +174,17 @@ not running in the bootloader, so the behavior there is unknown. Holding Power
 until the phone restarts is the only remaining fallback, and it may land in
 fastboot again. There is no verified emergency restore for macOS.
 
+*Manual fastboot entry (owner-reported, not yet observed).* On 2026-10-15 the
+owner reported that holding a volume button while the phone starts from the
+powered-off state enters fastboot. Together with a way to power the phone off,
+this would give a path into fastboot that does not depend on the running
+system; it has not been exercised in a trial.
+
 == Residual risks
 
 * The bootloader's handling of the persistent fast-boot marker is unknown. The
-  boot after `fastboot reboot` was normal, but no ordinary reboot has been
-  observed since, so a later reset could still enter fastboot.
+  boot after `fastboot reboot` was normal, and an ordinary reboot during the
+  later link:temporary-boot-trial.adoc[temporary boot trial] was normal too.
 * The shutdown is the ordinary systemd reboot path with an argument. It does not
   prove clean filesystems or modem quiescence, the same as any reboot.
 * The bootloader may update its own state in regions such as `para`, `expdb`,

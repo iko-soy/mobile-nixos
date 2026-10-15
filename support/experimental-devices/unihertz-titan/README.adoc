@@ -22,8 +22,9 @@ hardware works under NixOS.
 * A reproduction of the Ubuntu Touch reference boot-image recipe, using the
   pinned Ubuntu Touch initramfs, adaptation overlay and prebuilt Titan DT table.
 * A separate source-built AArch64 rescue ramdisk with a small independent
-  PID 1 and static backup tools, plus a separate experimental USB acquisition
-  profile. Neither has phone boot validation; see the build-only sections below.
+  PID 1 and static backup tools, plus separate experimental USB acquisition and
+  USB probe profiles. None has phone boot validation; see the build-only
+  sections below.
 * Host-side inventory, kernel configuration comparison, read-only kernel API
   probes, boot-image inspection and bounded private boot/recovery/dtbo
   acquisition tools, bounded GPT capture/validation, and a host-only sparse ext4
@@ -34,6 +35,12 @@ hardware works under NixOS.
   The owner approved it, and it ran once on 2026-10-15: the phone entered
   bootloader fastboot, the Mac recognized it, and `fastboot reboot` returned to
   Ubuntu Touch.
+* A link:temporary-boot-trial.adoc[temporary (RAM) boot trial]. Stage A ran
+  once on 2026-10-15: the bootloader accepted a `fastboot boot` of the phone's
+  own boot image, then crashed and reset into a normal boot from storage; an
+  ordinary reboot afterwards was normal. Stage B crashed the bootloader the
+  same way with a compact self-rebooting probe image, so temporary boot through
+  `fastboot boot` is not available.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -288,6 +295,23 @@ complete archive or confirmed an incomplete result. It is absent from the
 AArch64 artifact. This output is not an Android boot image, a consistent Titan
 backup or a demonstrated recovery environment. Hardware boot/exit, writer
 quiescence, calibration preservation and Mac USB recognition remain unverified.
+
+== Build-only USB probe profile
+
+`usbProbe.ramdisk` holds only the rescue PID 1 built with a probe profile for a
+first temporary boot. It guards every block device read-only, binds the same
+fixed ACM gadget, writes one bounded status line every two seconds and reboots
+by itself at a fixed deadline from a separate process, with a PID 1 backstop.
+It reads no storage contents, accepts no input and starts no acquisition. See
+the link:usb-probe/README.adoc[probe record] and Stage B of the
+link:temporary-boot-trial.adoc[temporary boot proposal].
+
+[source,sh]
+----
+nix-build support/experimental-devices/unihertz-titan -A usbProbe.ramdisk --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbProbe.toolTests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbProbe.vmTests --no-out-link
+----
 
 == Private rescue boot-image packaging
 
@@ -1012,3 +1036,51 @@ outside Nix) and the Mac Nix `tests` target (307) passed, as did `tests` on
 x86_64 Linux (307) for a snapshot identical to the committed tree apart from
 documentation. The reader's first snapshot, with 15 tests, had also passed on
 macOS and Linux (301). No image was sent to or booted on the phone.
+
+=== Follow-up: temporary boot trial and USB probe
+
+The link:temporary-boot-trial.adoc[temporary boot trial] tested whether this
+bootloader can start an image sent over USB with `fastboot boot`, without
+writing a partition. `tools/boot-fastboot-image.py` sends only a pinned image,
+after fixed identity queries, from a verified read-only private copy that it
+measures again afterwards. An independent review with mutation testing found
+that one test checked fewer identity values than claimed, gaps in the stop
+conditions, no way to tell a RAM boot from a reset, and a small window between
+the last image check and fastboot reading the file; all were fixed before use,
+and 25 of 26 helper mutations now fail the tests.
+
+* *Stage A*, owner-approved: the phone's own 32 MiB boot image was accepted
+  (`Booting OKAY`), then the bootloader crashed. The next boot reported
+  `androidboot.bootreason=lk_crash`, ran the earliest boot stage again with
+  normal bootloader timing, and started Ubuntu Touch from storage. An ordinary
+  reboot afterwards was normal. A later control-region copy differed from the
+  previous one only in `expdb`.
+* *Stage B*, owner-approved while the probe code's review was still running:
+  the compact 9.7 MB probe envelope crashed the bootloader the same way, so the
+  probe never ran. Temporary boot through `fastboot boot` is not available on
+  this bootloader.
+
+The link:usb-probe/README.adoc[USB probe profile] remains the intended first
+new ramdisk for another route. Its PID 1 arms a separate deadline process
+before any mount, guards every block device read-only, binds the fixed ACM
+gadget, writes a bounded status line every two seconds and restarts at a fixed
+deadline, with a PID 1 backstop. The archive inspector and envelope tool gained
+a separate `usb-probe` profile with unchanged defaults; the envelope, 9719808
+bytes with SHA-256 `e6da06fc...`, matched the pinned `mkbootimg`.
+`tools/read-probe-report.py` only listens. During Stage B it opened the
+MediaTek preloader's brief USB port, read-only, because it accepted any new
+port; it now opens only a device with the probe's fixed strings. Ubuntu
+Touch's own gadget on this phone shares the probe's pid.codes test ID
+`1209:0005`.
+
+Validation on 2026-10-15: the host suite (332 tests, one comparison skipped
+outside Nix) and the Mac Nix `tests` target (332) passed. On x86_64 Linux,
+`tests` (331, before the last listener test), the four probe VM cases (success, stuck PID 1, killed deadline
+process, missing storage) on Linux 6.18.38 and the qemu-user refusal check
+passed, and the existing 36 VM cases passed with the acquisition and rescue
+ramdisks byte-identical to their pinned hashes. The Linux snapshots predate
+the last listener change and documentation edits. An independent review of the
+probe code found no high or medium problems; its low-severity findings on the
+Mac tools and documentation were fixed, and those on the probe itself are
+listed in the probe record for its next revision. The two trials were the only
+phone actions by these tools; nothing was flashed or written to a partition.
