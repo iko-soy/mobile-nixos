@@ -788,6 +788,58 @@ which boots recovery and can update boot-control state. A separately authorized
 entry, recognition and return trial remains necessary before proposing any
 rescue-image boot.
 
+==== Installed reboot path and persistent RTC state
+
+A focused follow-up on 2026-10-15 identified installed `adbd` package
+`1:14.0.0+r45-0ubports1+0~20250723174015.5+ubports~dev~1.gbp05a118`
+and systemd `255.4-1ubuntu8.17` through normal-mode read-only queries. The saved
+Ubuntu image's `adbd` and `systemctl` files match fresh live file hashes;
+`/sbin/reboot` resolves to that `systemctl`. Saved package metadata agrees with
+the extracted bytes, but this is not package-signature verification. No reboot
+command was issued.
+
+The package's public
+https://gitlab.com/ubports/development/core/packaging/adbd/-/blob/05a118669fae0806703fc0ecbc7e43ab7cd8ebdb/debian/patches/0018-daemon-enable-reboot-command-on-non-Android.patch#L19[UBports reboot patch]
+maps an ADB `reboot:<argument>` request to `/sbin/reboot <argument>`.
+Its
+https://gitlab.com/ubports/development/core/packaging/adbd/-/blob/05a118669fae0806703fc0ecbc7e43ab7cd8ebdb/debian/patches/adbd-unprivileged-user.patch#L53[unprivileged-daemon patch]
+switches the daemon to `phablet` and launches subprocesses through
+`adbd-pam-session`. The
+https://gitlab.com/ubports/development/core/packaging/adbd/-/blob/05a118669fae0806703fc0ecbc7e43ab7cd8ebdb/debian/adbd-pam-session/adbd-pam-session.c#L392[PAM helper]
+drops back to the requesting UID before shell execution; it does not simply
+run the reboot command as root. Live PAM/logind authorization, reboot-parameter
+permissions and the exact Ubuntu systemd patches remain unaudited. The daemon
+source mapping therefore does not prove that a mode request will succeed or
+that its argument reaches the kernel unchanged.
+
+The pinned Titan kernel has a concrete consumer for the `bootloader` restart
+argument. Its
+link:{kernel-src}/drivers/watchdog/mediatek/wdk/wd_api.c#L657[`arch_reset` handler]
+calls `rtc_mark_fast()` for that argument, then the vendor watchdog reset path.
+The handler is registered with priority 128. The
+link:{kernel-src}/drivers/misc/mediatek/rtc/mtk_rtc_common.c#L407[RTC setter]
+selects `RTC_FAST_BOOT`; the
+link:{kernel-src}/drivers/misc/mediatek/rtc/mt6358/mtk_rtc_hal.c#L95[MT6358 register map]
+maps it to `RTC_PDN1` bit 13. The
+link:{kernel-src}/drivers/misc/mediatek/rtc/mtk_rtc_hal_common.c#L115[register operation]
+performs a read-modify-write followed by the RTC write trigger. This is a
+persistent control-state change, not a passive connectivity query.
+
+The preserved runtime configuration enables the relevant vendor watchdog/kicker,
+RTC and MT6358 paths. `CONFIG_MTK_PMIC` is disabled, so the separately guarded
+`pmic_pre_wdt_reset()` exception-register clearing in the watchdog source is not
+part of that configuration. These configuration/source correlations do not
+prove exact source-to-installed-binary identity. The MT6771
+link:{kernel-src}/drivers/misc/mediatek/eccci/mt6771/md_sys1_platform.c#L1333[modem shutdown callback]
+is empty; reaching the kernel's device shutdown alone does not establish modem
+quiescence.
+
+The remaining trace must resolve installed userspace authorization, orderly
+shutdown and argument propagation, then LK's consumption/clearing of the RTC
+marker and a concrete return mechanism. Neither absence of boot-control storage
+writes across that whole route nor a reliable return has been established.
+The source findings do not authorize an entry trial, temporary boot or write.
+
 ==== Modem and calibration consistency source audit
 
 The retained configuration builds ECCCI/CLDMA support. Its
@@ -854,7 +906,8 @@ transport have been verified on this exact phone.
   trial. Trace the installed normal-mode command or physical route, orderly
   shutdown, possible boot-control/RTC changes and modem effects. Document the
   expected exit mechanism and failure fallback for review. These questions
-  remain open; bootloader strings do not establish reachable commands. A route
+  are only partly resolved by the source trace above; bootloader strings do not
+  establish reachable commands. A route
   through recovery must account for that image's startup writes.
 . With separate owner authorization, perform only the reviewed entry,
   recognition and return trial. Record Mac recognition, product, relevant
