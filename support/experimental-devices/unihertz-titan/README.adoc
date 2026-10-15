@@ -52,9 +52,11 @@ hardware works under NixOS.
   consistent, then restarted into fastboot, and the original recovery was
   restored. The first attempt stalled in macOS's serial driver; the repeat
   succeeded.
-* A link:repo-kernel-trial.adoc[repository-kernel probe trial] proposal: it
-  boots the kernel this repository builds, from the recovery partition with the
-  probe, which is M1's remaining hardware gate. Not run.
+* A link:repo-kernel-trial.adoc[repository-kernel probe trial], run on
+  2026-10-15 with the owner's approval: the kernel this repository builds booted
+  from the recovery partition, ran the probe, which reported kernel `4.14.141`,
+  restarted into fastboot, and the original recovery was restored. This passes
+  M1's hardware gate for the kernel.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -528,9 +530,9 @@ details are recorded; the rollback set has a verified second copy on separate
 storage since 2026-10-15. Rescue boots from the recovery partition and their returns into
 fastboot have worked three times, the original recovery has been restored byte
 for byte twice, and the sixteen regions other than `userdata` have a consistent
-offline copy. M1 hardware validation remains open until a generated image with
-the repository's own kernel boots through that procedure; the
-link:repo-kernel-trial.adoc[repository-kernel trial] proposes it.
+offline copy. M1's hardware gate for the kernel passed on 2026-10-15, when a
+generated image with the repository's own kernel booted through that procedure
+in the link:repo-kernel-trial.adoc[repository-kernel trial].
 `tools/flash-recovery.py` writes only the recovery partition, and only pinned
 images.
 
@@ -1211,3 +1213,16 @@ the normal-mode copies except `expdb`, and a read-only `e2fsck` found no errors
 in the four ext4 copies. The same day the owner made a second copy of the
 whole rollback set on a remote server and verified all 57 files against a
 SHA-256 list made on the Mac.
+
+=== Follow-up: repository-kernel trial
+
+The owner approved and ran the link:repo-kernel-trial.adoc[repository-kernel
+trial] on 2026-10-15. `fastboot flash recovery` wrote the second-version probe
+with the repository-built kernel, read back by hash. On the Volume Up start the
+probe reported five status lines with kernel release `4.14.141`, where the
+installed kernel reports `4.14.141+`, so the kernel this repository builds ran
+the storage guard and the USB gadget on the phone. Its deadline restart reached
+bootloader fastboot, the preserved original recovery was written back and read
+back byte for byte, and boot and dtbo never changed. This is the first kernel
+built by this repository to run on the Titan, and it passes M1's hardware gate
+for the kernel.

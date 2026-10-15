@@ -110,7 +110,13 @@ crashes and resets into a normal boot instead of starting it; a compact probe
 image crashed it the same way. A recovery-partition trial then succeeded: the
 bootloader wrote a probe image to recovery, ran it on a Volume Up start, the
 probe restarted into fastboot, and the original recovery was restored byte for
-byte. M0 remains open.
+byte. An offline acquisition started the same way then copied the sixteen
+regions other than userdata, each read twice and stable, and the owner keeps a
+second verified copy of the rollback set on separate storage. Finally the
+kernel this repository builds booted from the recovery partition with the probe
+and restarted into fastboot, which passes M1's hardware gate for the kernel.
+M0 remains open for firmware/restore provenance and outstanding hardware
+details.
 
 toc::[]
 

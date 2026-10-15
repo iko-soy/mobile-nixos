@@ -81,6 +81,14 @@ original recovery
 |Firmware writers outside the run; see
 link:control-acquisition-trial.adoc[the trial record]
 
+|Repository-built kernel on hardware
+|One owner-approved trial: the pinned `Image.gz` (`cd370ef6...`) booted from
+the recovery partition with the probe, which reported kernel `4.14.141`;
+restart into fastboot; byte-exact restore of the original recovery
+|2026-10-15
+|The UBports initramfs, any NixOS userspace, other builds of the recipe; see
+link:repo-kernel-trial.adoc[the trial record]
+
 |Second copy of the rollback set
 |The owner's remote copy of the six cataloged sets and the offline region
 copy, all 57 files matching a SHA-256 list made on the Mac

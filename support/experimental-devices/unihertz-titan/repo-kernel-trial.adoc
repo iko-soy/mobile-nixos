@@ -1,8 +1,8 @@
 = Repository-kernel probe trial
 
-Status on 2026-10-15: proposal only. Nothing in it has run on the phone, and
-it authorizes no phone action. Running it needs the owner's explicit approval
-of this procedure, and that approval covers one run.
+Status on 2026-10-15: *run once with the owner's explicit approval; all four
+questions were answered yes. See <<result,the result>>.* Each repetition needs
+the owner's explicit approval of this exact procedure.
 
 The kernel this repository builds (`kernel.nix`) comes from the pinned UBports
 source with the same configuration as the installed kernel, whose exact source
@@ -13,6 +13,37 @@ kernel from the recovery partition with the second-version
 link:usb-probe/README.adoc[USB probe] ramdisk, which already ran on the phone
 in the link:recovery-route-trial.adoc[recovery-partition trial], and then
 restores the original recovery. Ubuntu Touch's boot partition is never written.
+
+[[result]]
+== Result (2026-10-15)
+
+The owner approved the procedure and ran the partition reads, the entry and the
+Volume Up start; watchers ran the fastboot steps and the listener.
+
+* *Preconditions.* Step 2 found boot, recovery and dtbo identical to their
+  preserved copies and `para` unchanged since the offline acquisition trial;
+  of the control regions only `expdb` had changed. The battery was full.
+* *Part 1.* `fastboot flash recovery` sent the padded image and reported
+  `Writing 'recovery' OKAY`. Step 7 read recovery back as `e5946388...`, with
+  boot and dtbo unchanged.
+* *Questions 1 and 2, yes.* After the Volume Up start the Mac saw the probe's
+  USB device, and the listener recorded five valid status lines, with no
+  fragments, reporting kernel `4.14.141` at uptimes of 4 to 12 seconds and a
+  restart deadline at 154 seconds. The installed kernel reports `4.14.141+`, so
+  the repository-built kernel ran the probe's storage guard and USB gadget.
+* *Question 3, yes.* Bootloader fastboot (`is-userspace: no`) appeared after
+  the probe's deadline.
+* *Question 4, yes.* From there `fastboot flash recovery` wrote the preserved
+  original (`Writing 'recovery' OKAY`) and `fastboot reboot` started Ubuntu
+  Touch (`bootreason=reboot`, kernel `4.14.141+`), back on ADB after 142
+  seconds instead of the usual 65. Step 13 read recovery back as
+  `4dd1c1f7...`, with boot and dtbo unchanged throughout.
+
+This pinned kernel binary (`cd370ef6...`) therefore boots on the Titan from a
+generated image and supports the probe's storage guard, USB gadget and restart,
+which passes M1's hardware gate for the kernel. Not shown: the reference boot
+image with the UBports initramfs, any NixOS userspace on this kernel, or a
+change to the boot partition.
 
 == Questions
 
