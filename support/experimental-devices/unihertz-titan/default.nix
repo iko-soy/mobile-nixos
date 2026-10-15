@@ -60,6 +60,9 @@ in
     nativeBuildInputs = [ testPython ];
   } ''
     export PYTHONDONTWRITEBYTECODE=1
+    # The rescue repacker is compared against the pinned independent assembler
+    # using synthetic inputs only. Private phone images never enter the store.
+    export TITAN_MKBOOTIMG_SOURCE=${sources.mkbootimg}
     # The inventory collector intentionally rejects output in Git checkouts.
     # Nix's private build directory also keeps temporary inventory fixtures out
     # of the source tree, even when the caller builds from a checkout.

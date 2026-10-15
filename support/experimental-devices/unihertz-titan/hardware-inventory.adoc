@@ -291,6 +291,13 @@ numeric `/proc` enumeration and status parent fields for adopted-worker cleanup;
 it does not depend on the optional children listing. Raw probe output remains
 private, and the normal-mode probes changed no phone configuration.
 
+A subsequent read-only `/proc/cmdline` probe in the same normal-mode session
+reported `androidboot.verifiedbootstate=orange`, `rodata=0` and `init=/init`.
+It contained no `rdinit`, `panic` or `skip_initramfs` option and no explicit
+flash-lock or vbmeta-device-state field. This records kernel-received strings,
+not an independent bootloader lock-state or temporary-boot test. The full
+command line remains private because it includes device-specific data.
+
 === Direct userdata source geometry
 
 A later normal-mode ADB probe revalidated the original eMMC layout without

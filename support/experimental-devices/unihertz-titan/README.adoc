@@ -261,6 +261,22 @@ AArch64 artifact. This output is not an Android boot image, a consistent Titan
 backup or a demonstrated recovery environment. Hardware boot/exit, writer
 quiescence, calibration preservation and Mac USB recognition remain unverified.
 
+== Private rescue boot-image packaging
+
+The local link:rescue-image.adoc[rescue-envelope helper] combines the exact
+preserved installed kernel and DTB with the reviewed USB acquisition ramdisk.
+It checks fixed input hashes and emits a raw, unsigned Android v2 envelope in a
+new private directory outside Git and the Nix store. It replaces Ubuntu Touch
+startup arguments, recomputes the legacy image checksum and discards the old
+AVB metadata. The generic format check is separate from bootloader acceptance;
+no flashing or temporary-boot command is supplied.
+
+The private result is 12707840 bytes and matches the pinned Android assembler
+byte-for-byte. Its kernel and DTB match the preserved installed boot, and its
+ramdisk matches the tested USB acquisition build. It remains unsigned and
+untested on hardware; packaging does not establish a recovery route. All 186
+host tools tests and the existing packaging fixture passed on the Mac.
+
 == Reference inputs
 
 Every downloaded build input has a fixed revision or content hash. The

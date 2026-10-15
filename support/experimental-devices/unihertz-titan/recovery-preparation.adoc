@@ -570,6 +570,18 @@ hardware trial:
   system. Neither temporary boot nor rollback is demonstrated. A build-only
   rescue artifact cannot close the recovery gate.
 
+==== Private build-only boot envelope
+
+The link:rescue-image.adoc[local rescue-image helper] now prepares a separately
+named raw Android v2 envelope from the fixed preserved boot kernel/DTB and the
+reviewed USB acquisition ramdisk. Private phone inputs stay on the Mac, outside
+Git and the Nix store. The helper removes inherited Ubuntu Touch storage/startup
+arguments, selects `/init`, requests `panic=0`, and omits all old AVB metadata.
+It preserves DTB bytes and records the remaining command-line and watchdog
+assumptions. This is a format/assembly experiment, not an accepted boot image
+or a demonstrated offline backup environment. No hardware action follows
+from a successful local preparation.
+
 ==== Build-only storage guard
 
 The independent ramdisk prototype and its host-only build commands are described

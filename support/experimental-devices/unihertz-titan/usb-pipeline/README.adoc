@@ -110,6 +110,10 @@ remaining ownership and reports failure.
 
 Production limits are 125074145280 compressed bytes, 21600 seconds for the
 producer, 21900 seconds for the sender, and a 21960-second supervisor deadline.
+These deadlines start at worker launch, not at host HELLO. The sender waits for
+HELLO before reading producer data; bounded pipes and queues backpressure the
+producer while the host is absent. A late host consumes the transfer budget;
+expiry fails this one-shot attempt and does not trigger a retry.
 These are rejection bounds, not storage reservations, throughput measurements
 or promises that every syscall can be interrupted. USB setup and cleanup also
 have polling deadlines; blocked kernel operations can exceed them.

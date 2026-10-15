@@ -52,6 +52,12 @@ tests exercise the sealed configfs policy, complete sparse restoration and
 failure cleanup. These software results do not establish a quiescent Titan
 backup, macOS ACM operation or a hardware boot/return route; M0 remains open.
 
+A private raw Android v2 envelope now combines that tested acquisition ramdisk
+with the preserved installed kernel and DTB. Its bytes match an independent
+invocation of the pinned Android assembler. It has no AVB metadata and has not
+been sent to or booted on the phone; bootloader acceptance and a return path
+remain prerequisites for any separately authorized hardware trial.
+
 toc::[]
 
 == Objective and recommended approach
