@@ -20,6 +20,7 @@ let
   usbControl = import ./usb-control.nix { inherit pkgs transport; };
   usbDiag = import ./usb-diag.nix { inherit pkgs transport; };
   nativeKernel = import ./native/kernel.nix { inherit pkgs; };
+  ramNixos = import ./ram-nixos.nix { inherit pkgs; kernel = nativeKernel; };
   nativeProbeImage = import ./native/probe-image.nix {
     inherit pkgs sources;
     kernel = nativeKernel;
@@ -37,6 +38,18 @@ let
     # The configured 128 KiB log buffer could lose the earliest boot records
     # before the diagnostic producer reads them.
     extraCmdline = "log_buf_len=2M";
+  };
+  nativeRamImage = import ./native/probe-image.nix {
+    inherit pkgs sources;
+    kernel = nativeKernel;
+    ramdisk = ramNixos.ramdisk;
+    boardDtb = "${ramNixos.boardDtb}/mt6771-unihertz-titan-ram.dtb";
+    name = "titan-native-ram-recovery-image";
+    imageName = "UNTESTED-UNSIGNED-native-ram.img";
+    summary = "and the RAM NixOS stage 0, with the eMMC controller disabled";
+    extraCmdline = ramNixos.imageCmdline;
+    title = "Build-only native-route RAM NixOS recovery image";
+    status = "Not booted.";
   };
   # This pin's Darwin libffi trampoline dylib aborts on macOS 27 when ctypes
   # loads. Backport the targeted upstream fix for the host test interpreter:
@@ -76,7 +89,7 @@ let
   };
 in
 {
-  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition usb mountPolicy usbAcquisition usbProbe usbControl usbDiag nativeKernel nativeProbeImage nativeDiagImage;
+  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition usb mountPolicy usbAcquisition usbProbe usbControl usbDiag ramNixos nativeKernel nativeProbeImage nativeDiagImage nativeRamImage;
 
   tests = pkgs.runCommand "titan-tools-and-boot-packaging-tests" {
     nativeBuildInputs = [ testPython ];

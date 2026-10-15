@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
-This host helper writes only the `recovery` partition, and only one of six
+This host helper writes only the `recovery` partition, and only one of seven
 pinned full-partition images: the USB probe envelope, the same probe with the
-repository-built kernel, the native route's first modern-kernel image or its
-diagnostic image, or the offline control-region acquisition envelope, each
-padded with zeros to the partition size, or the preserved original recovery
-image that restores it. It
+repository-built kernel, the native route's first modern-kernel image, its
+diagnostic image or its RAM NixOS image, or the offline control-region
+acquisition envelope, each padded with zeros to the partition size, or the
+preserved original recovery image that restores it. It
 first sends fixed read-only identity queries, including the recovery
 partition's size and type, from a verified read-only private copy that it
 measures again afterwards. It never writes another partition and never issues
 erase, boot, oem, flashing, set_active or any other command. Running it changes
 the phone's storage and needs the owner's explicit authorization of the
 procedure in recovery-route-trial.adoc, control-acquisition-trial.adoc,
-repo-kernel-trial.adoc, native-boot-trial.adoc or native-diag-trial.adoc.
+repo-kernel-trial.adoc, native-boot-trial.adoc, native-diag-trial.adoc or
+native-ram-trial.adoc.
 """
 
 import argparse
@@ -66,6 +67,14 @@ PROFILES = {
         "source_bytes": 17606656,
         "source_sha256": "8a58da6ccf326fb6c8432e18a9d5c57b2a9c4b3bfcf44909a93df4c01f029bde",
         "sha256": "5a55f9d7a54c9f5bb757b32955f2488909457a042ba42509182fcacb7ec7c6ee",
+    },
+    # The native route's RAM NixOS image (ram-nixos/README.adoc): the same
+    # kernel and overlay, the board tree with the eMMC host disabled, and the
+    # stage 0 ramdisk that pins the NixOS store squashfs (nativeRamImage).
+    "ram-nixos": {
+        "source_bytes": 16510976,
+        "source_sha256": "aa1b6751f995c3a201bf2737a3a0ad656b4206d1986ba489e49a8da31c74222a",
+        "sha256": "b05b933d10f17a927e6d8bd3e132d20a3d40cb12f24cc836a50a1397d2d8d240",
     },
     # The offline control-region acquisition envelope (control/README.adoc),
     # which restarts into the bootloader after the transfer or at its deadline,

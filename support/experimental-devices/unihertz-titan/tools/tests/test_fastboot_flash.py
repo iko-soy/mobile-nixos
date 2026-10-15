@@ -126,7 +126,7 @@ class RecoveryFlashTests(unittest.TestCase):
     def test_pinned_profiles_match_the_reviewed_images(self):
         real = load("titan_fastboot_flash_constants", HERE.parent / "flash-recovery.py")
         self.assertEqual(set(real.PROFILES), {"rescue-probe", "repo-kernel-probe", "native-probe", "native-diag",
-                                              "control-acquisition", "original-recovery"})
+                                              "ram-nixos", "control-acquisition", "original-recovery"})
         self.assertEqual(real.PARTITION_BYTES, 33554432)
         self.assertEqual(real.PARTITION, "recovery")
         # The probe is the second version, not the first-version envelope that
@@ -154,6 +154,13 @@ class RecoveryFlashTests(unittest.TestCase):
                           "5a55f9d7a54c9f5bb757b32955f2488909457a042ba42509182fcacb7ec7c6ee"))
         # The same kernel, overlay and DTB tables with the diagnostic ramdisk (1960531).
         self.assertEqual(diag["source_bytes"], 2048 + pages(15585590) + pages(1960531) + pages(5765) + pages(47337))
+        ram = real.PROFILES["ram-nixos"]
+        self.assertEqual((ram["source_bytes"], ram["source_sha256"], ram["sha256"]),
+                         (16510976, "aa1b6751f995c3a201bf2737a3a0ad656b4206d1986ba489e49a8da31c74222a",
+                          "b05b933d10f17a927e6d8bd3e132d20a3d40cb12f24cc836a50a1397d2d8d240"))
+        # The same kernel and overlay, the stage 0 ramdisk (864739) and the
+        # DTB table with the eMMC host disabled (47341).
+        self.assertEqual(ram["source_bytes"], 2048 + pages(15585590) + pages(864739) + pages(5765) + pages(47341))
         control = real.PROFILES["control-acquisition"]
         self.assertEqual((control["source_bytes"], control["source_sha256"], control["sha256"]),
                          (13475840, "41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65",

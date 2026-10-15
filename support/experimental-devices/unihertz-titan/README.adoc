@@ -73,6 +73,10 @@ hardware works under NixOS.
   nothing from storage. The bootloader applied the image's own overlay; all
   eight CPUs, the eMMC, USB, the PMIC regulators and the GPU came up. The
   original recovery was restored.
+* A link:ram-nixos/README.adoc[RAM NixOS image], built and checked in a VM,
+  and its link:native-ram-trial.adoc[trial proposal], not run: the first NixOS
+  userspace for the phone, its store pushed from the Mac over USB networking
+  into RAM, reachable over SSH, with Linux never seeing the phone's storage.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1272,3 +1276,17 @@ image's own overlay on a recovery start. All eight CPUs, the eMMC, USB device
 mode, the MT6358 regulators, the clock controllers and the Mali GPU came up;
 the display stops at the missing DSI output, and no I2C controller is enabled
 yet.
+
+=== Follow-up: RAM NixOS
+
+The link:ram-nixos/README.adoc[RAM NixOS image] (`nativeRamImage`) is the
+first NixOS userspace for the Titan. The recovery partition is too small for a
+NixOS store, so a busybox stage 0 in the image brings up USB networking,
+receives the store squashfs from the Mac, checks it against the SHA-256 pinned
+in the image and starts NixOS from RAM. The board tree disables the eMMC
+controller, so Linux never sees the phone's storage, and three deadlines
+restart the phone into Ubuntu Touch. The aarch64 system is assembled from the
+binary cache's packages; a VM runs the same stage 0 and configuration on
+x86_64. An independent review found that the kernel's built-in NBD devices
+would have made stage 0 refuse before USB came up, among other fixes. The
+link:native-ram-trial.adoc[trial proposal] awaits the owner's approval.

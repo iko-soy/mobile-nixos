@@ -1,0 +1,166 @@
+= RAM NixOS trial
+
+Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-diag-trial.adoc[diagnostic trial] showed the modern kernel's
+view of the Titan: all eight CPUs, USB device mode in both directions, the
+PMIC and the clocks come up. This trial starts the first NixOS userspace on
+the phone: the link:ram-nixos/README.adoc[RAM NixOS] image boots the same
+kernel from the recovery partition, with the eMMC controller disabled in its
+board tree, receives the NixOS store over the USB network into RAM, and
+accepts SSH from the Mac with one dedicated key. The original recovery is then
+restored. Ubuntu Touch's boot and `dtbo` partitions are never written, and
+Linux never sees the phone's storage during the run.
+
+== Questions
+
+. Does the image start, bring up USB networking that macOS accepts (CDC NCM
+  with a DHCP lease for the Mac), and accept the pinned NixOS store over it?
+. Does NixOS boot on the Titan from that store, with systemd, networkd and
+  SSH working, root in RAM and no block devices but loop and zram devices?
+. Does a restart from the SSH session, or the 20-minute deadline, boot
+  Ubuntu Touch?
+. Does the restore work as before, from fastboot entered from Ubuntu Touch?
+
+== Basis
+
+* *Kernel and overlay.* Unchanged from the earlier native trials: `Image.gz`
+  SHA-256 `461372e7dd4f98f1924ae9ecae0381731d75cd0cf92f5b6f3b30eddce59986d1`
+  and the same recovery-DTBO table.
+* *Board tree.* The Titan tree with only `status = "disabled"` added to the
+  eMMC host (`/soc/mmc@11230000`), checked to be the only difference; DTB
+  table `b41fe0d006af9c795e809115c53807a37a13eee0812d2ce1d5199e3e8bfcfb32`.
+* *Stage 0.* A static busybox script as PID 1; see
+  link:ram-nixos/README.adoc[the image record]. Ramdisk 864739 bytes,
+  SHA-256 `5723d84e11378fc5a006e7b84af4eaa5d1aeb94a0cf9715fd74d268afdd3731c`.
+* *NixOS.* A minimal NixOS from the pinned nixpkgs, aarch64 packages from the
+  binary cache: store squashfs 109862912 bytes, SHA-256
+  `26429d8f251636445aa8e74d2a8061b7dac1e801d8bd8e3cd60eaabb7fae448c`, pinned in stage 0.
+* *Image.* The native layout and command line, plus `nbd.nbds_max=0` and
+  `systemd.crash_action=reboot`: 16510976 bytes, SHA-256
+  `aa1b6751f995c3a201bf2737a3a0ad656b4206d1986ba489e49a8da31c74222a`; padded to 33554432 bytes, `b05b933d10f17a927e6d8bd3e132d20a3d40cb12f24cc836a50a1397d2d8d240`
+  (`tools/flash-recovery.py --profile ram-nixos`).
+* *Checks.* The VM build of the same stage 0 and configuration passes the
+  valid, hard-deadline, storage and deadline cases (see the image record),
+  and the phone build's binaries, busybox and pinned values are checked. An
+  independent review's findings are fixed: among them, the kernel's built-in
+  NBD devices would have made stage 0 refuse before USB came up.
+
+== Preconditions
+
+As in the link:native-diag-trial.adoc[diagnostic trial]: the owner present, a
+direct cable, battery at least 60%, no update pending, no recovery command
+file, both private copies of the original recovery (`4dd1c1f7...`) verified,
+and a normal-mode control-region copy right before the trial with `para`
+matching the latest copies. From step 5 until step 13 passes: no system
+update, factory reset, `reboot recovery` or Volume Up start other than step 9
+and the rows below.
+
+== Procedure
+
+*Part 1: write the image.* Steps 1 to 7 of the
+link:repo-kernel-trial.adoc[repository-kernel trial], with `--profile
+ram-nixos` and the image
+`native-ram-image-v1/UNTESTED-UNSIGNED-native-ram.img`; step 7
+must read recovery back as `b05b933d...`, with boot and dtbo unchanged.
+
+*Part 2: run RAM NixOS.*
+
+[start=8]
+. *Listen:* start `tools/ram-nixos.py` with the private copy of the store
+  squashfs, its pinned size and SHA-256, a new private output directory and
+  the dedicated key; and the ADB/fastboot watcher of the earlier trials.
+. *Start, owner-run:* keep the cable connected, power the phone off from
+  Ubuntu Touch, hold Volume Up and press Power, and release both once the
+  unlocked-state warning appears.
+. *Expected:* within about 40 seconds the image's USB device appears; if
+  macOS asks whether to allow the new accessory, the owner allows it. macOS
+  adds a network interface with the address 172.16.42.2, the helper pushes
+  the store, stage 0 verifies it and starts NixOS, and SSH answers about a
+  minute later.
+. *Session:* over SSH, read-only inspection only, saved privately: the system
+  state and failed units, the kernel log and journal, mounts, block devices,
+  network, processors, memory, temperatures and the bound drivers. Then
+  `systemctl reboot`, which restarts the phone into Ubuntu Touch. Without a
+  session the deadline restarts it 20 minutes after the kernel started, and
+  stage 0's helper at 25 minutes if that fails.
+
+*Part 3: restore.* From Ubuntu Touch, `sudo /sbin/reboot bootloader`
+(owner-run); then, as in the earlier trials, write the preserved original
+with the `original-recovery` profile, return, and read recovery back as
+`4dd1c1f7...`, with boot and dtbo unchanged.
+
+*Part 4: compare.* A normal-mode control-region copy after Part 3, compared
+with the one from step 2 (`expdb` changes on every boot).
+
+== Stop conditions
+
+The repository-kernel trial's general stop conditions apply. This table
+replaces the earlier native trials':
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|SSH answers, the session ends with `systemctl reboot`, and Ubuntu Touch
+starts
+|The expected outcome. Go to Part 3.
+|The USB device appears, but the network or the push never completes
+|Stage 0 restarts at its 600-second deadline, or at once after a refusal it
+reports on the status port. Keep the helper's output, which records the
+status lines; wait for Ubuntu Touch, then Part 3 without retrying.
+|The push completes, then the phone restarts before SSH answers
+|NixOS crashed or refused a disk. Keep the helper's output; wait for Ubuntu
+Touch, then Part 3 without retrying.
+|NixOS starts but SSH never answers
+|The NixOS deadline restarts the phone 20 minutes after the kernel started,
+stage 0's helper at 25 minutes; wait for Ubuntu Touch, then Part 3.
+|Ubuntu Touch starts without the USB device appearing
+|Read the boot reason from `/proc/cmdline`. Only `PowerKey` allows one retry
+of step 9. Any other reason may mean the bootloader refused the image or the
+kernel crashed: record it, then Part 3 without retrying.
+|The phone powers off
+|A critical temperature trip powers it off, since nothing throttles the CPUs.
+Let it cool, start Ubuntu Touch normally with Power, then Part 3.
+|A MediaTek boot ROM or preloader USB device (`0e8d:0003` or `0e8d:2000`)
+stays present
+|The phone is in the SoC's download mode. Do not interact with it or run any
+flashing tool. Hold Power about ten seconds; if it persists, stop and report.
+|The screen shows a bootloader error or a crash-dump screen
+|Photograph or note it, then apply the next row.
+|Neither Ubuntu Touch nor fastboot appears within 35 minutes of step 9
+|Hold Power about ten seconds, but expect nothing: this kernel does not arm
+the PMIC long-press reset, so it works only if the bootloader left it armed,
+which is unverified. Then unplug, let the battery run down, charge, start
+Ubuntu Touch normally and go to Part 3.
+|===
+
+== Residual risks
+
+* The modern kernel's earlier runs lasted 150 and about 45 seconds; this
+  one may last up to 25 minutes with the CPUs at the bootloader's clocks, no
+  frequency scaling, no thermal throttling and no charger driver. The session
+  is mostly idle.
+* The first userspace on the phone runs systemd and udev, which replay device
+  events for every device the kernel found; with no kernel modules or
+  firmware available, they can only adjust attributes of drivers already
+  bound. Nothing in the configuration writes hardware settings, and the
+  hardware watchdog is left untouched.
+* The USB network path is new on the phone: NCM on Linux 7.3, macOS's NCM
+  driver and its handling of a lease without a router were not exercised by
+  the VM, which uses virtio networking.
+* The eMMC controller is disabled in the board tree, so Linux sees no
+  storage; stage 0 and NixOS both refuse to continue with a disk present. The
+  eMMC stays as the bootloader left it until the restart.
+* macOS adds a network service for the gadget, which stays in its settings
+  after the run. The lease has no router or name server, so the Mac's own
+  network use is unaffected.
+* The hang worst case is unchanged: no feedback channel but USB, and no way
+  out but the battery running down.
+
+== What this can and cannot show
+
+Success gives a NixOS system on the Titan, reachable over SSH, from which
+further experiments can run without flashing. It does not show NixOS on
+storage, the display, input, charging, audio, radios or a boot without the
+Mac.

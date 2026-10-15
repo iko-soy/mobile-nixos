@@ -107,6 +107,18 @@ Linux 6.18.38 VM case, qemu-user refusal checks, Mac splitter tests
 |Display, input, charging, audio, radios, NixOS userspace; behavior beyond
 one run; see link:native-diag-trial.adoc[the trial record]
 
+|RAM NixOS image
+|Linux 6.18.38 VM cases (4) of the same stage 0 and configuration on x86_64:
+a short and a same-size corrupt push rejected, the pinned store accepted,
+NixOS `running` with no failed unit and SSH by key, the NixOS and hard
+deadlines, a disk refused; phone build checks (static AArch64 binaries, the
+phone busybox accepting the pinned store and rejecting a changed byte, the
+kernel's built-in block drivers); the DTB differing only in the eMMC host's
+status
+|Builder runs on 2026-10-16
+|Any run on the Titan: NCM on Linux 7.3, macOS's NCM driver and DHCP, NixOS
+on this kernel; see link:native-ram-trial.adoc[the proposal]
+
 |Second copy of the rollback set
 |The owner's remote copy of the six cataloged sets and the offline region
 copy, all 57 files matching a SHA-256 list made on the Mac

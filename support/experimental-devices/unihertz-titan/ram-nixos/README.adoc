@@ -1,0 +1,107 @@
+= RAM NixOS
+
+A NixOS system that runs on the Titan entirely from RAM, reachable from the
+Mac over USB networking and SSH, started from the recovery partition on the
+native route's modern kernel (link:../native-n0.adoc[N0 record]). It is the
+first NixOS userspace for the phone and turns later experiments into SSH
+sessions instead of flash-and-restore cycles. Building it does not authorize
+starting it; see link:../native-ram-trial.adoc[the trial proposal].
+
+[source,sh]
+----
+nix-build support/experimental-devices/unihertz-titan -A ramNixos.vmTests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A nativeRamImage --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A ramNixos.phoneSquashfs --no-out-link
+----
+
+The aarch64 system needs a builder that can run aarch64-linux, natively or
+under emulation (`boot.binfmt.emulatedSystems`); its packages come from the
+binary cache, and only the small assembly steps run there.
+
+== Why two stages
+
+The recovery partition holds 32 MiB, and the kernel alone takes 15.6 MB, so
+the recovery image carries only a small stage 0 and the NixOS store comes over
+USB. Everything stays in RAM; nothing is written to the phone.
+
+== Stage 0
+
+`stage0.sh` runs as PID 1 under a static busybox:
+
+. It mounts the kernel's virtual filesystems, starts a small static helper,
+  `deadline.c`, that restarts the phone with `reboot(2)` at a fixed uptime
+  (25 minutes) and keeps running into NixOS, and arms its own 600-second
+  deadline.
+. It binds a USB gadget (`1209:0005`, "Titan rescue experiment" / "Titan RAM
+  NixOS") with a CDC NCM network function and an ACM port for status lines.
+. It refuses to go on, reporting why on the status port, while any block
+  device other than loop, RAM or zram devices exists. The image's board tree
+  disables the eMMC controller (an `fdtput` of `status = "disabled"` on the
+  compiled tree, checked to be the only difference), so Linux never sees the
+  eMMC, and the command line sets `nbd.nbds_max=0`, since the kernel builds in
+  NBD with sixteen devices; a build check keeps other built-in block drivers
+  from creating devices.
+. It sets the phone's address to 172.16.42.1 and offers the Mac one DHCP
+  lease, 172.16.42.2, with no router or name server.
+. It listens on TCP port 7000 and writes at most the pinned number of bytes
+  into a tmpfs. A stream with the wrong size or SHA-256 is discarded and the
+  port listens again until the deadline.
+. It mounts the verified squashfs read-only with an overlay in RAM as
+  `/nix/store`, moves its mounts into the new root, stops its DHCP server and
+  deadline, and starts NixOS with `switch_root`.
+
+Any failed step restarts the phone, which then boots Ubuntu Touch.
+
+== NixOS
+
+`configuration.nix` is a minimal NixOS without kernel, initrd or boot loader:
+
+* root on tmpfs and journald in memory, with no swap or nix daemon;
+* `systemd-networkd` with the same address and a one-address DHCP server;
+* OpenSSH with root login by the one key in `authorized_keys` only, and no
+  passwords;
+* a udev rule that restarts the phone if any block device other than loop,
+  RAM or zram devices appears, at boot or later, the GPT auto-mount generator
+  masked, and emergency mode off, since no console is reachable;
+* a crash of the service manager restarts instead of freezing
+  (`systemd.crash_action=reboot` on the command line and in `system.conf`),
+  and the hardware watchdog stays untouched, including systemd's default
+  arming at reboot, since how the bootloader treats a watchdog reset is
+  unknown;
+* a deadline timer, armed in early boot and kept across isolation, that
+  restarts the phone cleanly 20 minutes after the kernel started; stage 0's
+  helper restarts it at 25 minutes regardless. Keeping a session longer means
+  stopping both, deliberately.
+
+The private half of the key stays in the owner's private evidence directory.
+
+== Mac side
+
+`tools/ram-nixos.py` checks the local squashfs against the pinned size and
+SHA-256 before connecting, connects only from the leased address 172.16.42.2
+(so nothing can reach another network's 172.16.42.1), streams the file once,
+records the status lines from the ACM port (it never writes to it), waits for
+the SSH banner and prints the login command. macOS adds a network service for
+the gadget, which stays in its settings after the run.
+
+== Checks
+
+The VM build runs the same stage 0 and configuration on x86_64 under TCG, with
+QEMU's restricted user network in place of the USB data path:
+
+* a short push and a same-size push with one changed byte are rejected and
+  the pinned squashfs accepted; NixOS boots to `running` with no failed unit,
+  root on tmpfs and the store on the overlay; SSH accepts the test key; only
+  loop and zram devices exist; the address, storage rule, crash action and
+  untouched watchdog are as configured; the deadline timer is armed and kept
+  on isolation; and the guest then restarts by itself at that deadline;
+* with the timer stopped over SSH, the hard deadline helper, still running in
+  NixOS, restarts the guest at its own deadline;
+* with a blank disk attached, stage 0 reports the refusal on its status port
+  and restarts before networking, leaving the disk unchanged;
+* with nothing pushed, stage 0 restarts at its own deadline.
+
+The phone build is checked for static AArch64 binaries, a busybox with every
+applet stage 0 uses, and the pinned values in its stage 0; the phone's own
+busybox, under qemu-user, accepts the pinned squashfs and rejects one with a
+changed byte.

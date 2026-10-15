@@ -1,7 +1,8 @@
 { pkgs, sources, kernel, ramdisk, name ? "titan-native-probe-recovery-image",
   imageName ? "UNTESTED-UNSIGNED-native-probe.img",
   summary ? "and the modern USB probe", extraCmdline ? "",
-  title ? "Build-only first native-route recovery image", status ? "Never booted." }:
+  title ? "Build-only first native-route recovery image", status ? "Never booted.",
+  boardDtb ? null }:
 
 # Native-route boot images (../native-n0.adoc): the native kernel, the Titan
 # board tree and minimal bootloader overlay as Android DT tables, and a modern
@@ -27,7 +28,7 @@ pkgs.runCommand name {
   set -o pipefail
   export PYTHONDONTWRITEBYTECODE=1
   mkdir -p "$out"
-  python3 -I ${./dt-table.py} ${kernel}/dtbs/mt6771-unihertz-titan.dtb dtb.img
+  python3 -I ${./dt-table.py} ${if boardDtb == null then "${kernel}/dtbs/mt6771-unihertz-titan.dtb" else boardDtb} dtb.img
   python3 -I ${./dt-table.py} ${kernel}/dtbs/mt6771-unihertz-titan-minimal-dtbo.dtb dtbo.img
   python3 -B ${sources.mkbootimg}/mkbootimg.py \
     --kernel ${kernel}/Image.gz --ramdisk ${ramdisk}/initramfs.cpio.gz \
