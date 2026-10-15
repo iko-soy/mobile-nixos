@@ -1,0 +1,233 @@
+= Proposed recovery-partition probe trial
+
+Status on 2026-10-15: *proposal only, not authorized and not run.* It writes
+the recovery partition twice, first the probe and then the preserved original,
+and changes the boot mode several times, so it needs the owner's explicit
+approval of this exact procedure. It never writes the boot partition, userdata
+or any other partition, never erases and never uses `fastboot boot`. It does not
+boot NixOS.
+
+== Why this route
+
+The link:temporary-boot-trial.adoc[temporary boot trial] showed that this
+bootloader crashes on `fastboot boot`, so a new ramdisk can start only from
+storage. The recovery partition is the smallest such change:
+
+* Ubuntu Touch's boot partition stays untouched, so its normal boot and
+  `sudo /sbin/reboot bootloader` stay available.
+* The installed stock recovery is preserved privately and pinned: 33554432
+  bytes, SHA-256
+  `4dd1c1f75cff6e8ec2d4606020f4c790ad3dc10545acc4ea0a11207d2d36be6d`.
+* Holding Volume Up at power-on starts the recovery partition without the RTC
+  flag that `reboot recovery` sets, which the MT6358 map labels "factory data
+  reset"; see link:entry-return-trial.adoc[the key-entry record].
+* Ubuntu Touch's Android container has no automatic recovery restore: a
+  read-only check on 2026-10-15 found no `install-recovery.sh`, `flash_recovery`
+  init entry or recovery patch file, so a written probe is not silently replaced
+  at the next boot.
+* The second version of the link:usb-probe/README.adoc[USB probe] is designed
+  to restart into bootloader fastboot at its deadline, where the original
+  recovery is written back. That restart is untested on the phone; it is
+  Question 4.
+
+== Questions
+
+. Does `fastboot flash recovery` write the pinned image? Ubuntu Touch reads the
+  partition back to check.
+. Does holding Volume Up at power-on start the probe from the recovery
+  partition?
+. Does the probe run on the phone: guard storage, bind its USB gadget and
+  report to the Mac?
+. Does its deadline restart reach bootloader fastboot?
+. Does `fastboot flash recovery` restore the original byte for byte, with
+  Ubuntu Touch booting normally afterwards?
+
+== Basis
+
+* *Images.* The probe image uses the stock recovery's layout: the installed
+  boot kernel and DTB, the second-version probe ramdisk, the probe's command
+  line and the stock recovery's 47545-byte recovery-DTBO section
+  (`0da3565a...`, identical to the dtbo partition's table). It is 9768960 bytes
+  with SHA-256
+  `f37dd3b159226e7c9955ee87246a570b8075d6e95187d4f1406d456f5c0ce59d`,
+  byte-identical to the pinned `mkbootimg`, and is padded with zeros to the
+  partition's 33554432 bytes, giving SHA-256
+  `a97cb154eb82a7241e155fbdb5c6bc804404ab1bb8082739aaa63835f1d96080`. It still
+  differs from the stock recovery: a different kernel build, no device tree
+  appended to the kernel segment, no AVB footer or vbmeta, and a newer header
+  patch level. The bootloader may treat any of these differently.
+* *Flash helper.* `tools/flash-recovery.py` writes only the `recovery`
+  partition and only those two pinned contents. It builds and verifies a
+  read-only private copy, then requires exactly one fastboot device reporting
+  the recorded `product`, `is-userspace: no`, `unlocked: yes`, a
+  `partition-size:recovery` of `0x2000000`, `partition-type:recovery` of
+  `raw data` and a sufficient maximum download size. It rechecks the copy,
+  sends one `fastboot flash recovery` and measures the copy again afterwards.
+  It refuses every other partition, image and command. Its synthetic tests use
+  a fake executable; it has never run against the phone.
+* *Verification.* The read-only `tools/acquire-partitions.py`, run by the owner
+  with sudo, copies boot, recovery and dtbo privately, with saved-file and
+  phone-side hashes. Recovery must match the expected content; boot
+  (`6829a8bc...`) and dtbo (`5b4e9f20...`) must still match their preserved
+  copies.
+* *Ways into fastboot.* From Ubuntu Touch with `sudo /sbin/reboot bootloader`,
+  used three times. From the stock recovery menu, used once, but gone while the
+  probe or a partial image occupies recovery. And, if Question 4 succeeds, from
+  the probe's own deadline restart, which uses the same kernel argument as the
+  first; the recovery menu's "Reboot to bootloader" reaching fastboot after a
+  key entry is the closest evidence. Until Question 4 succeeds, fastboot depends
+  on Ubuntu Touch.
+* *Untested here.* `fastboot flash` has never run on this bootloader. Flashing
+  recovery through fastboot is common practice, but this bootloader crashed on
+  `fastboot boot`, so Question 1 is open.
+
+== Preconditions
+
+* The entry trial's preconditions: the owner present, a direct cable to the
+  Mac, battery at least 60% and no system-image update in progress. A read-only
+  check as in the temporary boot trial: `system-image-cli --info` shows no new
+  update, and `/android/cache/recovery` and `/cache/recovery`, as Ubuntu Touch
+  sees them, hold no command file.
+* A second private copy of the original recovery image, made and verified by
+  hash before step 5, so that one damaged file cannot strand the restore. The
+  owner has no separate storage, so both copies are on the Mac.
+* A control-region copy taken right before the trial, compared with the earlier
+  ones; `para`, which by convention holds the boot-control block (its format is
+  unverified), must match them, or the trial waits until the difference is
+  understood. This rules out only a request already present before step 5.
+* The owner can power the phone off from Ubuntu Touch and start it with Volume
+  Up held, and decides the stop conditions below before starting.
+* From step 5 until step 13 passes: no system update, factory reset,
+  `reboot recovery` or Volume Up start other than step 9 and the row for an
+  unreachable Ubuntu Touch below. Parts 2 and 3 follow Part 1 directly.
+
+== Procedure
+
+*Part 1: write the probe.*
+
+. *Baseline, normal mode, read-only*, as in the entry trial, plus the update
+  check above.
+. *Check, owner-run:* `tools/acquire-partitions.py --sudo` into a new private
+  directory, and the control-region copy. Recovery must be `4dd1c1f7...`, with
+  boot, dtbo and `para` unchanged; otherwise stop.
+. *Entry, owner-run:* `adb -d shell`, then `sudo /sbin/reboot bootloader`.
+. *Recognition, read-only:* `tools/observe-fastboot.py observe`.
+. *Write:*
++
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/flash-recovery.py \
+  --profile rescue-probe \
+  --image /absolute/private/usb-probe-envelope-v2-recovery/UNTESTED-UNSIGNED-rescue.img \
+  --output /absolute/private/new-recovery-flash
+----
+. *Return:* `tools/observe-fastboot.py return`; the owner unlocks the screen.
+. *Check, owner-run:* `acquire-partitions.py` again. Recovery must be
+  `a97cb154...`, with boot and dtbo unchanged.
+
+*Part 2: run the probe.*
+
+[start=8]
+. *Listen:* start `tools/read-probe-report.py` and, after it,
+  `observe-fastboot.py observe` with a 600-second wait for the probe's return
+  to fastboot.
+. *Start, owner-run:* keep the USB cable connected, because the probe reports
+  over it. Power the phone off from Ubuntu Touch. Hold Volume Up and press
+  Power; if a charging screen appears instead, keep holding both (untested).
+  Release both once the unlocked-state warning appears.
+. *Expected:* within about 30 seconds the Mac sees the probe's USB device and
+  the listener records at least five lines. About 150 seconds after the probe
+  starts, the phone should restart into fastboot, where the observation step
+  sees it. The screen may stay dark throughout.
+
+*Part 3: restore.*
+
+[start=11]
+. *Write:* `flash-recovery.py --profile original-recovery --image
+  /absolute/private/installed/recovery.img --output /absolute/private/new-recovery-restore`.
+. *Return:* `observe-fastboot.py return`; the owner unlocks the screen.
+. *Check, owner-run:* `acquire-partitions.py` again. Recovery must be
+  `4dd1c1f7...`, with boot and dtbo unchanged.
+. *Optional:* rerun the link:control-region-preservation.adoc[control-region
+  reader] and compare.
+
+== Stop conditions
+
+The entry trial's stop conditions apply to every entry and return, with one
+precedence rule: whenever the phone is in bootloader fastboot while recovery
+holds the probe or a partial image, run Part 3 there, overriding the entry
+trial's "do not flash" and "issue no other command" rows. Part 3 may be retried
+once; if it still fails, stop in the end state described below.
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|Step 2 does not match
+|Stop before writing anything.
+|The flash helper refuses before sending
+|Nothing was written. Return with `observe-fastboot.py return`.
+|`fastboot flash` in step 5 fails, is refused, times out or crashes the bootloader
+|Return to Ubuntu Touch, or let the crash fallback return it, and read recovery
+first. If it is still `4dd1c1f7...`, stop: nothing was written and Part 3 is
+not needed. Otherwise go to Part 3.
+|Step 7 does not match
+|Go to Part 3.
+|Ubuntu Touch starts instead of the probe in step 9
+|One retry of step 9 is allowed if the boot reason is not `lk_crash`. Then
+enter fastboot from Ubuntu Touch and go to Part 3.
+|The probe reported, then Ubuntu Touch started instead of fastboot
+|Record it, enter fastboot from Ubuntu Touch and go to Part 3.
+|The screen stays dark and no USB device appears
+|Wait: the probe should restart into fastboot about 150 seconds after it
+starts, even if its USB setup failed.
+|Neither fastboot nor Ubuntu Touch appears within six minutes of step 9,
+whether or not the probe reported
+|Physical fallback: hold Power about ten seconds to force a restart, without
+Volume Up. If any sign of Ubuntu Touch appears (boot animation, lock screen, an
+RNDIS or ADB device), wait instead of forcing another restart: it may be
+checking or resizing userdata. From Ubuntu Touch, enter fastboot and go to
+Part 3.
+|The phone returns to the probe instead of fastboot
+|Wait for the next deadline restart; if it repeats, use the physical fallback
+without Volume Up.
+|Ubuntu Touch cannot be reached while the probe is installed
+|As an exception to the Volume Up guard, use the probe's own route: start it
+with Volume Up; if its restart reaches fastboot, run Part 3 from there.
+|Step 13 does not match, or Part 3 fails twice
+|Stop in the end state below.
+|Any step would write another partition, erase, or use `fastboot boot`
+|Never do it; the helpers refuse.
+|===
+
+*End state if the restore does not succeed.* Ubuntu Touch's normal boot does
+not use the recovery partition and should keep working. Avoid Volume Up starts,
+`reboot recovery`, system updates and factory resets, since each would start
+whatever recovery now holds. Any further restore attempt needs its own review.
+
+== Residual risks
+
+* `fastboot flash` is untested on this bootloader; a crash during the write
+  could leave recovery partly written, and the stock recovery's path into
+  fastboot gone, until Part 3 succeeds.
+* If the bootloader preferred a pending recovery request over the fastboot
+  marker, every restart, including the physical fallback without Volume Up,
+  could return to the probe. No such request is known: key entry sets no RTC
+  flag, the probe writes nothing, and the `para` precondition rules out a
+  request already present, though not one the bootloader might write during
+  the step 9 key entry. With the stock recovery gone, no key combination into
+  fastboot and no verified macOS emergency restore, that case would be a dead
+  end. The guards from step 5 to step 13 keep the window short.
+* The bootloader may refuse or crash on the modified recovery image, and how it
+  then proceeds is unknown; so far its crashes have reset into a normal boot.
+* The probe has run only in VMs. On the vendor kernel its storage guard, USB
+  gadget or restart may behave differently. Its separate deadline process
+  restarts the phone even if the rest fails, unless the kernel itself hangs.
+* The probe's restart sets the bootloader's persistent fastboot marker, which
+  the paths seen so far have cleared or ignored.
+
+== What this can and cannot show
+
+Success shows that this bootloader writes recovery through fastboot, starts a
+new ramdisk from it, that the probe runs and reports on this phone, and that
+the original can be restored. It does not show offline acquisition, consistent
+preservation, a NixOS boot or a restore of any other partition.

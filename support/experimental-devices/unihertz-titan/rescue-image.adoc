@@ -18,10 +18,16 @@ and the corrected 3055279-byte USB acquisition ramdisk with SHA-256
 3054712-byte build (`27d2a3da...`) contains the mount-ID-0 and zram defects found
 by the 2026-10-15 audit; an intermediate corrected build (`65ac5adf...`) lacked
 the later readiness and re-guard changes. Neither is accepted.
-With `--ramdisk-profile usb-probe`, the helper instead accepts only the 65652-byte
-link:usb-probe/README.adoc[USB probe ramdisk] with SHA-256
-`8b45b35e4606c03b483e630136385eaca09ce19d554189e77268a382d6f464bd`, checked by
-the archive inspector's separate one-executable `usb-probe` profile.
+With `--ramdisk-profile usb-probe`, the helper instead accepts only the
+65825-byte second-version link:usb-probe/README.adoc[USB probe ramdisk] with
+SHA-256 `cdb87d510caffe98fca0c009cecd31016e0cc85b9fd08c7cd41d7a8c6bad3a99`,
+checked by the archive inspector's separate one-executable `usb-probe` profile,
+and writes the probe's own command line, which ends in `panic=5` instead of
+`panic=0`. The first version's ramdisk (65652 bytes, `8b45b35e...`) is
+superseded. For the probe only, `--recovery` with the preserved stock recovery
+(`4dd1c1f7...`) selects the recovery-partition layout: the helper copies that
+image's 47545-byte recovery-DTBO section (`0da3565a...`, identical to the dtbo
+partition's table) into the new image, as the stock recovery carries it.
 These constants select reviewed inputs; there is no runtime hash, source-profile
 or command-line override. A future ramdisk build requires a reviewed profile
 update. Matching a digest establishes byte identity, not hardware suitability.
@@ -125,11 +131,17 @@ the pinned LineageOS `mkbootimg.py` at revision
 `40a19c4c5ffe8b86c6c61318c8aa4ffe35d6e7ad` produced identical bytes from the
 same preserved kernel, DTB and ramdisk. Independent readback verified the image
 hash, unchanged input hashes, directory mode `0700` and file mode `0600`.
-The same day the helper packaged the probe ramdisk into a 9719808-byte envelope
-with SHA-256
-`e6da06fc1f6c47d4c4ae0edc8c1888e9dc628dbef9b8f8a01ae37768065704c8`; the pinned
-`mkbootimg` again produced identical bytes. The
-link:temporary-boot-trial.adoc[temporary boot proposal] pins it for Stage B.
+The same day the helper packaged the first probe ramdisk into a 9719808-byte
+envelope with SHA-256
+`e6da06fc1f6c47d4c4ae0edc8c1888e9dc628dbef9b8f8a01ae37768065704c8`, sent in
+Stage B of the link:temporary-boot-trial.adoc[temporary boot trial], and then
+the second version into a 9719808-byte envelope with SHA-256
+`11acc288e8b0b56cf47a1d885fec3dfd38bc831dc37f6dea04619895ed2c383b`, which the
+link:recovery-route-trial.adoc[recovery-route proposal] superseded with a
+9768960-byte recovery-layout image, SHA-256
+`f37dd3b159226e7c9955ee87246a570b8075d6e95187d4f1406d456f5c0ce59d`, which it
+pins. The pinned `mkbootimg`, given the same section as `--recovery_dtbo` for
+the last, produced identical bytes for all three.
 The generic inspector accepted its geometry; the reference-profile check
 rejected only the intentionally absent AVB footer/vbmeta. Both build manifests
 also matched the independently parsed ramdisk and its six ELF payloads.

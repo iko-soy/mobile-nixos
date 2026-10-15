@@ -4,9 +4,11 @@
 temporary boot of a new ramdisk on the Titan, as Stage B of the
 link:../temporary-boot-trial.adoc[temporary boot proposal]. It reports over USB
 and then reboots by itself. It does not replace `rescue.ramdisk` or the USB
-acquisition profile. On 2026-10-15 Stage B sent its envelope with `fastboot
-boot`, but the bootloader crashed before starting it, so the probe has never
-run on the Titan. Building it does not authorize booting it.
+acquisition profile. On 2026-10-15 Stage B sent the first version's envelope
+with `fastboot boot`, but the bootloader crashed before starting it, so the
+probe has never run on the Titan. The second version, described here, is meant
+for the link:../recovery-route-trial.adoc[recovery-partition route]. Building
+it does not authorize booting it.
 
 [source,sh]
 ----
@@ -21,8 +23,10 @@ The ramdisk holds only one static program, the rescue PID 1 built with the probe
 profile. Before any mount or device access, PID 1 starts a separate deadline
 process. That process keeps only the descriptors PID 1 inherited from the
 kernel, blocks every signal it can and sleeps until 150 seconds after PID 1
-started, by `CLOCK_BOOTTIME`; it then writes one console line, syncs and
-requests an ordinary restart without an argument. PID 1 itself restarts ten
+started, by `CLOCK_BOOTTIME`; it then syncs and requests a restart with the
+`bootloader` argument, falling back to an ordinary restart if that call fails.
+The phone build writes nothing on its restart paths, so a stalled console
+cannot delay them. PID 1 itself restarts ten
 seconds later if that has not happened, from its wait loops, including the
 failure path; only the USB owner's bounded port polling during setup, at most
 30 seconds, does not check. If the clock or the deadline process is
@@ -53,19 +57,27 @@ reported on the console and leaves PID 1 waiting for the deadline restart. The
 probe reads no storage contents, accepts no input and starts no acquisition,
 shell, network or Android service.
 
-The restart is the same kind as an ordinary `reboot` from Ubuntu Touch, whose
-effect on this phone Stage A's final step observes. A kernel panic instead
-triggers the vendor exception handler's watchdog reset, after which the
-bootloader's behavior is unknown.
+For the recovery-partition route the probe is packaged in the stock recovery's
+layout, with its recovery-DTBO section; see link:../rescue-image.adoc[the
+envelope record]. The `bootloader` argument takes the same kernel path as
+`sudo /sbin/reboot bootloader`, which reached bootloader fastboot in the
+link:../entry-return-trial.adoc[entry trial]; there the original recovery can be
+written back. The fallback, an ordinary restart, booted normally in the
+temporary boot trial. The probe's envelope uses `panic=5` instead of the rescue
+image's `panic=0`, keeping the kernel's own panic restart behind the vendor
+exception handler's watchdog reset; after either, the bootloader's behavior is
+unknown.
 
 == Disposable VM checks
 
 The VM profile substitutes the virtio disk `vda`, the `dummy_udc` controller,
-a 45-second deadline and five-second discovery. It reads the report back
-through the guest's own `cdc_acm` host port. QEMU runs with `-no-reboot`, so a
-guest restart ends the process; each case must end that way by itself, after
-its deadline and within 40 seconds of it, with the kernel's restart message and
-an unchanged writable disk fixture.
+a 45-second deadline and five-second discovery, and prints restart markers with
+boot-clock times. It reads the report back through the guest's own `cdc_acm`
+host port. QEMU runs with `-no-reboot`, so a guest restart ends the process.
+Each case must end that way by itself, with the kernel reporting a restart with
+the command `bootloader`, an armed deadline exactly 45 seconds after PID 1's
+start, a restart marker 0 to 3 seconds after the deadline (10 to 13 seconds
+for the backstop) and an unchanged writable disk fixture.
 
 [cols="1,3",options="header"]
 |===
@@ -85,24 +97,23 @@ guest on time.
 |===
 
 The production build check rejects dynamic dependencies and any VM-only string,
-such as the case selector, `dummy_udc`, `ttyACM0` or `/dev/vda`. A qemu-user
+such as the case selector, `dummy_udc`, `ttyACM0`, `/dev/vda` or the restart
+markers. A qemu-user
 check confirms that the AArch64 program refuses to run as anything but PID 1.
 
 == Known limitations
 
-An independent review on 2026-10-15 found no high or medium problems and these
-low-severity limits, left for the next revision of the probe:
+An independent review of the first version on 2026-10-15 found no high or
+medium problems. The second version addresses its console, VM timing and
+`panic=0` findings. These limits remain:
 
-* Both restart paths write a console line with blocking calls and then share
-  the same `reboot()` call, so the PID 1 backstop covers a dead or stuck
-  deadline process, not a stalled console or a hung kernel restart.
-* The VM checks measure the restart from QEMU's start, which includes guest
-  boot time, and do not compare the armed deadline with PID 1's start; the
-  phone's 150- and 10-second constants have no automated check.
-* The envelope inherits `panic=0` from the rescue command line, removing the
-  kernel's own panic restart as a fallback behind the vendor watchdog reset.
-* After a USB reset or re-enumeration the gadget TTY may hang up; the probe then
-  stops reporting and waits for its deadline.
+* Both restart paths share the same `reboot()` call, so the PID 1 backstop
+  covers a dead or stuck deadline process, not a hung kernel restart.
+* The VM checks pin the 45-second VM deadline; the phone's 150- and 10-second
+  constants have no automated check.
+* After a USB reset or re-enumeration the gadget TTY may hang up. A write error
+  from it is tolerated, but the next gadget recheck then fails and the probe
+  stops reporting until its deadline.
 
 == Hardware boundary
 

@@ -331,6 +331,10 @@ class RescueImageTests(unittest.TestCase):
             self.assertEqual(report["ramdisk_profile"], "usb-probe")
             self.assertEqual(report["inputs"]["usb_ramdisk"]["format"], "titan-usb-probe-initramfs-v1")
             info = prepare.boot_inspector.inspect_image(image)
+            # Only the probe uses its own command line, with a panic restart.
+            self.assertEqual(info["cmdline"], prepare.PROBE_CMDLINE)
+            self.assertEqual(report["policy"]["rescue_cmdline"], prepare.PROBE_CMDLINE)
+            self.assertEqual(prepare.PROBE_CMDLINE, prepare.RESCUE_CMDLINE.replace("panic=0", "panic=5"))
             self.assertEqual(prepare.payload(image, info, "ramdisk"), probe)
             self.assertEqual(prepare.payload(image, info, "kernel"), self.kernel)
             # Each ramdisk is accepted only under its own profile.
@@ -348,6 +352,79 @@ class RescueImageTests(unittest.TestCase):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
             prepare.main(["--boot", "b", "--ramdisk", "r", "--output", "o", "--ramdisk-profile", "rescue"])
+
+    def probe_fixture(self):
+        paths = (".", "dev", "init", "proc", "run", "sys", "tmp")
+        probe = test_rescue_ramdisk.compressed(test_rescue_ramdisk.archive([
+            test_rescue_ramdisk.record(path, test_rescue_ramdisk.elf(b"probe") if path == "init" else b"",
+                                       inode=index, directory=path != "init")
+            for index, path in enumerate(paths)]))
+        dtbo = b"DTBO" * 1000 + b"tail"
+        recovery = bytes(test_boot_image.image(recovery=dtbo))
+        pins = {"PROBE_RAMDISK_BYTES": len(probe), "PROBE_RAMDISK_SHA256": hashlib.sha256(probe).hexdigest(),
+                "RECOVERY_BYTES": len(recovery), "RECOVERY_SHA256": hashlib.sha256(recovery).hexdigest(),
+                "RECOVERY_DTBO_BYTES": len(dtbo), "RECOVERY_DTBO_SHA256": hashlib.sha256(dtbo).hexdigest()}
+        return probe, dtbo, recovery, pins
+
+    def test_recovery_layout_carries_the_pinned_stock_section(self):
+        probe, dtbo, recovery, pins = self.probe_fixture()
+        with patch.multiple(prepare, **pins):
+            self.assertEqual(prepare.validate_recovery(recovery), dtbo)
+            image, report = prepare.assemble_image(self.boot, probe, "usb-probe", dtbo)
+            info = prepare.boot_inspector.inspect_image(image)
+            self.assertEqual(prepare.payload(image, info, "recovery_dtbo"), dtbo)
+            self.assertEqual(prepare.payload(image, info, "ramdisk"), probe)
+            self.assertEqual(prepare.payload(image, info, "kernel"), self.kernel)
+            self.assertEqual(report["layout"], "recovery")
+            self.assertEqual(report["inputs"]["recovery_dtbo"]["sha256"], hashlib.sha256(dtbo).hexdigest())
+            # The legacy ID covers the section in mkbootimg's recovery-DTBO slot.
+            digest = hashlib.sha1(usedforsecurity=False)
+            for item in (self.kernel, probe, b"", b"", dtbo, self.dtb):
+                digest.update(item)
+                digest.update(struct.pack("<I", len(item)))
+            self.assertEqual(image[576:608], digest.digest() + bytes(12))
+            _, plain = prepare.assemble_image(self.boot, probe, "usb-probe")
+            self.assertEqual(plain["layout"], "boot")
+            for data, profile, section in ((self.ramdisk, "usb-acquisition", dtbo), (probe, "usb-probe", dtbo[:-1] + b"x")):
+                with self.subTest(profile=profile), self.assertRaises(prepare.PreparationError):
+                    prepare.assemble_image(self.boot, data, profile, section)
+            with self.assertRaises(prepare.PreparationError):
+                prepare.validate_recovery(recovery[:-1] + b"x")
+            with self.private_inputs() as (parent, boot, ramdisk, output):
+                ramdisk.write_bytes(probe)
+                stock = parent / "recovery.img"
+                stock.write_bytes(recovery)
+                stock.chmod(0o600)
+                with self.assertRaisesRegex(prepare.PreparationError, "only for the probe"):
+                    prepare.prepare(boot, ramdisk, output, "usb-acquisition", stock)
+                self.assertFalse(output.exists())
+                prepare.prepare(boot, ramdisk, output, "usb-probe", stock)
+                self.assertEqual(json.loads((output / prepare.MANIFEST_NAME).read_text())["layout"], "recovery")
+
+    @unittest.skipUnless(os.environ.get("TITAN_MKBOOTIMG_SOURCE"), "pinned mkbootimg source required for independent assembly comparison")
+    def test_recovery_layout_byte_identical_to_pinned_mkbootimg(self):
+        probe, dtbo, recovery, pins = self.probe_fixture()
+        source = Path(os.environ["TITAN_MKBOOTIMG_SOURCE"])
+        script = source / "mkbootimg.py" if source.is_dir() else source
+        with patch.multiple(prepare, **pins):
+            expected, _ = prepare.assemble_image(self.boot, probe, "usb-probe", dtbo)
+        with tempfile.TemporaryDirectory(prefix="titan-synthetic-mkbootimg-") as temporary:
+            parent = Path(temporary)
+            for name, data in (("kernel", self.kernel), ("ramdisk", probe), ("dtb", self.dtb), ("dtbo", dtbo)):
+                (parent / name).write_bytes(data)
+            output = parent / "reference.img"
+            result = subprocess.run(
+                [sys.executable, str(script), "--kernel", str(parent / "kernel"),
+                 "--ramdisk", str(parent / "ramdisk"), "--dtb", str(parent / "dtb"),
+                 "--recovery_dtbo", str(parent / "dtbo"),
+                 "--cmdline", prepare.PROBE_CMDLINE, "--header_version", "2", "--os_version", "10",
+                 "--os_patch_level", "2025-08", "--base", "0x40000000", "--kernel_offset", "0x80000",
+                 "--ramdisk_offset", "0x15000000", "--second_offset", "0xf00000",
+                 "--tags_offset", "0x14000000", "--pagesize", "2048", "--dtb_offset", "0x14000000",
+                 "--output", str(output)], capture_output=True, timeout=15, check=False,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+            self.assertEqual(output.read_bytes(), expected)
 
     @unittest.skipUnless(os.environ.get("TITAN_MKBOOTIMG_SOURCE"), "pinned mkbootimg source required for independent assembly comparison")
     def test_byte_identical_to_pinned_mkbootimg(self):

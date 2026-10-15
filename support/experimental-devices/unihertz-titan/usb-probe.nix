@@ -54,7 +54,8 @@ let
     fi
     # VM-only cases, controller and host-side strings must not enter the phone profile.
     strings root/init > "$out/init.strings.txt"
-    if grep -E 'dummy_udc|dummy_hcd|ttyACM0|TITAN_PROBE_VM_|titan_usb_probe_test=|/dev/vda' "$out/init.strings.txt"; then
+    # The phone build also writes nothing on its restart paths.
+    if grep -E 'dummy_udc|dummy_hcd|ttyACM0|TITAN_PROBE_VM_|titan_usb_probe_test=|/dev/vda|TITAN_PROBE_DEADLINE_REBOOT|TITAN_PROBE_BACKSTOP_REBOOT' "$out/init.strings.txt"; then
       echo "VM fixture strings leaked into the probe init" >&2
       exit 1
     fi

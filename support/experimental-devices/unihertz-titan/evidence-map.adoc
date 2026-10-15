@@ -55,6 +55,13 @@ preflight, publication commit point)
 |Current revision; fixture from 2026-10-14
 |Any Titan userdata archive
 
+|Recovery-partition route
+|Proposal; recovery-only flash helper with host tests (9); key entry into
+recovery and the recovery menu's path into fastboot, each seen once
+|2026-10-15
+|Whether `fastboot flash` works on this bootloader; whether the bootloader
+starts the probe from recovery; see link:recovery-route-trial.adoc[the proposal]
+
 |USB probe profile and its deadline reboot
 |Linux 6.18.38 VM cases (4): success, stuck PID 1, killed deadline process,
 missing storage; qemu-user refusal check; Mac report-reader tests

@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: MIT
- * Separate experimental PID 1 profile for a first temporary boot. After the
- * rescue storage guard it binds the fixed ACM gadget, writes a bounded status
- * line every two seconds and reboots at a fixed deadline counted from PID 1
- * start, whether or not the earlier steps succeeded. It reads no storage
- * contents, accepts no input and starts no acquisition, shell or service.
- * The VM-only branch reads the report back through dummy_hcd and adds faults.
+ * Separate experimental PID 1 profile for a first boot of a new ramdisk. After
+ * the rescue storage guard it binds the fixed ACM gadget, writes a bounded
+ * status line every two seconds and restarts into the bootloader at a fixed
+ * deadline counted from PID 1 start, whether or not the earlier steps
+ * succeeded. It reads no storage contents, accepts no input and starts no
+ * acquisition, shell or service. The VM-only branch reads the report back
+ * through dummy_hcd, adds faults and prints restart markers.
  */
 #define _GNU_SOURCE
 #if !defined(TITAN_USB_PROBE_PROFILE) || !defined(TITAN_USB_MOUNT_PROFILE)
@@ -25,7 +26,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/reboot.h>
 #include <sys/reboot.h>
+#include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -46,7 +49,7 @@ int titan_rescue_guard_storage(void);
 #define BACKSTOP_SECONDS 10
 #define REPORT_MILLISECONDS 2000
 
-static struct timespec deadline;
+static struct timespec start, deadline;
 static pid_t deadline_process = -1;
 static int armed;
 
@@ -63,20 +66,36 @@ static _Noreturn void restart_now(void)
     /* Nothing writable is mounted from storage; every block node is read-only. */
     sync();
     for (;;) {
+        /* Restart into bootloader fastboot, where the original recovery can be
+         * written back; the vendor kernel maps this argument to its fastboot
+         * marker. An ordinary restart is the fallback if the call fails. */
+        (void)syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+                      LINUX_REBOOT_CMD_RESTART2, "bootloader");
         (void)reboot(RB_AUTOBOOT);
         sleep(1);
     }
 }
 
-static void console_marker(const char *text)
+#ifdef TITAN_USB_PROBE_VM_TEST
+/* VM-only restart markers. The phone build writes nothing on its restart
+ * paths, so a stalled console cannot delay the restart. */
+static void console_marker(const char *name)
 {
-    int fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_CLOEXEC | O_NOFOLLOW);
+    struct timespec now;
+    char text[96];
+    int length = snprintf(text, sizeof(text), "%s now=%lld\n", name,
+                          boottime(&now) == 0 ? (long long)now.tv_sec : -1LL);
+    int fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
     if (fd < 0) return;
-    (void)!write(fd, text, strlen(text));
+    if (length > 0 && length < (int)sizeof(text)) (void)!write(fd, text, (size_t)length);
     close(fd);
 }
+#else
+#define console_marker(name) ((void)0)
+#endif
 
-/* Independent of PID 1: it shares no descriptors or state and only sleeps. */
+/* Separate from PID 1: it holds no gadget or block descriptor, keeps only the
+ * descriptors inherited from the kernel and sleeps until the deadline. */
 static _Noreturn void deadline_main(void)
 {
     sigset_t all;
@@ -88,7 +107,7 @@ static _Noreturn void deadline_main(void)
             (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) break;
         (void)nanosleep(&pause, NULL);
     }
-    console_marker("TITAN_PROBE_DEADLINE_REBOOT\n");
+    console_marker("TITAN_PROBE_DEADLINE_REBOOT");
     restart_now();
 }
 
@@ -96,7 +115,6 @@ static _Noreturn void deadline_main(void)
  * separate deadline process there is no guaranteed return, so reboot now. */
 void titan_usb_probe_arm(void)
 {
-    struct timespec start;
     if (getpid() != 1) return;
     if (boottime(&start) != 0) restart_now();
     deadline.tv_sec = start.tv_sec + DEADLINE_SECONDS;
@@ -109,7 +127,8 @@ void titan_usb_probe_arm(void)
 
 void titan_usb_probe_announce(void)
 {
-    printf("TITAN_PROBE_ARMED deadline=%lld backstop=%d\n", (long long)deadline.tv_sec, BACKSTOP_SECONDS);
+    printf("TITAN_PROBE_ARMED start=%lld deadline=%lld backstop=%d\n", (long long)start.tv_sec,
+           (long long)deadline.tv_sec, BACKSTOP_SECONDS);
 }
 
 /* PID 1 backstop, called from every wait loop including the failure path. */
@@ -118,7 +137,7 @@ void titan_usb_probe_tick(void)
     struct timespec now;
     if (!armed) restart_now();
     if (boottime(&now) != 0 || now.tv_sec >= deadline.tv_sec + BACKSTOP_SECONDS) {
-        puts("TITAN_PROBE_BACKSTOP_REBOOT");
+        console_marker("TITAN_PROBE_BACKSTOP_REBOOT");
         restart_now();
     }
 }
@@ -245,7 +264,9 @@ int titan_usb_probe_run(void)
         /* The descriptor is non-blocking: without a reading host the line is
          * dropped, and a full or absent host never stalls this loop. */
         ssize_t written = write(usb.tty_fd, line, (size_t)length);
-        if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) fail_wait("report-write-failed");
+        /* A hung-up gadget TTY (EIO) means the host went away; keep guarding. */
+        if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR && errno != EIO)
+            fail_wait("report-write-failed");
         /* Drop queued output after a short or refused write, so a later host
          * receives whole lines rather than an old fragment. */
         if (written != length) (void)tcflush(usb.tty_fd, TCOFLUSH);

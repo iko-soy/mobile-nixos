@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import selectors
 import stat
 import subprocess
@@ -92,6 +93,15 @@ def has_marker(console, marker):
     return any(line == marker or line.startswith(marker + b" ") for line in lines(console))
 
 
+def marker_values(console, marker):
+    """Return the integer fields of the first complete marker line, or None."""
+    prefix = marker.encode("ascii") + b" "
+    for line in lines(console):
+        if line.startswith(prefix):
+            return {key.decode(): int(value) for key, value in re.findall(rb"([a-z]+)=(-?\d+)", line)}
+    return None
+
+
 def run_case(name, output, qemu, kernel, initrd, kernel_version):
     spec = CASES[name]
     directory = output / name
@@ -148,13 +158,25 @@ def run_case(name, output, qemu, kernel, initrd, kernel_version):
         console = captured["stdout"]
         if code != 0:
             raise RuntimeError(f"QEMU exited with status {code} instead of a guest reboot.")
-        if not has_marker(console, "reboot: Restarting system") and b"reboot: Restarting system" not in console:
-            raise RuntimeError("The kernel did not report a restart.")
+        if b"reboot: Restarting system with command 'bootloader'" not in console:
+            raise RuntimeError("The kernel did not report a restart into the bootloader.")
         missing = [marker for marker in spec["required"] if not has_marker(console, marker)]
         if missing:
             raise RuntimeError("Missing markers: " + ", ".join(missing))
         if name == "valid" and not has_marker(console, f"TITAN_PROBE_KERNEL {kernel_version}"):
             raise RuntimeError("The probe reported an unexpected kernel release.")
+        # Boot-clock markers pin the deadline to PID 1's start and the restart
+        # to the deadline, independent of the guest's own boot time.
+        armed = marker_values(console, "TITAN_PROBE_ARMED")
+        if armed is None or armed.get("deadline", 0) - armed.get("start", 0) != DEADLINE:
+            raise RuntimeError("The armed deadline is not exactly the VM deadline after PID 1's start.")
+        backstop = name == "child-killed"
+        restart = marker_values(console, "TITAN_PROBE_BACKSTOP_REBOOT" if backstop else "TITAN_PROBE_DEADLINE_REBOOT")
+        offset = None if restart is None else restart.get("now", -10**6) - armed["deadline"]
+        low = BACKSTOP if backstop else 0
+        if offset is None or not low <= offset <= low + 3:
+            raise RuntimeError(f"The restart marker was {offset} s after the deadline, not within {low}-{low + 3} s.")
+        result["restart_offset_seconds"] = offset
         if elapsed < spec["earliest"] - 1:
             raise RuntimeError("The guest rebooted before its deadline.")
         if elapsed > spec["earliest"] + LATE:

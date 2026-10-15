@@ -111,8 +111,9 @@ This sequence keeps the dependencies one-directional:
   link:temporary-boot-trial.adoc[temporary boot], loaded into RAM only, to
   establish acceptance, USB recognition and the return path. Both stages
   crashed the bootloader, which reset into a normal boot each time, so this
-  route is unavailable. A reviewed write to the preserved recovery partition is
-  the alternative, with its own proposal.
+  route is unavailable. The alternative is the
+  link:recovery-route-trial.adoc[recovery-partition route], which writes the
+  probe to the preserved recovery partition and restores it afterwards.
 . A reviewed offline acquisition boot that meets the conditions above for the
   sixteen regions other than `userdata`, with a demonstrated return.
 . Only then any rollback write, separately authorized.

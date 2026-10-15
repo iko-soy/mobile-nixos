@@ -231,11 +231,10 @@ the earlier envelope, it changes the header command line and carries no AVB
 footer or vbmeta, so Stage B also tests whether the bootloader starts such an
 image.
 
-The probe image is unchanged by this result. It remains the intended first new
-ramdisk for any other route, for example a separately reviewed write to the
-recovery partition, whose original is preserved. Such a route needs its own
-proposal: the probe's deadline restart would then be the way back, and a
-persistent recovery-boot flag could make every restart return to the probe.
+The link:recovery-route-trial.adoc[recovery-partition route] proposes the next
+attempt, with a second version of the probe designed to restart into
+bootloader fastboot, untested on the phone, where the original recovery is
+written back.
 
 == What Stage A can and cannot show
 

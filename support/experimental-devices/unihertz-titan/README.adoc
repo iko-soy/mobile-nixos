@@ -41,6 +41,9 @@ hardware works under NixOS.
   ordinary reboot afterwards was normal. Stage B crashed the bootloader the
   same way with a compact self-rebooting probe image, so temporary boot through
   `fastboot boot` is not available.
+* A link:recovery-route-trial.adoc[proposed recovery-partition probe trial]
+  with a helper that writes only the recovery partition, and only the padded
+  probe image or the preserved original. Not authorized or run.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1084,3 +1087,39 @@ probe code found no high or medium problems; its low-severity findings on the
 Mac tools and documentation were fixed, and those on the probe itself are
 listed in the probe record for its next revision. The two trials were the only
 phone actions by these tools; nothing was flashed or written to a partition.
+
+=== Follow-up: recovery-partition route
+
+With temporary boot unavailable, the
+link:recovery-route-trial.adoc[recovery-partition proposal] writes a probe
+image to the recovery partition, starts it
+with Volume Up at power-on, lets it report over USB and then restores the
+preserved stock recovery. It is not authorized or run.
+
+* `tools/flash-recovery.py` writes only the recovery partition, and only the
+  padded probe image or the preserved original, after fixed identity queries
+  that include the partition's size and type.
+* The probe's second version is designed to restart into bootloader fastboot at
+  its deadline, untested on the phone; it writes nothing on its restart paths in
+  the phone build, and its envelope uses
+  `panic=5`. Its VM checks now pin the deadline to PID 1's start by the boot
+  clock and require the kernel's restart with the command `bootloader`.
+* The envelope tool's recovery layout copies the stock recovery's 47545-byte
+  recovery-DTBO section; the probe image, 9768960 bytes with SHA-256
+  `f37dd3b1...`, matched the pinned `mkbootimg`.
+* Read-only checks found no automatic recovery restore in Ubuntu Touch's
+  Android container. The owner showed that Volume Up at power-on opens the
+  stock recovery and that its menu reaches bootloader fastboot.
+
+An independent review found no high-severity problems. Its medium findings, on
+failure handling, the missing recovery-DTBO section and the risk of a restart
+loop, were addressed in the proposal and the image layout. A second review
+confirmed those fixes and found three low-severity documentation problems, on
+precedence over the entry trial's rules, overstated guards and this record,
+which were corrected.
+
+Validation on 2026-10-15: the host suite (343 tests, two comparisons skipped
+outside Nix) and the Mac Nix `tests` target (343) passed; on x86_64 Linux,
+`tests` (343) and the four probe VM cases passed, with restart markers 0, 0, 10
+and 0 seconds after the deadline. The only phone actions were the owner's
+recovery-menu checks and a read-only ADB check of the Android container.

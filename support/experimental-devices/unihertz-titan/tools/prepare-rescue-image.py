@@ -30,11 +30,19 @@ DTB_SHA256 = "51a6baed284c9caaec627cf402c4925db133856a4eecbaa87cfefe070915ce69"
 # (3054712 bytes 27d2a3da..., 3055165 bytes 65ac5adf...) must not be repackaged.
 RAMDISK_BYTES = 3055279
 RAMDISK_SHA256 = "0ed6d547c282b8a93d206d747cdb2b5535a7175726265f04e8085fb62671eb74"
-# 2026-10-15 USB probe build for a first temporary boot: guards storage
-# read-only, reports over ACM and reboots itself at a fixed deadline.
-PROBE_RAMDISK_BYTES = 65652
-PROBE_RAMDISK_SHA256 = "8b45b35e4606c03b483e630136385eaca09ce19d554189e77268a382d6f464bd"
+# 2026-10-15 USB probe, second version: guards storage read-only, reports over
+# ACM and restarts into the bootloader at a fixed deadline. The first version
+# (65652 bytes, 8b45b35e...), sent in the temporary boot trial, is superseded.
+PROBE_RAMDISK_BYTES = 65825
+PROBE_RAMDISK_SHA256 = "cdb87d510caffe98fca0c009cecd31016e0cc85b9fd08c7cd41d7a8c6bad3a99"
 RAMDISK_PROFILES = ("usb-acquisition", "usb-probe")
+# The preserved stock recovery (recovery-preparation.adoc) and its 47545-byte
+# recovery-DTBO section, which equals the dtbo partition's table. The probe's
+# recovery-partition layout carries the same section as the stock recovery.
+RECOVERY_BYTES = 33554432
+RECOVERY_SHA256 = "4dd1c1f75cff6e8ec2d4606020f4c790ad3dc10545acc4ea0a11207d2d36be6d"
+RECOVERY_DTBO_BYTES = 47545
+RECOVERY_DTBO_SHA256 = "0da3565acd89174d28d47e10be80fdd734c1f712a90f2ea04b5e929645fcf098"
 SOURCE_CMDLINE = (
     "bootopt=64S3,32N2,64N2 buildvariant=user "
     "systempart=/dev/disk/by-partlabel/system halium_lvm_vg=ubports "
@@ -46,6 +54,12 @@ SOURCE_CMDLINE = (
 RESCUE_CMDLINE = (
     "bootopt=64S3,32N2,64N2 buildvariant=user security=apparmor rodata=0 "
     "rdinit=/init init=/init panic=0"
+)
+# The probe restarts by itself, so it keeps the kernel's own panic restart as a
+# fallback behind the vendor exception handler's watchdog reset.
+PROBE_CMDLINE = (
+    "bootopt=64S3,32N2,64N2 buildvariant=user security=apparmor rodata=0 "
+    "rdinit=/init init=/init panic=5"
 )
 IMAGE_NAME = "UNTESTED-UNSIGNED-rescue.img"
 MANIFEST_NAME = "manifest.json"
@@ -78,7 +92,7 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def legacy_image_id(kernel, ramdisk, dtb):
+def legacy_image_id(kernel, ramdisk, dtb, recovery_dtbo=b""):
     """Match pinned Lineage mkbootimg v2 ID, including its empty legacy-dt slot.
 
     This SHA-1 field is format compatibility metadata, never authentication.
@@ -86,7 +100,7 @@ def legacy_image_id(kernel, ramdisk, dtb):
     40a19c4c5ffe8b86c6c61318c8aa4ffe35d6e7ad/mkbootimg.py
     """
     digest = hashlib.sha1(usedforsecurity=False)
-    for payload in (kernel, ramdisk, b"", b"", b"", dtb):
+    for payload in (kernel, ramdisk, b"", b"", recovery_dtbo, dtb):
         digest.update(payload)
         digest.update(struct.pack("<I", len(payload)))
     return digest.digest() + bytes(12)
@@ -136,6 +150,11 @@ def validate_boot(data):
     return info, kernel, dtb
 
 
+def profile_cmdline(profile):
+    require(profile in RAMDISK_PROFILES, "Unknown USB ramdisk profile.")
+    return RESCUE_CMDLINE if profile == "usb-acquisition" else PROBE_CMDLINE
+
+
 def ramdisk_pin(profile):
     require(profile in RAMDISK_PROFILES, "Unknown USB ramdisk profile.")
     return (RAMDISK_BYTES, RAMDISK_SHA256) if profile == "usb-acquisition" else (
@@ -153,23 +172,46 @@ def validate_ramdisk(data, profile="usb-acquisition"):
         raise PreparationError("USB rescue ramdisk archive validation failed.") from error
 
 
-def assemble_image(boot, ramdisk, profile="usb-acquisition"):
+def validate_recovery(data):
+    """Return the preserved stock recovery's pinned recovery-DTBO section."""
+    require(type(data) is bytes and len(data) == RECOVERY_BYTES and sha256(data) == RECOVERY_SHA256,
+            "Installed recovery does not match the reviewed copy.")
+    try:
+        info = boot_inspector.inspect_image(data)
+    except boot_inspector.ImageFormatError as error:
+        raise PreparationError("Installed recovery failed boot-image inspection.") from error
+    section = payload(data, info, "recovery_dtbo")
+    require(info["header_version"] == 2 and len(section) == RECOVERY_DTBO_BYTES
+            and sha256(section) == RECOVERY_DTBO_SHA256,
+            "Installed recovery's recovery-DTBO section differs from the reviewed copy.")
+    return section
+
+
+def assemble_image(boot, ramdisk, profile="usb-acquisition", recovery_dtbo=b""):
     """Return (raw envelope bytes, private manifest); no filesystem or subprocess I/O."""
     original, kernel, dtb = validate_boot(boot)
     ramdisk_report = validate_ramdisk(ramdisk, profile)
+    # Only the probe may use the recovery-partition layout, and only with the
+    # pinned stock section.
+    require(not recovery_dtbo or (profile == "usb-probe" and len(recovery_dtbo) == RECOVERY_DTBO_BYTES
+                                  and sha256(recovery_dtbo) == RECOVERY_DTBO_SHA256),
+            "The recovery-DTBO section is allowed only for the probe and must be the reviewed copy.")
     # Rebuild the narrow v2 envelope explicitly. No inherited padding, AVB or
     # authentication bytes are copied. Only reviewed payloads and fixed fields.
     header = bytearray(PAGE_SIZE)
     header[:8] = b"ANDROID!"
     struct.pack_into("<10I", header, 8, len(kernel), 0x40080000, len(ramdisk),
                      0x55000000, 0, 0, 0x54000000, PAGE_SIZE, 2, (10 << 25) | (25 << 4) | 8)
-    first, extra = command_fields(RESCUE_CMDLINE)
+    cmdline = profile_cmdline(profile)
+    first, extra = command_fields(cmdline)
     header[64:576] = first
-    header[576:608] = legacy_image_id(kernel, ramdisk, dtb)
+    header[576:608] = legacy_image_id(kernel, ramdisk, dtb, recovery_dtbo)
     header[608:1632] = extra
-    struct.pack_into("<IQIIQ", header, 1632, 0, 0, HEADER_SIZE, len(dtb), 0x54000000)
+    padded = lambda section: len(section) + (-len(section)) % PAGE_SIZE
+    recovery_offset = PAGE_SIZE + padded(kernel) + padded(ramdisk) if recovery_dtbo else 0
+    struct.pack_into("<IQIIQ", header, 1632, len(recovery_dtbo), recovery_offset, HEADER_SIZE, len(dtb), 0x54000000)
     image = bytes(header)
-    for section in (kernel, ramdisk, dtb):
+    for section in (kernel, ramdisk, recovery_dtbo, dtb):
         image += section + bytes((-len(section)) % PAGE_SIZE)
     require(len(image) <= BOOT_BYTES, "Rescue envelope exceeds the fixed boot partition capacity.")
     try:
@@ -178,25 +220,29 @@ def assemble_image(boot, ramdisk, profile="usb-acquisition"):
         raise PreparationError("Generated rescue envelope failed independent geometry inspection.") from error
     require(inspected["avb"] is None and len(image) == inspected["padded_payload_end"]
             and inspected["load_addresses"] == original["load_addresses"]
-            and inspected["cmdline"] == RESCUE_CMDLINE
+            and inspected["cmdline"] == cmdline
             and payload(image, inspected, "kernel") == kernel
             and payload(image, inspected, "dtb") == dtb
-            and payload(image, inspected, "ramdisk") == ramdisk,
+            and payload(image, inspected, "ramdisk") == ramdisk
+            and payload(image, inspected, "recovery_dtbo") == recovery_dtbo,
             "Generated rescue envelope failed preservation checks.")
     manifest = {
         "format": "titan-private-usb-rescue-envelope-v1",
         "status": "prepared-build-only",
         "ramdisk_profile": profile,
+        "layout": "recovery" if recovery_dtbo else "boot",
         "inputs": {
             "installed_boot": {"bytes": len(boot), "sha256": sha256(boot)},
             "kernel": {"bytes": len(kernel), "sha256": sha256(kernel)},
             "dtb": {"bytes": len(dtb), "sha256": sha256(dtb)},
             "usb_ramdisk": ramdisk_report,
+            **({"recovery_dtbo": {"bytes": len(recovery_dtbo), "sha256": sha256(recovery_dtbo),
+                                  "source": "preserved installed recovery"}} if recovery_dtbo else {}),
         },
         "image": {"file": IMAGE_NAME, "bytes": len(image), "sha256": sha256(image),
                   "legacy_image_id": image[576:608].hex(), "inspection": inspected},
         "policy": {
-            "source_cmdline": SOURCE_CMDLINE, "rescue_cmdline": RESCUE_CMDLINE,
+            "source_cmdline": SOURCE_CMDLINE, "rescue_cmdline": cmdline,
             "rodata_zero": "inherited compatibility assumption, not proven necessary",
             "mkbootimg_reference_revision": MKBOOTIMG_REV,
             "avb_metadata_included": False, "authentication_performed": False,
@@ -298,18 +344,25 @@ def write_private(directory_fd, name, data):
     return metadata.st_dev, metadata.st_ino
 
 
-def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition"):
+def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition", recovery_path=None):
     output = private_path(output_path)
     require(not os.path.lexists(output), "Output must be a new private directory.")
-    boot = ramdisk = None
+    require(recovery_path is None or profile == "usb-probe", "The recovery layout is only for the probe.")
+    boot = ramdisk = recovery = None
     directory_fd = parent_fd = -1
     owned = {}
     try:
         boot = PrivateInput(boot_path, BOOT_BYTES)
         ramdisk = PrivateInput(ramdisk_path, ramdisk_pin(profile)[0])
-        image, manifest = assemble_image(boot.data, ramdisk.data, profile)
+        section = b""
+        if recovery_path is not None:
+            recovery = PrivateInput(recovery_path, RECOVERY_BYTES)
+            section = validate_recovery(recovery.data)
+        image, manifest = assemble_image(boot.data, ramdisk.data, profile, section)
         boot.recheck()
         ramdisk.recheck()
+        if recovery is not None:
+            recovery.recheck()
         parent_fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
         parent_metadata = os.fstat(parent_fd)
         parent_identity = (parent_metadata.st_dev, parent_metadata.st_ino)
@@ -334,6 +387,8 @@ def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition"):
             owned[pending] = write_private(directory_fd, pending, data)
         boot.recheck()
         ramdisk.recheck()
+        if recovery is not None:
+            recovery.recheck()
         require(identity(os.stat(output.name, dir_fd=parent_fd, follow_symlinks=False))[:2] == directory_identity
                 and identity(os.stat(output.parent, follow_symlinks=False))[:2] == parent_identity
                 and private_path(output) == output,
@@ -375,6 +430,8 @@ def prepare(boot_path, ramdisk_path, output_path, profile="usb-acquisition"):
             os.close(directory_fd)
         if parent_fd >= 0:
             os.close(parent_fd)
+        if recovery is not None:
+            recovery.close()
         if ramdisk is not None:
             ramdisk.close()
         if boot is not None:
@@ -388,9 +445,12 @@ def main(argv=None):
     parser.add_argument("--output", required=True, type=Path, help="new private directory outside Git/jj and /nix")
     parser.add_argument("--ramdisk-profile", choices=RAMDISK_PROFILES, default="usb-acquisition",
                         help="reviewed ramdisk profile (default: usb-acquisition)")
+    parser.add_argument("--recovery", type=Path,
+                        help="private preserved stock recovery copy; adds its recovery-DTBO section "
+                             "for the recovery-partition layout (usb-probe only)")
     args = parser.parse_args(argv)
     try:
-        report = prepare(args.boot, args.ramdisk, args.output, args.ramdisk_profile)
+        report = prepare(args.boot, args.ramdisk, args.output, args.ramdisk_profile, args.recovery)
     except PreparationError as error:
         print(f"Preparation refused: {error}", file=sys.stderr)
         return 1
