@@ -3,6 +3,8 @@
 :job: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/unihertz-titan/-/jobs/16473049944
 :artifacts: https://gitlab.com/api/v4/projects/25471544/jobs/16473049944/artifacts/out
 :kernel-src: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe
+:systemd-src: https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/tree
+:systemd-rev: 330932302e61e8264d770bc8a76b00e97c625946
 
 Research date: 2026-10-14. This concerns the owner's original eMMC Titan running
 Ubuntu Touch, with a macOS computer available. At the start of preservation the
@@ -120,9 +122,13 @@ inspected as a document; no installer, driver or flash tool was run.
 The current official link:https://www.unihertz.com/pages/contact-us[Unihertz contact page]
 lists `service@unihertz.com` for technical inquiries. A future owner inquiry
 should request the matching original-Titan eMMC firmware, exact variant/build,
-checksums, restore tool/driver versions and supported host OS. No contact was
-made. No OEM-supported Titan MediaTek emergency restoration workflow for macOS
-was verified. ADB/fastboot availability does not establish that low-level route.
+checksums, restore tool/driver versions and supported host OS. It should also
+request the exact bootloader entry/exit method, whether that exit clears the
+RTC fastboot marker, and the physical fallback if USB is unavailable. The
+ordinary power controls in the user manual do not answer those questions.
+No contact was made. No OEM-supported Titan MediaTek emergency restoration
+workflow for macOS was verified. ADB/fastboot availability does not establish
+that low-level route.
 
 == Read-only preparation on the Mac
 
@@ -807,10 +813,10 @@ switches the daemon to `phablet` and launches subprocesses through
 `adbd-pam-session`. The
 https://gitlab.com/ubports/development/core/packaging/adbd/-/blob/05a118669fae0806703fc0ecbc7e43ab7cd8ebdb/debian/adbd-pam-session/adbd-pam-session.c#L392[PAM helper]
 drops back to the requesting UID before shell execution; it does not simply
-run the reboot command as root. Live PAM/logind authorization, reboot-parameter
-permissions and the exact Ubuntu systemd patches remain unaudited. The daemon
-source mapping therefore does not prove that a mode request will succeed or
-that its argument reaches the kernel unchanged.
+run the reboot command as root. The subsequent authorization and exact-version
+systemd audit below narrows this path. The daemon source mapping alone does not
+prove that a mode request will succeed or that its argument reaches the kernel
+unchanged.
 
 The pinned Titan kernel has a concrete consumer for the `bootloader` restart
 argument. Its
@@ -834,11 +840,93 @@ link:{kernel-src}/drivers/misc/mediatek/eccci/mt6771/md_sys1_platform.c#L1333[mo
 is empty; reaching the kernel's device shutdown alone does not establish modem
 quiescence.
 
-The remaining trace must resolve installed userspace authorization, orderly
-shutdown and argument propagation, then LK's consumption/clearing of the RTC
-marker and a concrete return mechanism. Neither absence of boot-control storage
-writes across that whole route nor a reliable return has been established.
-The source findings do not authorize an entry trial, temporary boot or write.
+===== Exact Ubuntu systemd source and live authorization boundary
+
+The official source tag for `255.4-1ubuntu8.17` resolves to commit
+`{systemd-rev}`. Its Debian patch archive matched the exact release `.dsc`
+SHA-256, and every active quilt patch touching the inspected files was applied
+to private working copies. The scheduled-shutdown patch changes an error path;
+it does not move argument storage after authorization. This is an exact-version
+source review, not a reproducible rebuild or signature verification of the
+installed binaries.
+
+When invoked through `/sbin/reboot`, systemctl selects its
+link:{systemd-src}/src/systemctl/systemctl.c?id={systemd-rev}#n1087[compatibility parser].
+That parser calls
+link:{systemd-src}/src/systemctl/systemctl-compat-halt.c?id={systemd-rev}#n142[the reboot-parameter update]
+before `halt_main` can consult logind. A nonempty argument causes an atomic
+creation/replacement of `/run/systemd/reboot-param`; an empty argument can remove
+an existing file. The compatibility frontend's `-w` dry-run flag does not skip
+this parsing step. Do not invoke reboot commands, including this dry-run form,
+as read-only permission or connectivity probes.
+
+Fresh normal-mode queries found the active manager at `255.4-1ubuntu8.17` and
+logind running. For the queried ADB caller, `CanReboot` and `CanPowerOff` returned
+`challenge`; the caller was not associated with a known logind session. That
+result means authentication might permit the logind action, not that a request
+has been authorized. It does not authorize the earlier client-side file write.
+`CanRebootToBootLoaderMenu` returned `na`; that firmware-menu API is not a test
+of Android fastboot or the generic `bootloader` reboot argument.
+
+At the same inspection, `/run/systemd/reboot-param` was absent and its parent
+was root-owned mode `0755`, with no effective write access for the ADB caller.
+Systemctl was root-owned `0755`, without a file-capability attribute, and the
+caller had no effective or ambient capabilities. Combining those observations
+with the source predicts that an unprivileged named compatibility reboot fails
+at parameter creation, before logind authorization. No reboot or dry-run
+invocation was made to test this inference, and no permissions were changed.
+The separate D-Bus
+link:{systemd-src}/src/login/logind-dbus.c?id={systemd-rev}#n2714[`SetRebootParameter` setter]
+has its own authorization and is not used by that compatibility parser. It was
+not called.
+
+The live PAM helper is setuid-root and matches the copy extracted from the
+preserved Ubuntu image. Its readable PAM configuration includes the common
+session stack, but privileged policy directories were not readable without
+elevation. The observed policy result applies to that caller and time; this is
+not a complete audit of all authentication rules or future session contexts.
+
+For an authorized ordinary reboot that reaches logind, the source follows the
+reboot target and
+link:{systemd-src}/units/systemd-reboot.service?id={systemd-rev}#n14[ordered shutdown units].
+The live unit has `SuccessAction=reboot-force` after shutdown, unmount and final
+targets, with no reported drop-ins. The standard final
+link:{systemd-src}/src/shutdown/shutdown.c?id={systemd-rev}#n632[shutdown tail]
+attempts `RESTART2` with the saved parameter, then ordinary reboot if that call
+returns. It also attempts sync, process termination and storage teardown; it
+can proceed after teardown failures, so the source is not proof of clean
+filesystems or modem quiescence.
+
+The current probes found no `/run/nextroot`, `/run/initramfs/shutdown`, kernel
+`kexec_loaded` attribute or packaged `system-shutdown` hook directory. Those
+observations narrow the automatic soft-reboot/kexec and custom shutdown paths
+at inspection time. They do not prove that services cannot prepare a different
+shutdown tail later. Argument preservation through a future shutdown and the
+kernel/LK transition remains untested.
+
+===== Return-path evidence still required
+
+A bounded passive examination of the preserved raw LK payload did not establish
+command registration, the RTC marker's consumption/clearing or a normal-return
+handler. No captured code was executed. Its raw image lacks an authoritative
+load map and matching symbols; simple string references are not a substitute
+for control-flow evidence.
+
+The manufacturer's
+https://www.unihertz.com/pages/titan-user-manual[original Titan manual], version
+1.0 dated 2019-11-22, describes ordinary power-on and Android's on-screen
+power-off control on printed pages 2–3. Its 15-second Power-button passage
+concerns possible battery depletion; it does not describe a forced restart or
+bootloader escape. A focused official-source search did not establish a
+physical exit fallback. Instructions for other Titan models are not substitutes.
+
+The next gate for a proposed entry/return trial is a concrete return/failure
+procedure for this installed bootloader and explicit owner authorization.
+Consistent writable-state preservation remains required before later rollback
+writes, in the staged sequence below. Neither absence of boot-control storage
+writes across the whole shutdown route nor a reliable return has been
+demonstrated. These source and read-only observations do not authorize an entry
+trial, temporary boot or write.
 
 ==== Modem and calibration consistency source audit
 
