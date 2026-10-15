@@ -25,7 +25,14 @@ there; an existing directory must be empty.
 
 The default profile accepts only the existing rescue environment's six RAM/virtual mounts:
 RAM root, devtmpfs `/dev`, proc `/proc`, sysfs `/sys`, and tmpfs `/run` and `/tmp`.
-Swap must be absent and the mount namespace must agree with PID 1. These checks
+The five virtual mounts must sit directly on the root record. Swap must be
+absent and the mount namespace must agree with PID 1. Mount ID 0 is accepted:
+the Titan's Linux 4.14 kernel gives it to the initramfs root when the bootloader
+supplies `root=`. Before a 2026-10-15 audit, this guard and the shared USB mount
+policy rejected ID 0, so the standalone checker and every USB acquisition boot
+would have stopped on the Titan; the disposable 6.18 VMs never produce that
+numbering. Host parser fixtures (`storage.parserTests`,
+`mountPolicy.parserTests`) now cover it. These checks
 describe the current kernel namespace; they do not prove that no other namespace,
 kernel thread, firmware component or ordinary raw-device writer exists.
 
@@ -90,5 +97,5 @@ remain separate requirements. The separate
 link:../block/README.adoc[guarded block producer] now keeps the checked descriptor
 open through the imaging/compression pipeline, repeats the guards and supervises
 completion. These observations do not prove the absence of other writers.
-A verified USB startup and explicitly authorized boot/return route are still
-required before any hardware trial.
+A verified USB startup and an explicitly authorized boot/return route are still
+required before any hardware trial of the acquisition environment.

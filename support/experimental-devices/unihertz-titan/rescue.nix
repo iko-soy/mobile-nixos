@@ -32,7 +32,13 @@ let
   mkInit = staticPkgs: vmTest: staticPkgs.stdenv.mkDerivation {
     pname = "titan-rescue-init${lib.optionalString vmTest "-VM-TEST-ONLY"}";
     version = "0";
-    src = ./rescue;
+    # Only the compiled sources: untracked files such as bytecode caches must
+    # not change this derivation.
+    src = lib.cleanSourceWith {
+      src = ./rescue;
+      filter = path: type: type == "regular"
+        && builtins.elem (baseNameOf path) [ "init.c" "vm-test.c" ];
+    };
     dontConfigure = true;
     strictDeps = true;
     buildPhase = ''

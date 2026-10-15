@@ -29,6 +29,12 @@ hardware works under NixOS.
   acquisition tools, bounded GPT capture/validation, and a host-only sparse ext4
   archive verifier, with
   automated tests.
+* A link:entry-return-trial.adoc[proposed bootloader entry and return trial] with
+  a fastboot helper that sends only fixed read-only queries or one return command.
+  It is not authorized and has not been run.
+* The link:consistent-preservation.adoc[remaining consistent preservation
+  requirements] and the link:userspace-feasibility.adoc[kernel/userspace
+  feasibility record].
 * A separate fixed-scope link:bootloader-preservation.adoc[LK partition reader]
   for private passive bootloader inspection. It does not enter fastboot or
   establish that either bootloader copy is a working fallback.
@@ -96,15 +102,23 @@ No Ubuntu Touch ramdisk binary, systemd, firmware or Nix store is packed.
 PID 1 mounts devtmpfs, read-only proc/sysfs and bounded RAM-backed `/run` and
 `/tmp`. It checks that these and the RAM root are the complete mount set. For
 every visible block node it matches sysfs/device numbers, sets `BLKROSET`, and
-verifies `BLKROGET`. It waits up to ten seconds for non-loop/non-RAM storage,
-then checks mounts and block protection every second. A failure prints a marker
-and waits indefinitely. It starts no shell, USB/network service, Android/modem
+verifies `BLKROGET`. It waits up to ten seconds until the fixed `mmcblk0` disk and
+exactly its 38 measured partitions, both eMMC boot areas and the RPMB node are
+guarded with no device still registering; RAM, loop and zram nodes are guarded
+but never count as storage. It then checks
+mounts and block protection every second. A failure prints a marker and waits
+indefinitely; the vendor kernel's own watchdog and panic handling still apply. It starts no shell, USB/network service, Android/modem
 service, filesystem repair, acquisition, or automatic reboot.
 
-`TITAN_RESCUE_READY` means the currently visible devices passed those guards.
-It does not prove complete Titan storage discovery, stop firmware/kernel writes,
-or establish a consistent calibration snapshot. Devices can arrive between
-scans. The production ramdisk contains no VM callback or shutdown path.
+`TITAN_RESCUE_READY` means the expected eMMC block devices were present and
+every visible block node passed those guards. It does not stop
+firmware/kernel writes or establish a consistent calibration snapshot. Devices
+can arrive between scans. A 2026-10-15 audit fixed a premature readiness rule
+under which the built-in `zram0` counted as storage. This default profile's own
+mount check ignores mount IDs; the separate USB acquisition build's guards
+rejected mount ID 0, see link:source/README.adoc[the source guard]. VM builds
+substitute the virtio disk `vda` with no partition count, so the production
+readiness rule has not run anywhere. The production ramdisk contains no VM callback or shutdown path.
 
 [source,sh]
 ----
@@ -282,9 +296,16 @@ no flashing or temporary-boot command is supplied.
 
 The private result is 12707840 bytes and matches the pinned Android assembler
 byte-for-byte. Its kernel and DTB match the preserved installed boot, and its
-ramdisk matches the tested USB acquisition build. It remains unsigned and
-untested on hardware; packaging does not establish a recovery route. All 186
-host tools tests and the existing packaging fixture passed on the Mac.
+ramdisk is the reviewed AArch64 USB acquisition build `27d2a3da...`. An x86_64
+VM variant of those sources passed; the AArch64 binaries ran only qemu-user
+refusal checks. At commit `bae47c7a`, all 186 host tools tests and the packaging
+fixture passed on the Mac. That embedded ramdisk contains the mount-ID-0 and
+zram defects found on 2026-10-15, so that envelope must not be used. The same
+helper then packaged the final corrected ramdisk `0ed6d547...` into a
+12707840-byte envelope `52f48e74...`, again byte-identical to the pinned
+assembler; see
+link:rescue-image.adoc[the envelope record]. Both remain unsigned and untested on
+hardware; packaging does not establish a recovery route.
 
 == Reference inputs
 
@@ -453,8 +474,9 @@ Ubuntu Touch installation. Direct SSH is sufficient for the initial read-only
 collection. A USB recovery route must still be established before replacing the
 phone's boot path; an SSH connection cannot provide access after a failed boot.
 
-M0 remains open until firmware/restore provenance, outstanding hardware details
-and a restoration procedure are recorded. M1 hardware validation remains open
+M0 remains open until firmware/restore provenance and outstanding hardware
+details are recorded and a restoration procedure is demonstrated on this phone,
+with consistent preservation and a verified entry/return route. M1 hardware validation remains open
 until a generated image is compared with the preserved known-working boot image and tested using the
 verified recovery procedure. No flash or partition-writing helper is included.
 
@@ -575,13 +597,17 @@ link:https://github.com/NixOS/nixpkgs/commit/31ac410db37503704af446f2cad40811fab
 The standalone test target applies that exact fix to its Darwin test interpreter
 only. All ABI tests remain enabled; Linux packages and the kernel/reference-image
 inputs are unchanged. All 104 tests and the nonbootable packaging fixture pass
-in the pinned Nix target on both aarch64-darwin and x86_64-linux. The host suite
-also passes all 104 tests.
+in the pinned Nix target on both aarch64-darwin and x86_64-linux. A separate
+host-suite run was also reported; its log was not retained (the retained Mac log
+is the Nix build log).
 
 === Follow-up: independent x86_64 Linux reference build
 
 The pinned kernel and reference boot image built successfully on a separate
-x86_64 Linux builder. Privately downloaded outputs were hashed again on the Mac:
+x86_64 Linux builder. The Mac rehashed the downloaded `Image.gz`, configuration
+and boot image; `Image` itself was not downloaded. On 2026-10-15 the Mac also
+decompressed the saved `Image.gz` and confirmed the `Image` digest and its
+embedded configuration hash below.
 
 [source,text]
 ----
@@ -648,8 +674,10 @@ A same-builder `nix-build --check -A transport.sender` reproduced the complete
 output using the pinned compiled OpenSSL input. The private Mac copy matches
 that hash. ELF inspection found no interpreter or shared-library dependency.
 
-All 18 transport test methods pass with the native Mac sender, native Linux
-sender and AArch64 sender under qemu-user. Coverage includes every byte value
+All 18 transport test methods passed with the native Linux sender and the AArch64
+sender under qemu-user; the private records retain those two runs. A native Mac
+sender run was also reported, without a retained log; the 2026-10-15 audit reran
+it privately (Apple clang 21, OpenSSL 3.5.9) with the strengthened 19-test suite. Coverage includes every byte value
 over independently configured bridged PTYs, fragmented frames, source-status
 failures, stale sessions, corrupt or oversized data, missing acknowledgements,
 receiver disk/readback failures and private output handling. These are repeated
@@ -665,9 +693,15 @@ The original rescue ramdisk remains separate from this transport prototype.
 === Follow-up: off-device imaging/compression supervision
 
 The producer builds as static musl executables for x86_64 and AArch64 with
-strict compiler warnings. The production AArch64 executable is 84096 bytes,
-with SHA-256
-`e25e75dfcbdb03418100968c5c8cc0e78df0c01980bc4d5b421f81028eb6c36b`.
+strict compiler warnings. At commit `f31e315d`, the production AArch64 executable
+was 84096 bytes, with SHA-256
+`e25e75dfcbdb03418100968c5c8cc0e78df0c01980bc4d5b421f81028eb6c36b`. Commit
+`d77f5026` changed `supervisor.c`; that source, unchanged since, builds the
+production executable with SHA-256
+`d4a1f0985c95d1117f4fb72266422b4efac89a4cbc33670ca4f8b8deae3ad91a` (the builder
+record of the `d77f5026` build, reused by the 2026-10-15 tests). That binary has
+no `--check` or Mac copy; the `--check` and Mac-copy statements here apply only
+to the earlier `e25e75df...` build.
 A same-builder `nix-build --check -A producer.supervisor` reproduced the complete
 output. The private Mac copy matches that hash; ELF inspection found no
 interpreter or shared-library dependency.
@@ -851,3 +885,75 @@ partition contents, block flags, gadget configuration or boot mode changed in
 this stage. Consistent userdata/calibration preservation, a second independent
 backup destination and a demonstrated boot/return/restoration route remain
 open; NixOS compatibility is still unresolved.
+
+=== Follow-up: 2026-10-15 audit, corrections and validation
+
+Ten independent read-only reviewers, each followed by an adversarial verifier,
+examined all work since `0b875ee7` against source, private manifests and build
+logs. The only phone operation was an `adb devices` connection check. A fresh
+private catalog pass matched all 27 payloads (8727773184 bytes) and was
+identical to the earlier catalog apart from its timestamp; it was repeated
+after the tool changes below. Every recorded tested-source set matched its
+published commit. The link:evidence-map.adoc[evidence map] summarizes what each
+claim rests on.
+
+Confirmed and corrected:
+
+* *High:* the USB acquisition build's mount guards (the shared mount policy and
+  its source guard) rejected mount ID 0. Linux 4.14 gives that ID to the
+  initramfs root when the bootloader supplies `root=`, as the normal-mode mount
+  table shows, so every USB acquisition boot would have stopped at its first
+  mount check. The default rescue profile ignores mount IDs, and the 6.18 VMs
+  never produce that numbering. Both parsers now accept it and check the mount
+  tree; new host fixtures cover 4.14 numbering.
+* *Medium:* the built-in `zram0` counted as storage, so readiness could come
+  before the eMMC was guarded, and the USB profile never rescanned. Readiness
+  now requires `mmcblk0`, its 38 partitions, both boot areas and the RPMB node;
+  devices still registering are retried, also in a new guard pass before gadget
+  setup. Only the VM variant of this rule (`vda`) has run.
+* *Medium:* `acquire-partitions.py` and `acquire-gpt.py` could send the sudo
+  password to any single ADB transport before checking the phone's identity.
+  All ADB helpers now select only USB transports, and both helpers run
+  unprivileged identity checks before prompting.
+* *Medium:* a failure after the OS, firmware or LK helpers removed their `.part`
+  names could delete the only verified copies. Publication now has a commit
+  point after which images are kept, the manifest is demoted to
+  `manifest.json.part` and the run is reported as not complete; a rollback
+  before that point never removes the last link to verified bytes.
+* *Medium (documentation):* `panic=0` does not keep this kernel halted, because
+  the vendor exception handler requests an immediate watchdog reset; the rescue
+  envelope prerequisites no longer require preservation before the environment
+  that would perform it.
+* *Low:* transport negative tests now assert the exact rejection and catch the
+  guards they name (checked by mutation); the Mac receiver uses `F_FULLFSYNC`;
+  the sparse verifier withdraws an image after a late failure; output paths
+  refuse jj workspaces and the Nix store and create private parents; the partition
+  guard ties nodes to sysfs device numbers; the boot inspector bounds its input;
+  future acquisition manifests record helper source digests; the rescue init
+  derivation no longer imports untracked files; stale documentation was fixed.
+
+A suggested LK guard-format bump was not adopted: the catalog revalidates the
+historical manifests with the live validators. A new test pins the recorded
+value-free key shapes of those manifests against the fixtures and validators.
+
+Validation on 2026-10-15 used uncommitted snapshots of this change, each
+recorded privately with per-file source hashes; the commit that introduced this
+record contains the final snapshot's sources. On the Mac, the final host suite
+(286 tests, one comparison skipped outside Nix), the Mac Nix `tests` target (286)
+and the transport suite with a native Mac sender (20) passed. The final builder
+snapshot, identical to the committed tree apart from documentation, passed on
+x86_64 Linux: `tests` (286), transport (20, native and qemu-aarch64), producer
+(12, both variants), both parser-fixture targets and all 36 VM cases on Linux
+6.18.38, and it built every AArch64 artifact. The new fastboot helper's nine
+tests are part of the 286. The final AArch64 USB acquisition ramdisk is 3055279
+bytes, SHA-256 `0ed6d547c282b8a93d206d747cdb2b5535a7175726265f04e8085fb62671eb74`;
+the final rescue ramdisk has SHA-256
+`26e0a3aeca800cc8884620f0cdc29257d01f6613dcd80dad7a0f4e76d94eaf22`. Because
+`source/guard.c` changed, the standalone checker and block producer now hash to
+`5461e36bf718c5b99c37d36800893af1b6987d88721590f2fe21476393be4f89` and
+`26e42c920810f5e571764d3b1e820d8e4ebb95cc2c0313355f04ec13e58a651b`; the
+earlier values above describe their previous builds. A packaging rerun of the
+reference boot image with the cached kernel reproduced `88c0ca7d...`. The rescue
+envelope was repackaged privately with the final ramdisk and again matched the
+pinned assembler. These are host, emulator and VM results: no image was sent to
+or booted on the phone, and NixOS boot and recovery remain unproven.

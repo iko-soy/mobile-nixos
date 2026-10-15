@@ -276,7 +276,7 @@ class OutputTests(unittest.TestCase):
 
     def test_default_invocation_does_not_prompt_or_create_output_when_unreadable(self):
         with tempfile.TemporaryDirectory() as temporary, \
-                patch.object(acquisition, "run_bounded", return_value=(b"List of devices attached\nsecret-id\tdevice\n", 50, "hash")), \
+                patch.object(acquisition, "run_bounded", return_value=(b"List of devices attached\nsecret-id\tdevice usb:1-1 transport_id:1\n", 50, "hash")), \
                 patch.object(acquisition.Remote, "check_protocol"), \
                 patch.object(acquisition.Remote, "run", side_effect=acquisition.AcquisitionError("unreadable")), \
                 patch.object(acquisition, "prompt_password") as prompt, \
@@ -286,6 +286,50 @@ class OutputTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertNotIn("secret-id", terminal.getvalue())
             prompt.assert_not_called()
+
+
+    def test_identity_checks_run_without_credentials_before_the_password_prompt(self):
+        events = []
+
+        def run(remote, script, limit=16384, **kwargs):
+            events.append((script, remote.password))
+            return b"", 0, ""
+
+        def prompt():
+            events.append(("prompt", None))
+            raise acquisition.AcquisitionError("stop before acquisition")
+
+        listing = b"List of devices attached\nsecret-id\tdevice usb:1-1 transport_id:1\n"
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(acquisition, "run_bounded", return_value=(listing, 50, "hash")), \
+                patch.object(acquisition.Remote, "check_protocol"), \
+                patch.object(acquisition.Remote, "run", autospec=True, side_effect=run), \
+                patch.object(acquisition, "prompt_password", side_effect=prompt), \
+                contextlib.redirect_stderr(io.StringIO()):
+            output = Path(temporary) / "backup"
+            self.assertEqual(acquisition.main(["--sudo", "--output", str(output)]), 1)
+            self.assertFalse(output.exists())
+        self.assertEqual(events, [(acquisition.identity_script(label), None) for label in acquisition.PARTITIONS]
+                         + [("prompt", None)])
+        for label, (device, _, _) in acquisition.PARTITIONS.items():
+            identity = acquisition.identity_script(label)
+            self.assertTrue(acquisition.guard_script(label).startswith(identity))
+            self.assertIn(f"stat -c '%t:%T' /dev/{device}", identity)
+            self.assertNotIn("-r /dev/", identity)
+
+    def test_network_or_emulator_transport_is_refused_before_any_remote_command(self):
+        for row in (b"192.0.2.10:5555\tdevice product:titan transport_id:2\n",
+                    b"emulator-5554\tdevice product:sdk transport_id:3\n"):
+            with self.subTest(row=row), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(acquisition, "run_bounded", return_value=(b"List of devices attached\n" + row, 50, "h")), \
+                    patch.object(acquisition.Remote, "check_protocol") as protocol, \
+                    patch.object(acquisition.Remote, "run") as run, \
+                    patch.object(acquisition, "prompt_password") as prompt, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(acquisition.main(["--sudo", "--output", str(Path(temporary) / "backup")]), 1)
+                protocol.assert_not_called()
+                run.assert_not_called()
+                prompt.assert_not_called()
 
 
 if __name__ == "__main__":

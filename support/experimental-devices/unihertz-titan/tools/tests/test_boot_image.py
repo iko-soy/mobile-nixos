@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -190,6 +191,25 @@ class BootImageTests(unittest.TestCase):
                 report = json.loads(result.stdout)
                 self.assertFalse(report["validation"]["bootability_verified"])
                 self.assertEqual(bool(report["validation"]["errors"]), bool(status))
+
+
+    def test_cli_refuses_symlinks_fifos_and_oversized_inputs_before_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "boot.img"
+            target.write_bytes(image())
+            (base / "alias.img").symlink_to(target)
+            os.mkfifo(base / "pipe.img")
+            with (base / "huge.img").open("wb") as stream:
+                stream.truncate(64 * 1024 * 1024 + 1)
+            for name in ("alias.img", "pipe.img", "huge.img"):
+                with self.subTest(name=name):
+                    result = subprocess.run([sys.executable, str(SCRIPT), "--json", str(base / name)],
+                                            capture_output=True, text=True, check=False, timeout=10)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    report = json.loads(result.stdout)
+                    self.assertFalse(report["validation"]["geometry_valid"])
+                    self.assertTrue(report["validation"]["errors"])
 
 
 if __name__ == "__main__":

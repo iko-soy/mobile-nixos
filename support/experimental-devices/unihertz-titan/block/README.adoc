@@ -3,8 +3,11 @@
 `acquisition.producer` is a separate, build-only integration of the
 link:../source/README.adoc[fixed userdata source guard] and the
 link:../producer/README.adoc[imaging/compression supervisor]. It builds a static
-AArch64 `titan-block-produce` executable. It is not included in the phone rescue
-ramdisk, invoked by production PID 1, or connected to a USB startup service.
+AArch64 `titan-block-produce` executable with the default six-mount profile; that
+build is not packed into any ramdisk. A `TITAN_USB_MOUNT_PROFILE` build of the
+same source is `/bin/titan-block-produce` in the separate
+link:../usb-pipeline/README.adoc[USB acquisition ramdisk], whose PID 1 starts it
+after USB setup and sealing.
 No generated image has been booted on the Titan, and this does not boot NixOS.
 
 == Fixed source and descriptor ownership

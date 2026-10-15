@@ -44,21 +44,28 @@ ANCHORS = {2: ("recovery", None, 65536), 28: ("boot", None, 65536),
            30: ("dtbo", None, 16384), 36: ("userdata", 10027008, 234137536)}
 
 
-def guard_script(emit=False):
-    """Fixed sysfs/ioctl checks; no block contents are read by this guard."""
+def guard_script(emit=False, privileged=True):
+    """Fixed sysfs/ioctl checks; no block contents are read by this guard.
+
+    The unprivileged form omits only the read-permission and ioctl checks, so
+    the identity of this phone's disk and partition map can be established
+    before any sudo credential is requested or sent.
+    """
+    readable = " && [ -r /dev/mmcblk0 ]" if privileged else ""
+    ioctls = f"""[ "$(/usr/sbin/blockdev --getsize64 /dev/mmcblk0)" = {DISK_BYTES} ] || exit 17
+[ "$(/usr/sbin/blockdev --getss /dev/mmcblk0)" = 512 ] || exit 18
+[ "$(/usr/sbin/blockdev --getpbsz /dev/mmcblk0)" = 512 ] || exit 19
+""" if privileged else ""
     script = f"""set -eu
 export LC_ALL=C
-[ ! -L /dev/mmcblk0 ] && [ -b /dev/mmcblk0 ] && [ -r /dev/mmcblk0 ] || exit 10
+[ ! -L /dev/mmcblk0 ] && [ -b /dev/mmcblk0 ]{readable} || exit 10
 [ "$(readlink -f /dev/mmcblk0)" = /dev/mmcblk0 ] || exit 11
 [ "$(cat /sys/class/block/mmcblk0/device/type)" = MMC ] || exit 12
 [ "$(cat /sys/class/block/mmcblk0/removable)" = 0 ] || exit 13
 [ "$(cat /sys/class/block/mmcblk0/size)" = {DISK_SECTORS} ] || exit 14
 [ "$(cat /sys/class/block/mmcblk0/queue/logical_block_size)" = 512 ] || exit 15
 [ "$(cat /sys/class/block/mmcblk0/queue/physical_block_size)" = 512 ] || exit 16
-[ "$(/usr/sbin/blockdev --getsize64 /dev/mmcblk0)" = {DISK_BYTES} ] || exit 17
-[ "$(/usr/sbin/blockdev --getss /dev/mmcblk0)" = 512 ] || exit 18
-[ "$(/usr/sbin/blockdev --getpbsz /dev/mmcblk0)" = 512 ] || exit 19
-disk_sysfs=$(readlink -f /sys/class/block/mmcblk0)
+{ioctls}disk_sysfs=$(readlink -f /sys/class/block/mmcblk0)
 case "$disk_sysfs" in /sys/devices/*/mmcblk0) ;; *) exit 20;; esac
 canonical_decimal() {{
     case "$1" in ''|*[!0-9]*|0?*) exit 30;; esac
@@ -266,6 +273,8 @@ def acquire(remote, requested):
     manifest = {"format": 1, "status": "incomplete", "transport": "adb-shell-v2-no-pty",
         "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "scope": "two fixed GPT edge windows only; not a snapshot, calibration or filesystem backup",
+        "helper_sources": acquisition.source_digests("acquire-gpt.py", "acquire-partitions.py",
+                                                     "collect-inventory.py", "inspect-gpt.py"),
         "validation_policy": {"allow_zero_disk_guid": True,
             "reason": "observed on the measured original Titan; zero supplies no unique disk identity"},
         "warnings": [], "edge_bytes": EDGE_BYTES, "kernel_map": baseline, "regions": {}}
@@ -363,10 +372,13 @@ def main(argv=None):
     remote = None
     previous_umask = os.umask(0o077)
     try:
-        devices, _, _ = acquisition.run_bounded([args.adb, "devices"], 65536, args.timeout)
-        serial = acquisition.inventory.select_device(acquisition.inventory.parse_devices(devices.decode()), args.serial)
+        devices, _, _ = acquisition.run_bounded([args.adb, "devices", "-l"], 65536, args.timeout)
+        serial = acquisition.inventory.select_usb_device(devices.decode(), args.serial)
         remote = acquisition.Remote(args.adb, serial, args.timeout)
         remote.check_protocol()
+        # Establish this disk and its complete partition map as the unprivileged
+        # USB ADB user before any credential is requested or sent.
+        remote.run(guard_script(privileged=False))
         if args.sudo:
             remote.password = acquisition.prompt_password()
         output, manifest = acquire(remote, args.output)

@@ -1,7 +1,7 @@
 { pkgs }:
 
-# Off-device transport prototype. Deliberately absent from rescue.ramdisk and
-# PID 1; no gadget configuration, storage acquisition or startup is supplied.
+# Transport sender and host tests. Absent from rescue.ramdisk; only the separate
+# build-only usbAcquisition profile starts the sender (usb-pipeline/README.adoc).
 let
   inherit (pkgs) lib;
   target = pkgs.pkgsCross.aarch64-multiplatform.pkgsStatic;

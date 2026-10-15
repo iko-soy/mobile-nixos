@@ -26,6 +26,7 @@ bootloaders = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bootloaders)
 transport = bootloaders.transport
 AcquisitionError = transport.AcquisitionError
+PublicationRetained = bootloaders.PublicationRetained
 TARGETS = {
     "vendor": {"number": 33, "start": 1097728, "sectors": 1753088, "bytes": 897581056},
     "system": {"number": 34, "start": 2850816, "sectors": 6291456, "bytes": 3221225472},
@@ -583,8 +584,41 @@ class PrivateOutput(bootloaders.PrivateOutput):
         finally:
             os.close(fd)
 
+    def withdraw(self, name):
+        """Remove a published name only while its .part link keeps the bytes."""
+        pending = name + ".part"
+        try:
+            if bootloaders.inode(os.stat(name, dir_fd=self.fd, follow_symlinks=False)) != self.owned[name]:
+                return
+            try:
+                os.link(name, pending, src_dir_fd=self.fd, dst_dir_fd=self.fd, follow_symlinks=False)
+            except FileExistsError:
+                pass
+            if bootloaders.inode(os.stat(pending, dir_fd=self.fd, follow_symlinks=False)) == self.owned[name]:
+                os.unlink(name, dir_fd=self.fd)
+        except OSError:
+            pass
+
+    def demote_manifest(self):
+        """After the commit point, keep the manifest only as manifest.json.part."""
+        self.withdraw("manifest.json")
+        try:
+            os.fsync(self.fd)
+        except OSError:
+            pass
+
+    def check_published(self, links):
+        for name in self.published:
+            metadata = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
+            require(bootloaders.inode(metadata) == self.owned[name] and stat.S_ISREG(metadata.st_mode)
+                    and metadata.st_uid == os.getuid() and metadata.st_nlink == links
+                    and stat.S_IMODE(metadata.st_mode) == 0o600 and metadata.st_size == self.sizes[name + ".part"]
+                    and metadata.st_mtime_ns == self.modified[name + ".part"],
+                    "Published file identity or privacy changed.")
+
     def publish(self):
         self.recheck(); self.budget.check()
+        committed = False
         try:
             for name in (*(label + ".img" for label in self.image_sizes), "manifest.json"):
                 pending = name + ".part"
@@ -592,22 +626,27 @@ class PrivateOutput(bootloaders.PrivateOutput):
                 self.owned[name] = self.owned[pending]
                 self.published.append(name)
             os.fsync(self.fd)
+            # Check every published name while its .part name still exists, so
+            # a failure up to here can roll back without losing verified bytes.
+            self.recheck()
+            self.check_published(links=2)
+            committed = True
             for name in self.published: os.unlink(name + ".part", dir_fd=self.fd)
             os.fsync(self.fd); os.fsync(self.parent_fd)
             self.recheck()
+            self.check_published(links=1)
+        except BaseException as error:
+            if committed:
+                # Some .part names may already be gone, leaving the published
+                # names as the only copies: never delete an image after this
+                # point. Demote only the manifest name so that the retained set
+                # cannot be taken for a completed acquisition.
+                self.demote_manifest()
+                raise PublicationRetained(
+                    "The verified files were published and kept, but a final check failed; "
+                    "inspect them before relying on this set.") from error
             for name in self.published:
-                metadata = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
-                require(bootloaders.inode(metadata) == self.owned[name] and stat.S_ISREG(metadata.st_mode)
-                        and metadata.st_uid == os.getuid() and metadata.st_nlink == 1
-                        and stat.S_IMODE(metadata.st_mode) == 0o600 and metadata.st_size == self.sizes[name + ".part"]
-                        and metadata.st_mtime_ns == self.modified[name + ".part"],
-                        "Published file identity or privacy changed.")
-        except BaseException:
-            for name in self.published:
-                try:
-                    if bootloaders.inode(os.stat(name, dir_fd=self.fd, follow_symlinks=False)) == self.owned[name]:
-                        os.unlink(name, dir_fd=self.fd)
-                except OSError: pass
+                self.withdraw(name)
             raise
 
 
@@ -619,6 +658,8 @@ def acquire(remote, requested):
             "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "transport": "adb-shell-v2-no-pty-framed-status", "kernel_map": baseline,
             "scope": "fixed vendor/system only; limited process mount views and repeated reads, not global quiescence",
+            "helper_sources": transport.source_digests("acquire-os-partitions.py", "acquire-bootloaders.py",
+                                                       "acquire-partitions.py", "collect-inventory.py"),
             "mount_view_scope": ["acquisition process", "PID1", "identified Android init"],
             "bytes_preserved": sum(target_bytes(label) for label in TARGETS), "partitions": {},
             "validation": {"atomic_snapshot": False, "global_quiescence": False,
@@ -648,7 +689,7 @@ def acquire(remote, requested):
             report["partitions"][label] = {"file": label + ".img", "bytes": expected,
                 "sha256": digest, "transfer_sha256": digest, "readback_sha256": digest,
                 "phone_repeat_sha256": digest, "zero_bytes_skipped": sink.zero_bytes,
-                "storage": "raw logical image with zero-only chunks stored as holes where supported",
+                "storage": "raw logical image; zero-only chunks skipped by seeking, allocation left to the filesystem",
                 "geometry": baseline["targets"][label]}
         require(probe(remote) == baseline, "Final kernel map or read safety changed.")
         progress("Both partitions verified; publishing the private pair and manifest")
@@ -678,8 +719,8 @@ def main(argv=None):
     try:
         candidate = bootloaders.private_path(args.output)
         require(not os.path.lexists(candidate), "Output must be a new private directory.")
-        devices, _, _ = transport.run_bounded([args.adb, "devices"], 65536, args.timeout)
-        serial = transport.inventory.select_device(transport.inventory.parse_devices(devices.decode("ascii")), args.serial)
+        devices, _, _ = transport.run_bounded([args.adb, "devices", "-l"], 65536, args.timeout)
+        serial = transport.inventory.select_usb_device(devices.decode("ascii"), args.serial)
         remote = transport.Remote(args.adb, serial, args.timeout)
         remote.check_protocol()
         permission = probe(remote, permission_only=True)
@@ -692,6 +733,10 @@ def main(argv=None):
         print(f"Verified vendor and system: {report['bytes_preserved']} private logical bytes with saved-file and repeat phone SHA-256 agreement. Output: {output}")
         print("Sparse storage preserves zero bytes; observed read agreement is not an atomic snapshot or restoration test.")
         return 0
+    except PublicationRetained as error:
+        print(f"OS partition acquisition stopped after publication: {error}", file=sys.stderr)
+        print("The published files were kept; this run is not reported as complete.", file=sys.stderr)
+        return 1
     except AcquisitionError as error:
         print(f"OS partition acquisition stopped: {error}", file=sys.stderr)
         print("Any retained .part files are incomplete private evidence; no completed result is reported.", file=sys.stderr)

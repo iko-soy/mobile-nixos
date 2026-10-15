@@ -206,31 +206,65 @@ def select_device(devices, serial):
     return serial
 
 
+def select_usb_device(listing, serial):
+    """Select one ready transport from `adb devices -l` that is attached by USB.
+
+    Network (`host:port`) and emulator transports never qualify: the acquisition
+    helpers may send the phone's sudo credential over the selected transport.
+    """
+    devices, usb = {}, set()
+    for line in listing.splitlines():
+        if not line.strip() or line.startswith(("List of devices", "*")):
+            continue
+        fields = line.split()
+        if len(fields) >= 2:
+            devices[fields[0]] = fields[1]
+            if any(field.startswith("usb:") and len(field) > 4 for field in fields[2:]):
+                usb.add(fields[0])
+    if serial is not None and serial in devices and serial not in usb:
+        raise ValueError("The selected ADB transport is not a direct USB connection.")
+    if devices and not usb:
+        raise ValueError("Only non-USB ADB transports are connected; attach the Titan by USB.")
+    return select_device({name: state for name, state in devices.items() if name in usb}, serial)
+
+
 def inside_git_checkout(path):
+    """Return whether path is inside a Git or jj working copy, or the Nix store.
+
+    Either version-control tool can snapshot new private files automatically,
+    and the store is world-readable. Nix build directories elsewhere are fine.
+    """
     path = path.resolve()
+    if path == Path("/nix/store") or Path("/nix/store") in path.parents:
+        return True
     for parent in (path, *path.parents):
         marker = parent / ".git"
-        if marker.is_file() or (marker / "HEAD").is_file():
+        if marker.is_file() or (marker / "HEAD").is_file() or (parent / ".jj").is_dir():
             return True
     return False
 
 
 def prepare_output(requested):
     """Create a new private directory; never reuse existing or repository paths."""
-    if requested:
-        output = Path(requested).expanduser().resolve()
-        if inside_git_checkout(output):
-            raise ValueError("Inventory output must be outside every Git checkout.")
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.mkdir(mode=0o700)
-    else:
-        state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
-        base = (state / "mobile-nixos/titan-inventory").expanduser().resolve()
-        if inside_git_checkout(base):
-            raise ValueError("Default state directory is in Git; choose --output outside it.")
-        base.mkdir(mode=0o700, parents=True, exist_ok=True)
-        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ-")
-        output = Path(tempfile.mkdtemp(prefix=timestamp, dir=base))
+    # Newly created parents are private too, whatever the caller's umask.
+    previous = os.umask(0o077)
+    try:
+        if requested:
+            output = Path(requested).expanduser().resolve()
+            if inside_git_checkout(output):
+                raise ValueError("Inventory output must be outside every Git or jj checkout and the Nix store.")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.mkdir(mode=0o700)
+        else:
+            state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+            base = (state / "mobile-nixos/titan-inventory").expanduser().resolve()
+            if inside_git_checkout(base):
+                raise ValueError("Default state directory is in a checkout; choose --output outside it.")
+            base.mkdir(mode=0o700, parents=True, exist_ok=True)
+            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ-")
+            output = Path(tempfile.mkdtemp(prefix=timestamp, dir=base))
+    finally:
+        os.umask(previous)
     return output
 
 
@@ -362,7 +396,7 @@ def main(argv=None):
     parser.add_argument("--ssh-port", type=int, help="SSH port (default: 22; requires --ssh)")
     parser.add_argument("--ssh-config", metavar="PATH", help="private OpenSSH configuration file (requires --ssh)")
     parser.add_argument("--adb", default="adb", help="ADB executable (default: adb)")
-    parser.add_argument("--output", help="new private output directory outside any Git checkout")
+    parser.add_argument("--output", help="new private output directory outside any Git or jj checkout")
     parser.add_argument("--timeout", type=float, default=20, help="seconds per command (default: 20)")
     parser.add_argument(
         "--include-private-logs", action="store_true",
@@ -394,11 +428,11 @@ def main(argv=None):
                 )
         else:
             result = subprocess.run(
-                [args.adb, "devices"], capture_output=True, timeout=args.timeout, check=False,
+                [args.adb, "devices", "-l"], capture_output=True, timeout=args.timeout, check=False,
             )
             if result.returncode:
                 raise ValueError("adb devices failed; run that command locally to diagnose it.")
-            serial = select_device(parse_devices(result.stdout.decode("utf-8", errors="replace")), args.serial)
+            serial = select_usb_device(result.stdout.decode("utf-8", errors="replace"), args.serial)
             check_adb_transport(args.adb, serial, args.timeout)
             collect = lambda script: run_probe(args.adb, serial, script, args.timeout)
         output = prepare_output(args.output)

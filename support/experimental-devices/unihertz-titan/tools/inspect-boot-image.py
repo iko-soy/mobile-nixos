@@ -9,13 +9,18 @@ not establish that a boot-image hash descriptor or a trusted signature exists.
 
 import argparse
 import json
+import os
 from pathlib import Path
+import stat
 import struct
 import sys
 
 
 HEADER_SIZE = 1660
 TITAN_PARTITION_SIZE = 32 * 1024 * 1024
+# Boot, recovery and dtbo inputs are at most one 32 MiB partition; refuse
+# multi-gigabyte copies, devices or FIFOs before reading them into memory.
+INPUT_LIMIT = 2 * TITAN_PARTITION_SIZE
 FDT_MAGIC = 0xD00DFEED
 DT_TABLE_MAGIC = 0xD7B7AB1E
 
@@ -241,6 +246,28 @@ def titan_errors(info):
     return errors
 
 
+def read_image(path, limit=None):
+    """Read one bounded regular file without following a final symlink."""
+    limit = INPUT_LIMIT if limit is None else limit
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > limit:
+            raise ImageFormatError(f"Input must be a regular file of at most {limit} bytes")
+        parts, count = [], 0
+        while True:
+            data = os.read(descriptor, min(1048576, limit + 1 - count))
+            if not data:
+                break
+            parts.append(data)
+            count += len(data)
+            if count > limit:
+                raise ImageFormatError(f"Input grew beyond {limit} bytes while being read")
+        return b"".join(parts)
+    finally:
+        os.close(descriptor)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
@@ -249,7 +276,7 @@ def main(argv=None):
                         help="also check the final UBports Titan packaging profile")
     args = parser.parse_args(argv)
     try:
-        report = inspect_image(args.image.read_bytes())
+        report = inspect_image(read_image(args.image))
         errors = titan_errors(report) if args.check_titan else []
         report["validation"]["titan_profile_checked"] = args.check_titan
         report["validation"]["errors"] = errors

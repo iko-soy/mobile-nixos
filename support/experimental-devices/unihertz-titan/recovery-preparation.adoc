@@ -664,8 +664,10 @@ hardware trial:
   ACM is another configured candidate. Mac recognition and reliable acquisition
   transport remain untested; do not assume RNDIS host support.
 * [ ] Review MTK watchdog, power/charging and failure behavior independently of
-  the normal OS. The kernel enables the MTK watchdog and has
-  `CONFIG_PANIC_TIMEOUT=1`. Account for all required userspace dependencies and
+  the normal OS. The kernel enables the MTK watchdog, has `CONFIG_PANIC_TIMEOUT=1`
+  and builds the vendor exception handler (`CONFIG_MTK_AEE_IPANIC=y`), whose panic
+  and oops notifiers request an immediate watchdog reset before any panic
+  timeout applies. Account for all required userspace dependencies and
   source/licensing provenance before publishing a binary; keep private payloads
   outside Git and retain their hashes.
 * [ ] Establish an explicitly authorized boot and exit route, including
@@ -680,10 +682,15 @@ named raw Android v2 envelope from the fixed preserved boot kernel/DTB and the
 reviewed USB acquisition ramdisk. Private phone inputs stay on the Mac, outside
 Git and the Nix store. The helper removes inherited Ubuntu Touch storage/startup
 arguments, selects `/init`, requests `panic=0`, and omits all old AVB metadata.
-It preserves DTB bytes and records the remaining command-line and watchdog
-assumptions. This is a format/assembly experiment, not an accepted boot image
-or a demonstrated offline backup environment. No hardware action follows
-from a successful local preparation.
+`panic=0` does not keep this kernel halted, because the vendor exception
+handler resets first. It preserves DTB bytes and records the remaining
+command-line and watchdog assumptions. This is a format/assembly experiment, not
+an accepted boot image or a demonstrated offline backup environment. The first
+envelope (`87caa695...`) embeds the ramdisk with the mount-ID-0 and zram defects
+found on 2026-10-15 and must not be used; the helper now accepts only the
+corrected ramdisk recorded in link:rescue-image.adoc[the envelope record],
+packaged privately as an unsigned envelope that is untested on hardware. No
+hardware action follows from a successful local preparation.
 
 ==== Build-only storage guard
 
@@ -741,8 +748,11 @@ starts with detection disabled; its `BOOT_UP_HANG` definition is commented out.
 The normal countdown requires enabled detection and an Android `system_server`,
 unless userspace explicitly sets its reboot flag. A standalone PID 1 should
 not invoke those Android monitor ioctls. This audit does not establish all
-kernel/firmware write paths, charging behavior or failure behavior; the retained
-configuration still has `CONFIG_PANIC_TIMEOUT=1`.
+kernel/firmware write paths, charging behavior or failure behavior. The retained
+configuration has `CONFIG_PANIC_TIMEOUT=1`, and its `CONFIG_MTK_AEE_IPANIC=y`
+exception handler registers panic and oops notifiers that request an immediate
+watchdog reset before that timeout or a `panic=` override is consulted (source
+analysis). The bootloader's handling of such an exception reset is unknown.
 
 ACM can avoid an `adbd` dependency: the configured
 link:{kernel-src}/drivers/usb/gadget/function/f_acm.c#L855[configfs ACM function]
@@ -831,8 +841,8 @@ https://gitlab.com/ubports/development/core/packaging/adbd/-/blob/05a118669fae08
 switches the daemon to `phablet` and launches subprocesses through
 `adbd-pam-session`. The
 https://gitlab.com/ubports/development/core/packaging/adbd/-/blob/05a118669fae0806703fc0ecbc7e43ab7cd8ebdb/debian/adbd-pam-session/adbd-pam-session.c#L392[PAM helper]
-drops back to the requesting UID before shell execution; it does not simply
-run the reboot command as root. The subsequent authorization and exact-version
+switches to the fixed `phablet` UID (32011) before shell execution, whether the
+caller is `phablet` or root; it does not run the reboot command as root. The subsequent authorization and exact-version
 systemd audit below narrows this path. The daemon source mapping alone does not
 prove that a mode request will succeed or that its argument reaches the kernel
 unchanged.
@@ -848,7 +858,12 @@ link:{kernel-src}/drivers/misc/mediatek/rtc/mt6358/mtk_rtc_hal.c#L95[MT6358 regi
 maps it to `RTC_PDN1` bit 13. The
 link:{kernel-src}/drivers/misc/mediatek/rtc/mtk_rtc_hal_common.c#L115[register operation]
 performs a read-modify-write followed by the RTC write trigger. This is a
-persistent control-state change, not a passive connectivity query.
+persistent control-state change, not a passive connectivity query. The same
+handler maps the `recovery` argument to `rtc_mark_recovery()`, which sets the
+RTC bits the MT6358 map labels "factory data reset", resets the stored power-on
+time and clears the alarm. How the installed bootloader or recovery acts on that
+flag is unknown, so `reboot recovery` and any recovery-based route need their
+own review before use.
 
 The preserved runtime configuration enables the relevant vendor watchdog/kicker,
 RTC and MT6358 paths. `CONFIG_MTK_PMIC` is disabled, so the separately guarded
@@ -873,11 +888,13 @@ When invoked through `/sbin/reboot`, systemctl selects its
 link:{systemd-src}/src/systemctl/systemctl.c?id={systemd-rev}#n1087[compatibility parser].
 That parser calls
 link:{systemd-src}/src/systemctl/systemctl-compat-halt.c?id={systemd-rev}#n142[the reboot-parameter update]
-before `halt_main` can consult logind. A nonempty argument causes an atomic
-creation/replacement of `/run/systemd/reboot-param`; an empty argument can remove
-an existing file. The compatibility frontend's `-w` dry-run flag does not skip
-this parsing step. Do not invoke reboot commands, including this dry-run form,
-as read-only permission or connectivity probes.
+before `halt_main` can consult logind. Every compatibility `reboot` invocation,
+with or without an argument and including `-w`, creates, replaces or removes
+`/run/systemd/reboot-param`: an argument is stored atomically and a missing
+argument unlinks the file. A stored parameter that is not consumed by its own
+reboot, for example after a privileged dry run, is applied by the next reboot of
+any origin. Do not invoke reboot commands, including the dry-run form, as
+read-only permission or connectivity probes.
 
 Fresh normal-mode queries found the active manager at `255.4-1ubuntu8.17` and
 logind running. For the queried ADB caller, `CanReboot` and `CanPowerOff` returned
@@ -900,9 +917,10 @@ has its own authorization and is not used by that compatibility parser. It was
 not called.
 
 The live PAM helper is setuid-root and matches the copy extracted from the
-preserved Ubuntu image. Its readable PAM configuration includes the common
-session stack, but privileged policy directories were not readable without
-elevation. The observed policy result applies to that caller and time; this is
+preserved Ubuntu image. The inspected `/etc/pam.d/adbd-pam-session` file serves
+interactive sessions; commands and `reboot:` requests use the separate
+`adbd-pam-session-noninteractive` service, whose file was not captured.
+Privileged policy directories were not readable without elevation. The observed policy result applies to that caller and time; this is
 not a complete audit of all authentication rules or future session contexts.
 
 For an authorized ordinary reboot that reaches logind, the source follows the
@@ -1017,7 +1035,10 @@ transport have been verified on this exact phone.
   expected exit mechanism and failure fallback for review. These questions
   are only partly resolved by the source trace above; bootloader strings do not
   establish reachable commands. A route
-  through recovery must account for that image's startup writes.
+  through recovery must account for that image's startup writes. The current
+  link:entry-return-trial.adoc[entry and return proposal] states the exact
+  commands, stop conditions and residual risks; it awaits review and explicit
+  authorization.
 . With separate owner authorization, perform only the reviewed entry,
   recognition and return trial. Record Mac recognition, product, relevant
   partition sizes and lock state; distinguish bootloader fastboot from userspace
@@ -1034,7 +1055,9 @@ transport have been verified on this exact phone.
   properties. Resolve the missing independent backup copy in that review.
 . Before acquiring userdata or calibration, establish the required writer
   quiescence, unmounted targets, identities and filesystem geometry. Account for
-  every required calibration/control region and any filesystem tail. The current
+  every required calibration/control region and any filesystem tail; the
+  link:consistent-preservation.adoc[preservation requirements] list the
+  seventeen uncovered regions and what makes a copy consistent. The current
   producer selects userdata only and requires its filesystem geometry to match
   the partition, with clean state and no pending recovery or orphan cleanup.
   An abrupt reset of the live filesystem does not establish those conditions.

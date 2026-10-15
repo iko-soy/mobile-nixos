@@ -184,6 +184,23 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("reserve", manifest["error"])
             self.assertFalse((output / "filesystem.img").exists())
 
+    def test_failure_after_publication_link_withdraws_the_image(self):
+        original = backup.write_manifest
+
+        def failing_completion(output, manifest):
+            if manifest.get("status") == "complete":
+                raise OSError(28, "No space left on device")
+            return original(output, manifest)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(backup, "write_manifest", side_effect=failing_completion):
+                code, output, manifest = self.run_fixture(Path(temporary))
+            self.assertEqual(code, 1)
+            self.assertEqual((manifest["status"], manifest["stage"]), ("failed", "complete"))
+            self.assertNotIn("file", manifest)
+            self.assertFalse((output / "filesystem.img").exists())
+            self.assertFalse((output / "filesystem.img.part").exists())
+
 
 class BoundaryTests(unittest.TestCase):
     def test_nonregular_and_symlink_inputs_are_rejected_without_reading(self):

@@ -52,6 +52,22 @@ superblock levels; an extra alias or a per-mount read-only bind over a writable
 superblock is rejected. Acquisition is disabled during writable gadget setup
 and cleanup. The original six-mount source profile is unchanged.
 
+Before USB setup, PID 1 must have guarded a complete storage set: `mmcblk0`,
+exactly its 38 measured partitions, both eMMC boot areas and the RPMB node, with
+no block device still registering. RAM, loop and zram nodes are guarded too but
+do not count as storage. PID 1 then guards every block node again immediately
+before preparing the gadget, because this profile does not rescan afterwards.
+In both passes a device whose sysfs identity or `/dev` node is still appearing
+is retried, for up to five one-second scans in the second pass; an incomplete
+set then fails with `storage-guard-incomplete`. These rules replace an earlier
+rule under which the built-in `zram0` alone counted as storage; that defect and
+the mount-ID-0 rejection described in the link:../source/README.adoc[source
+guard] were found by the 2026-10-15 audit. The VM variant substitutes the virtio
+disk `vda` without a partition count, so the production rule has not run.
+If both workers are reaped normally and either a worker exit or the producer
+status is nonzero, PID 1 now prints `TITAN_USB_PIPELINE_RESULT` with the
+producer status code and both wait statuses before `worker-result-nonzero`.
+
 The fixed workers are `/bin/titan-block-produce` and
 `/bin/titan-rescue-send`. The producer selects `/dev/mmcblk0p36`, named
 `userdata`, under `/dev/mmcblk0`; it accepts no input path or descriptor override.

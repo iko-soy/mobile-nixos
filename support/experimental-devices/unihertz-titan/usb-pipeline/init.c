@@ -34,6 +34,10 @@
 #include <time.h>
 #include <unistd.h>
 
+/* Supplied by rescue/init.c: re-guard every block node and require the fixed
+ * disk and partition set, without the USB profile's own rescans. */
+int titan_rescue_guard_storage(void);
+
 #ifdef TITAN_USB_PIPELINE_VM_TEST
 #define BYTE_CAP "33554432"
 #define PRODUCER_SECONDS "25"
@@ -561,6 +565,8 @@ int titan_usb_pipeline_run(void)
         reason = "vm-compressor-gate-install-failed"; goto failure;
     }
 #endif
+    /* Devices can register after READY; guard again before any USB setup. */
+    if (titan_rescue_guard_storage() != 0) { reason = "storage-guard-incomplete"; goto failure; }
     if (titan_usb_prepare(&pipeline.usb, &reason) != 0) goto failure;
     puts("TITAN_USB_PIPELINE_RAW_READY");
     if (titan_usb_bind_and_seal(&pipeline.usb, &reason) != 0) goto failure;
@@ -619,9 +625,16 @@ int titan_usb_pipeline_run(void)
     printf("TITAN_USB_PIPELINE_VM_RECEIPT %s\n", wanted == TITAN_VM_RECEIPT_VERIFIED ? "VERIFIED" : "INCOMPLETE");
     completed = 1;
 #else
-    if (ran != 0 || producer_status(&pipeline) != 0 || !pipeline.no_children ||
+    if (ran != 0) goto failure;
+    if (producer_status(&pipeline) != 0 || !pipeline.no_children ||
         !WIFEXITED(pipeline.statuses[0]) || WEXITSTATUS(pipeline.statuses[0]) != 0 ||
-        !WIFEXITED(pipeline.statuses[1]) || WEXITSTATUS(pipeline.statuses[1]) != 0) goto failure;
+        !WIFEXITED(pipeline.statuses[1]) || WEXITSTATUS(pipeline.statuses[1]) != 0) {
+        /* Plain integers only: the producer status code and both wait statuses. */
+        printf("TITAN_USB_PIPELINE_RESULT producer-status=%u producer=%d sender=%d\n",
+               producer_status(&pipeline), pipeline.statuses[0], pipeline.statuses[1]);
+        reason = "worker-result-nonzero";
+        goto failure;
+    }
     success_wait(&pipeline);
 #endif
 

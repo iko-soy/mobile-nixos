@@ -153,6 +153,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(set(report["partitions"]), set(LABELS))
         self.assertFalse(any(report["validation"].values()))
         self.assertEqual(json.loads((output / "manifest.json").read_text()), report)
+        self.assertEqual(set(report["helper_sources"]), {"acquire-firmware.py", "acquire-os-partitions.py",
+            "acquire-bootloaders.py", "acquire-partitions.py", "collect-inventory.py"})
+        self.assertEqual(report["helper_sources"]["acquire-firmware.py"],
+                         hashlib.sha256((HERE.parent / "acquire-firmware.py").read_bytes()).hexdigest())
         self.assertEqual(len(list(output.iterdir())), 17)
         for label, data in self.remote.data.items():
             image = output / (label + ".img")
@@ -282,7 +286,7 @@ class CredentialTests(unittest.TestCase):
                     self.assertEqual(remote.password, b"synthetic-secret" if missing else None)
                     return output, {"bytes_preserved": 235929600}
                 with mock.patch.object(tool.transport, "Remote", return_value=remote), \
-                     mock.patch.object(tool.transport, "run_bounded", return_value=(b"List of devices attached\nsynthetic-selector\tdevice\n", 0, "")), \
+                     mock.patch.object(tool.transport, "run_bounded", return_value=(b"List of devices attached\nsynthetic-selector\tdevice usb:1-1 transport_id:1\n", 0, "")), \
                      mock.patch.object(tool.transport, "prompt_password", side_effect=prompt) as password, \
                      mock.patch.object(tool, "acquire", side_effect=acquire) as acquisition, \
                      contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(io.StringIO()) as stderr:

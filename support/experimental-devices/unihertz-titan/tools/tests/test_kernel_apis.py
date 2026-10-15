@@ -218,7 +218,7 @@ class HostTests(unittest.TestCase):
             loader.assert_not_called()
             with tempfile.TemporaryDirectory() as temporary, \
                     patch.object(fresh, "load_inventory", return_value=inventory), \
-                    patch.object(inventory, "run_command", return_value=(b"List of devices attached\nprivate-id\tdevice\n", b"", 0, False)), \
+                    patch.object(inventory, "run_command", return_value=(b"List of devices attached\nprivate-id\tdevice usb:1-1 transport_id:1\n", b"", 0, False)), \
                     patch.object(inventory, "check_adb_transport"), \
                     patch.object(inventory, "run_probe", return_value=(json.dumps(report).encode(), b"", 0, False)), \
                     contextlib.redirect_stdout(io.StringIO()):
@@ -230,7 +230,7 @@ class HostTests(unittest.TestCase):
         inventory = apis.load_inventory()
         with tempfile.TemporaryDirectory() as temporary, \
                 patch.object(apis, "load_inventory", return_value=inventory), \
-                patch.object(inventory, "run_command", return_value=(b"List of devices attached\nprivate-id\tdevice\n", b"", 0, False)), \
+                patch.object(inventory, "run_command", return_value=(b"List of devices attached\nprivate-id\tdevice usb:1-1 transport_id:1\n", b"", 0, False)), \
                 patch.object(inventory, "check_adb_transport") as check, \
                 patch.object(inventory, "run_probe", return_value=(json.dumps(report).encode(), b"", 0, False)) as run, \
                 contextlib.redirect_stdout(io.StringIO()) as terminal:
@@ -257,7 +257,7 @@ class HostTests(unittest.TestCase):
                                                (b"{}", b"", 0, False)):
             with self.subTest(code=code, timed_out=timed_out), tempfile.TemporaryDirectory() as temporary, \
                     patch.object(apis, "load_inventory", return_value=inventory), \
-                    patch.object(inventory, "run_command", return_value=(b"List of devices attached\nprivate-id\tdevice\n", b"", 0, False)), \
+                    patch.object(inventory, "run_command", return_value=(b"List of devices attached\nprivate-id\tdevice usb:1-1 transport_id:1\n", b"", 0, False)), \
                     patch.object(inventory, "check_adb_transport"), \
                     patch.object(inventory, "run_probe", return_value=(stdout, stderr, code, timed_out)), \
                     contextlib.redirect_stderr(io.StringIO()) as terminal:

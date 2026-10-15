@@ -46,6 +46,19 @@ let
       --initrd ${vmRamdisk}/initramfs.cpio.gz --output "$NIX_BUILD_TOP/mount-results"
     cp -r "$NIX_BUILD_TOP/mount-results" "$out"
   '';
+  # Host parser fixtures with Linux 4.14 numbering (initramfs rootfs = mount 0),
+  # which the disposable 6.18 VMs cannot produce. No mount is performed.
+  parserTests = pkgs.runCommandCC "titan-usb-mount-policy-parser-tests" {
+    meta = { platforms = lib.platforms.linux; hydraPlatforms = []; };
+  } ''
+    $CC -std=c11 -O2 -Wall -Wextra -Werror \
+      -DTITAN_USB_MOUNT_PROFILE -DTITAN_MOUNT_POLICY_PARSER_TEST \
+      -I ${headers ./rescue} ${./rescue/mount-policy.c} ${./rescue/mount-parser-test.c} \
+      -o mount-parser-test
+    ./mount-parser-test > results || { cat results; exit 1; }
+    cat results
+    cp results "$out"
+  '';
 in {
-  inherit vmRamdisk vmTests;
+  inherit vmRamdisk vmTests parserTests;
 }

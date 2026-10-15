@@ -162,13 +162,16 @@ def emit(data):
 
     def direct(self, programs, *, maximum=LIMIT, timeout=1, consume=True, close_consumer=False,
                source_flags=os.O_RDONLY, change=None, extra_fd=None, binary=None, emulator=None,
-               argument_change=None, observe=None):
+               argument_change=None, observe=None, inherit=None):
         source = os.open(self.source, source_flags)
         data_read, data_write = os.pipe()
         status_read, status_write = os.pipe()
         if change:
             change(source, data_write, status_write)
-        inherited = [source, data_write, status_write] + ([extra_fd] if extra_fd is not None else [])
+        # Additional descriptors, under their own numbers, for role tests.
+        added = inherit(source, data_write, status_write) if inherit else []
+        inherited = ([source, data_write, status_write] + ([extra_fd] if extra_fd is not None else [])
+                     + added)
         arguments = command(binary or PRODUCER, emulator if binary else EMULATOR,
                             source, data_write, status_write, maximum=maximum,
                             timeout=timeout, programs=programs)
@@ -176,7 +179,7 @@ def emit(data):
             argument_change(arguments, source, data_write, status_write)
         process = subprocess.Popen(arguments, pass_fds=inherited,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for descriptor in (source, data_write, status_write):
+        for descriptor in (source, data_write, status_write, *added):
             os.close(descriptor)
         captured = {data_read: bytearray(), status_read: bytearray()}
         active = [status_read] + ([data_read] if consume else [])
@@ -377,6 +380,37 @@ def emit(data):
                                           "fifo-source": ("--input-fd", output)}[kind]
                     arguments[arguments.index(option) + 1] = str(descriptor)
                 code, output, status, _ = self.direct(self.programs(), argument_change=change)
+                self.assertNotEqual(code, 0)
+                self.assertEqual(output, b"")
+                self.assert_failure_status(status)
+                self.assertEqual(self.child_records(), [])
+
+    def test_wrong_descriptor_types_under_distinct_numbers_are_rejected_before_children(self):
+        # Distinct numbers keep the numeric alias checks from masking the type,
+        # access-mode and FIFO-identity checks.
+        for kind in ("regular-output", "same-fifo-status", "fifo-source", "write-only-source"):
+            with self.subTest(kind=kind):
+                extra = []
+
+                def inherit(_source, data_write, _status):
+                    if kind == "regular-output":
+                        extra.append(os.open(self.case / "regular-output", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+                    elif kind == "same-fifo-status":
+                        extra.append(os.dup(data_write))
+                    elif kind == "fifo-source":
+                        read_end, write_end = os.pipe()
+                        os.close(write_end)
+                        extra.append(read_end)
+                    else:
+                        extra.append(os.open(self.source, os.O_WRONLY))
+                    return list(extra)
+
+                def change(arguments, _source, _output, _status):
+                    option = {"regular-output": "--output-fd", "same-fifo-status": "--status-fd",
+                              "fifo-source": "--input-fd", "write-only-source": "--input-fd"}[kind]
+                    arguments[arguments.index(option) + 1] = str(extra[0])
+
+                code, output, status, _ = self.direct(self.programs(), argument_change=change, inherit=inherit)
                 self.assertNotEqual(code, 0)
                 self.assertEqual(output, b"")
                 self.assert_failure_status(status)

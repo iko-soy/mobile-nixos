@@ -57,9 +57,21 @@ static int virtual_device(char *text)
     return major(device) == device_major && minor(device) == device_minor;
 }
 
+#ifdef TITAN_MOUNT_POLICY_PARSER_TEST
+/* Host parser fixtures only; production builds read this process's table. */
+static const char *inventory_path = "/proc/self/mountinfo";
+void titan_mount_policy_test_path(const char *path)
+{
+    inventory_path = path;
+}
+#define TITAN_MOUNTINFO_PATH inventory_path
+#else
+#define TITAN_MOUNTINFO_PATH "/proc/self/mountinfo"
+#endif
+
 static int read_inventory(char *buffer, size_t capacity)
 {
-    int fd = open("/proc/self/mountinfo", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    int fd = open(TITAN_MOUNTINFO_PATH, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     if (fd < 0)
         return 1;
     struct stat metadata;
@@ -179,10 +191,11 @@ int titan_mount_inventory(enum titan_mount_phase phase, const char **reason)
         }
         uint64_t id, parent;
         /* These independently owned initramfs mounts must be private: no
-         * shared/master/propagate_from tags in this visible inventory. */
+         * shared/master/propagate_from tags in this visible inventory. Mount
+         * ID 0 is valid: Linux 4.14 numbers the initramfs rootfs 0. */
         if (token_count != 10 || strcmp(tokens[6], "-") != 0 ||
-            !decimal(tokens[0], UINT64_MAX, &id) || id == 0 ||
-            !decimal(tokens[1], UINT64_MAX, &parent) || parent == 0 ||
+            !decimal(tokens[0], UINT64_MAX, &id) ||
+            !decimal(tokens[1], UINT64_MAX, &parent) ||
             !virtual_device(tokens[2]) || strcmp(tokens[3], "/") != 0)
             return fail(reason, "unexpected-mount");
         int index = expected_mount(tokens[4], tokens[7]);
@@ -190,7 +203,7 @@ int titan_mount_inventory(enum titan_mount_phase phase, const char **reason)
             mount_options(tokens[5], tokens[9], index) != 0)
             return fail(reason, "unexpected-mount");
         for (size_t previous = 0; previous < 7; ++previous)
-            if (mount_ids[previous] == id)
+            if ((seen & (1U << previous)) != 0 && mount_ids[previous] == id)
                 return fail(reason, "unexpected-mount");
         mount_ids[index] = id;
         parent_ids[index] = parent;
@@ -200,6 +213,12 @@ int titan_mount_inventory(enum titan_mount_phase phase, const char **reason)
     }
     if (count != expected || seen != (1U << expected) - 1U)
         return fail(reason, "mount-inventory-incomplete");
+    /* The fixed tree: the five virtual mounts sit directly on '/' and
+     * configfs sits on /run. The root's own parent number is not assumed: it
+     * can be itself (4.14 rootfs) or a hidden mount on other kernels. */
+    for (size_t index = 1; index < 6; ++index)
+        if (parent_ids[index] != mount_ids[0])
+            return fail(reason, "unexpected-mount");
     if (phase == TITAN_MOUNTS_USB_SEALED_7 && parent_ids[6] != mount_ids[4])
         return fail(reason, "unexpected-mount");
     return 0;

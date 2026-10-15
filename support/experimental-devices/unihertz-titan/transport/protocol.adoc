@@ -1,7 +1,12 @@
 = Titan rescue transport prototype, version 1
 
-This is an off-device transport experiment. It is not enabled by rescue PID 1,
-does not configure a USB gadget, and does not open phone storage. Passing these
+This is an off-device transport experiment. The default `rescue.ramdisk` does
+not include it. Only the separate build-only
+link:../usb-pipeline/README.adoc[USB acquisition profile] starts the sender, after
+its gadget owner has made `ttyGS0` raw (before binding), bound the gadget and
+sealed configfs; the sender inherits that raw descriptor, and host bytes that
+arrive earlier wait unchanged in the raw TTY. The sender itself does not
+configure a gadget or open phone storage, and it has never run on the Titan. Passing these
 checks establishes byte transfer behavior, not an offline backup or hardware
 recovery procedure. A host nonce binds a session; it does not authenticate peers.
 
@@ -66,7 +71,9 @@ while returning zero. The separate
 link:../producer/README.adoc[producer prototype] exercises supervision against
 regular ext4 files. The separate link:../block/README.adoc[guarded block producer]
 uses the fixed userdata profile and retains its checked descriptors through
-completion; phone startup and USB integration remain unimplemented.
+completion. The USB acquisition profile adds startup and ACM ownership. Only its
+x86_64 VM-test variant has run, in disposable VMs; the AArch64 build ran only
+qemu-user refusal checks, and its production-only paths have not run.
 Ordinary pipe EOF must not be treated as backup success.
 
 Each endpoint has an absolute monotonic deadline covering data and handshake,
@@ -83,7 +90,10 @@ This permits future sparse/compressed streaming without staging userdata in RAM.
 Create a new private output directory and regular `payload.partial` with
 exclusive creation and no symlink following. Never overwrite existing output.
 Keep a private state report. After END, validate count/hash, fsync the file and
-directory, independently read back the file, then ACK. Only after a matching
+directory, independently read back the file, then ACK. On macOS, where plain
+`fsync` does not request a drive-cache flush, the receiver uses `F_FULLFSYNC`
+and falls back to `fsync` only if the filesystem rejects it. The readback still
+reads cached bytes; it checks saved contents, not media durability. Only after a matching
 COMPLETE may the host rename it to `payload.bin`, sync the directory and record
 transfer completion. ACK/receipt loss leaves an explicitly incomplete staging
 file even if its bytes were independently verified; never silently accept or
@@ -94,8 +104,9 @@ use production serial endpoints in automated tests: use synthetic files, pipes,
 sockets and PTYs. Neither test setup nor these programs may configure a phone
 gadget, mount phone filesystems, stop services, reboot or flash.
 
-The future gadget supervisor must establish raw sender readiness before binding
-the gadget and allowing the host to send HELLO. Bytes sent to an echoing or
+The gadget owner must establish raw terminal settings before binding the gadget
+and allowing the host to send HELLO; the USB acquisition profile does this in
+`usb/owner.c`. Bytes sent to an echoing or
 canonical terminal during startup may already be transformed; this protocol
 deliberately does not resynchronize or retry a corrupted session. The PTY fixture
 observes completed child descriptor/termios setup before starting the exchange.

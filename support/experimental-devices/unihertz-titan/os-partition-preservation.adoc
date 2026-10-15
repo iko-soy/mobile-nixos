@@ -61,9 +61,14 @@ hashes the transfer and independently rereads the saved file. Both images are
 published only when byte counts, all three hashes and repeated guards agree.
 Agreement describes those observations, not an atomic snapshot.
 
-The 4118806528 logical bytes total about 3.84 GiB. Entirely zero chunks are
-stored as holes where the Mac filesystem supports sparse files; all nonzero
-bytes, unused space and partition tails remain intact. The helper does not
+The 4118806528 logical bytes total about 3.84 GiB. The helper seeks over
+entirely zero chunks instead of writing them; the Mac filesystem decides whether
+those ranges stay unallocated. In a later scratch test on this Mac's APFS volume
+(1 MiB of data, a skipped interior gap, 1 MiB of data, measured right after
+`fsync`), gaps of 1 to 12 MiB were allocated and gaps of 16 and 32 MiB were not.
+Allocation can also fall later: the preserved firmware copy `tee2` now allocates 2965504
+of its 12582912 bytes. `zero_bytes_skipped` is therefore not a hole size. All nonzero bytes, unused
+space and partition tails remain intact. The helper does not
 interpret filesystem allocation or discard free blocks. Physical savings depend
 on the actual bytes, so it checks room for the entire remaining logical size
 plus a 64 MiB reserve and rechecks available space during transfer. Sparse
@@ -144,7 +149,7 @@ no AVB signature, trust policy or bootloader acceptance was verified. The full
 partition tails were retained. Both image hashes remained unchanged after all
 local inspection.
 
-At verification, the two sparse files occupied about 3.41 GiB physically on the
+At verification, the two image files occupied about 3.41 GiB physically on the
 Mac for 3.84 GiB of logical partition bytes. The system filesystem itself has
 749611 of 774003 blocks in use, independently of personal files in userdata.
 Sparse allocation is an observed saving, not an estimate of userdata backup size.

@@ -29,6 +29,17 @@ tool = load("titan_backup_catalog_test", HERE.parent / "verify-backup-catalog.py
 gpt_fixtures = load("titan_catalog_gpt_fixture", HERE / "test_gpt_acquisition.py")
 firmware_fixtures = load("titan_catalog_firmware_fixture", HERE / "test_firmware_acquisition.py")
 bootloader_fixtures = load("titan_catalog_lk_fixture", HERE / "test_bootloader_acquisition.py")
+os_fixtures = load("titan_catalog_os_fixture", HERE / "test_os_partition_acquisition.py")
+historical_shapes = load("titan_catalog_historical_shapes", HERE / "historical_guard_shapes.py")
+
+
+def key_shape(value):
+    """Keys and JSON type names only, matching historical_guard_shapes.py."""
+    if isinstance(value, dict):
+        return {key: key_shape(item) for key, item in sorted(value.items())}
+    if isinstance(value, list):
+        return [json.loads(item) for item in sorted({json.dumps(key_shape(entry), sort_keys=True) for entry in value})]
+    return type(value).__name__
 
 
 def encoded(value):
@@ -184,6 +195,24 @@ class ManifestTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="titan-catalog-schema-", dir="/tmp")
         self.addCleanup(self.temp.cleanup)
         self.fixture = Fixture(Path(self.temp.name).resolve() / "backup")
+
+    def test_historical_guard_shapes_remain_accepted(self):
+        # The catalog revalidates already captured kernel_map documents with the
+        # live acquisition validators. The synthetic fixtures must keep exactly
+        # the recorded key shapes (frozen without values), so a validator or
+        # schema change cannot be hidden by updating a fixture alongside it.
+        fixtures = {"bootloader-preservation/installed": (bootloader_fixtures.evidence(),
+                                                          tool.firmware.bootloaders.validate_evidence),
+                    "os-partition-preservation/installed": (os_fixtures.evidence(),
+                                                            tool.firmware.os_partitions.validate_evidence),
+                    "firmware-preservation/installed": (firmware_fixtures.evidence(), tool.firmware.validate_evidence)}
+        self.assertEqual(set(fixtures), set(historical_shapes.SHAPES))
+        for name, (fixture, validator) in fixtures.items():
+            with self.subTest(set=name):
+                recorded = historical_shapes.SHAPES[name]
+                self.assertEqual(fixture["format"], recorded["format"])
+                self.assertEqual(key_shape(fixture), recorded["shape"])
+                validator(json.dumps(fixture).encode("ascii") + b"\n")
 
     def test_fixed_profile_counts_bytes_and_real_gpt_geometry(self):
         report = tool.validate_manifests(self.fixture.manifests)

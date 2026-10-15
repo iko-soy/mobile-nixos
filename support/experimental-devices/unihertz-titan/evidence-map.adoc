@@ -1,0 +1,92 @@
+= Evidence map
+
+Status on 2026-10-15. Each row names the strongest evidence behind a claim,
+the revision or environment it applies to, and what it does not establish.
+Evidence types, weakest to strongest for hardware questions: evaluation,
+compilation, packaging, host tests, emulated execution (qemu-user or VMs),
+live read-only phone observation, hardware boot, demonstrated restoration.
+No row reaches hardware boot or restoration.
+
+[cols="2,2,2,3",options="header"]
+|===
+|Area |Strongest evidence |Revision / environment |Not established
+
+|Private copies of 21 GPT partitions, both eMMC boot areas, both GPT windows
+and two backing files (27 payloads)
+|Live read-only acquisition with independent phone hashes; local catalog
+re-verification
+|Acquisitions 2026-10-14/15; catalog passes on the Mac, latest 2026-10-15
+|Atomic snapshot, consistency of writable state, unique device identity,
+complete mount coverage for the LK capture, a second copy, any restore
+
+|Remaining preservation: userdata, calibration and control regions
+|Saved host mount table; requirements in
+link:consistent-preservation.adoc[the preservation record]
+|Inventory of 2026-10-14
+|Any copy of the 17 regions; absence of raw writers
+
+|GPT structure and zero disk GUID
+|Live read-only capture plus host parser; catalog reparse
+|2026-10-14 capture; parser at the current revision
+|UEFI conformance of the zero GUID; a restore of the table
+
+|ADB acquisition helpers (transport framing, guards, publication)
+|Host tests with fakes; earlier live runs of the then-current revisions
+|285-test suite on the Mac and Linux, 2026-10-15
+|Live behavior of the 2026-10-15 corrections (USB-only selection, identity
+preflight, publication commit point)
+
+|TTR1 transport
+|Host tests with native Linux, native Mac and qemu-aarch64 senders
+|19 tests, 2026-10-15
+|Titan USB serial behavior, Mac ACM recognition
+
+|Sparse archive verification
+|Host tests plus a real local ext4/e2image fixture
+|Current revision; fixture from 2026-10-14
+|Any Titan userdata archive
+
+|Rescue PID 1, source guard, block producer, USB pipeline
+|Linux 6.18.38 VM cases (36) plus 4.14-numbering parser fixtures;
+qemu-user refusal checks of the AArch64 builds
+|Builder runs on 2026-10-15
+|Titan 4.14 runtime, MTU3 gadget operation, eMMC discovery timing, writer
+quiescence; the production eMMC readiness rule and post-readiness loop (VM
+builds substitute the virtio disk `vda`)
+
+|Rescue envelope (`52f48e74...`, final corrected ramdisk)
+|Packaging; byte identity with the pinned `mkbootimg`; structural inspection
+|Private Mac run, 2026-10-15
+|Bootloader acceptance, temporary boot, failure behavior, return
+
+|Reference kernel and boot image
+|Compilation on x86_64 Linux; packaging checks; Mac rehash and embedded
+configuration check
+|2026-10-14 build (`88c0ca7d...`); 2026-10-15 packaging rerun with the cached
+kernel reproduced it
+|Bit reproducibility across environments; hardware boot of this build
+
+|Installed boot equals the CI candidate
+|Live read-only acquisition and hash comparison
+|2026-10-14
+|Source-to-binary reproducibility
+
+|Bootloader entry path and RTC marker
+|Exact-version systemd source review; pinned kernel source; read-only
+authorization probes
+|Ubuntu systemd `255.4-1ubuntu8.17`; kernel `fc94895e`
+|That the bootloader consumes or clears the marker; a working return;
+see link:entry-return-trial.adoc[the trial proposal]
+
+|Kernel/userspace compatibility
+|Live read-only API probes; configuration comparison; upstream systemd
+baselines; Nix evaluation
+|Probes 2026-10-14; baselines and pins checked 2026-10-15
+|A NixOS boot of any package set; see link:userspace-feasibility.adoc[the
+feasibility record]
+|===
+
+Detailed logs, hashes of private images and identifiers stay in the private
+evidence directory. The link:README.adoc[README] validation records name the
+commit or describe the source snapshot each run tested; private records keep
+per-file source hashes for every snapshot.

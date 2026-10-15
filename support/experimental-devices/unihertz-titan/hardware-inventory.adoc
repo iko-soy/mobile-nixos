@@ -20,8 +20,9 @@ Neither establishes a boot result for the experimental image.
 The owner supplied a summary followed by runtime inventory excerpts from the
 running phone. The tables below retain selected hardware/build facts; raw mount
 listings, input bitmaps, build-host identifiers and transient resource readings
-are omitted. No direct SSH inspection was completed from the development
-environment, and probe completion/status information is still outstanding.
+are omitted. At the time of this owner report, no direct inspection had been
+completed from the development environment and probe status was outstanding;
+the later direct follow-up below supplies both.
 
 [cols="2,3",options="header"]
 |===
@@ -30,7 +31,7 @@ environment, and probe completion/status information is still outstanding.
 |Board / platform |`g61v71c2k_dfl_tee` / `mt6771`; hardware property `mt6771`.
 |Device tree |Model `MT6771V/C`; compatible `mediatek,mt6771`.
 |Running OS |Ubuntu `24.04.5 LTS (Noble Numbat)`, variant `Touch`.
-|Installed systemd tools |`systemctl --version` reports `255 (255.4-1ubuntu8.17)`; running system-manager version not yet queried.
+|Installed systemd tools |`systemctl --version` reports `255 (255.4-1ubuntu8.17)`; the running manager was queried later and matches (see the direct follow-up).
 |Kernel / architecture |`4.14.141+` / `aarch64`, reporting SMP and PREEMPT.
 |Kernel compiler |Android Clang 9.0.3, build 5484270 based on `r353983c`.
 |Internal storage |eMMC: `mmcblk0.type=MMC`, model `hDEaP3`, with internal Android partition labels mapped below.
@@ -88,8 +89,10 @@ must implement its own discovery/mount logic and preserve existing data.
 
 Device-specific preservation targets visible in the label map include `nvcfg`
 (`mmcblk0p6`), `nvdata` (`mmcblk0p7`), `nvram` (`mmcblk0p25`), `protect1`
-(`mmcblk0p9`) and `protect2` (`mmcblk0p10`). This is not an exhaustive backup list;
-no partition contents or backups were collected or verified.
+(`mmcblk0p9`) and `protect2` (`mmcblk0p10`). This is not an exhaustive backup list.
+At the time of this owner report no partition contents were collected; the later
+preservation records cover other partitions, and these five remain without
+copies (see link:consistent-preservation.adoc[the preservation requirements]).
 
 === Enumerated runtime interfaces
 

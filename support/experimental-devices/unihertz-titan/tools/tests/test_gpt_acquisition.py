@@ -98,11 +98,17 @@ class FakeRemote:
         self.bad_count = None
         self.password = None
         self.protocol_checked = False
+        self.identity_checks = []
 
     def check_protocol(self):
         self.protocol_checked = True
 
     def run(self, script, limit=16384, *, sink=None, expected_exit=0):
+        if script == tool.guard_script(privileged=False):
+            # Unprivileged identity preflight: record which credential, if any,
+            # accompanied it. It produces no output and reads no block contents.
+            self.identity_checks.append(self.password)
+            return b"", 0, hashlib.sha256(b"").hexdigest()
         if script == tool.guard_script(emit=True):
             if limit != tool.MAP_LIMIT or sink is not None:
                 raise AssertionError("Map must use its bounded metadata channel")
@@ -254,7 +260,7 @@ class AcquisitionTests(unittest.TestCase):
         fixture = Fixture(); fixture.disk_guid = uuid.UUID(int=0)
         remote = FakeRemote(fixture)
         with mock.patch.object(tool.acquisition, "Remote", return_value=remote), \
-             mock.patch.object(tool.acquisition, "run_bounded", return_value=(b"List of devices attached\nprivate-serial\tdevice\n", 0, "")), \
+             mock.patch.object(tool.acquisition, "run_bounded", return_value=(b"List of devices attached\nprivate-serial\tdevice usb:1-1 transport_id:1\n", 0, "")), \
              contextlib.redirect_stdout(io.StringIO()) as captured:
             self.assertEqual(tool.main(["--output", str(self.output)]), 0)
         self.assertIn("Warning: the observed GPT disk GUID is zero", captured.getvalue())
@@ -380,18 +386,43 @@ class AcquisitionTests(unittest.TestCase):
 
         def prompt():
             self.assertTrue(remote.protocol_checked)
+            self.assertEqual(remote.identity_checks, [None])
             return b"fixture-secret"
 
         with mock.patch.object(tool.acquisition, "Remote", return_value=remote), \
-             mock.patch.object(tool.acquisition, "run_bounded", return_value=(b"List of devices attached\nfixture\tdevice\n", 0, "")), \
+             mock.patch.object(tool.acquisition, "run_bounded", return_value=(b"List of devices attached\nfixture\tdevice usb:1-1 transport_id:1\n", 0, "")), \
              mock.patch.object(tool.acquisition, "prompt_password", side_effect=prompt), \
              contextlib.redirect_stdout(io.StringIO()) as captured:
             self.assertEqual(tool.main(["--sudo", "--output", str(self.output)]), 0)
         self.assertIsNone(remote.password)
+        self.assertEqual(remote.identity_checks, [None])
         self.assertNotIn("fixture-secret", captured.getvalue())
         self.assertNotIn(str(remote.fixture.disk_guid), captured.getvalue())
         for path in (self.output, self.output.parent, self.output.parent.parent):
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+
+    def test_cli_failed_identity_preflight_never_prompts_or_creates_output(self):
+        remote = FakeRemote()
+        failures = []
+
+        def run(script, limit=16384, **kwargs):
+            failures.append(script)
+            raise tool.AcquisitionError("fixture identity mismatch")
+
+        remote.run = run
+        self.output = self.base / "refused"
+        with mock.patch.object(tool.acquisition, "Remote", return_value=remote), \
+             mock.patch.object(tool.acquisition, "run_bounded", return_value=(b"List of devices attached\nfixture\tdevice usb:1-1 transport_id:1\n", 0, "")), \
+             mock.patch.object(tool.acquisition, "prompt_password") as prompt, \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(tool.main(["--sudo", "--output", str(self.output)]), 1)
+        prompt.assert_not_called()
+        self.assertEqual(failures, [tool.guard_script(privileged=False)])
+        self.assertFalse(self.output.exists())
+        unprivileged = tool.guard_script(privileged=False)
+        self.assertNotIn("-r /dev/mmcblk0", unprivileged)
+        self.assertNotIn("blockdev", unprivileged)
+        self.assertIn("check_node", unprivileged)
 
     def test_cli_has_no_device_path_geometry_or_arbitrary_read_overrides(self):
         for option in ("--device", "--disk-bytes", "--skip", "--count"):

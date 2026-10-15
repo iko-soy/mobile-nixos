@@ -144,6 +144,10 @@ class AcquisitionTests(unittest.TestCase):
         self.assertEqual(report["bytes_preserved"], 2097152)
         self.assertFalse(any(report["validation"].values()))
         self.assertEqual(json.loads((output / "manifest.json").read_text()), report)
+        tools = SCRIPT.parent
+        self.assertEqual(report["helper_sources"], {
+            name: hashlib.sha256((tools / name).read_bytes()).hexdigest()
+            for name in ("acquire-bootloaders.py", "acquire-partitions.py", "collect-inventory.py")})
         self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
         self.assertEqual(sorted(path.name for path in output.iterdir()), ["lk.img", "lk2.img", "manifest.json"])
         for label, data in remote.data.items():
@@ -247,6 +251,25 @@ class AcquisitionTests(unittest.TestCase):
         self.assert_unpublished()
         self.assertEqual((self.output / "lk.img.part").stat().st_size, 1048576)
         self.assertEqual((self.output / "lk2.img.part").stat().st_size, 1048576)
+
+    def test_failure_after_publication_commit_keeps_the_verified_files(self):
+        original, failed = os.unlink, []
+
+        def unlink(path, *args, **kwargs):
+            result = original(path, *args, **kwargs)
+            if path == "manifest.json.part" and not failed:
+                failed.append(path)
+                raise KeyboardInterrupt
+            return result
+
+        with mock.patch.object(tool.os, "unlink", side_effect=unlink), \
+                self.assertRaises(tool.PublicationRetained):
+            tool.acquire(FakeRemote(), self.output)
+        self.assertEqual(failed, ["manifest.json.part"])
+        for name in ("lk.img", "lk2.img"):
+            self.assertEqual((self.output / name).stat().st_size, 1048576)
+        self.assertFalse((self.output / "manifest.json").exists())
+        self.assertTrue((self.output / "manifest.json.part").is_file())
 
     def test_directory_replacement_is_detected_without_touching_replacement(self):
         displaced = self.base / "displaced"
@@ -481,7 +504,7 @@ class CLITests(unittest.TestCase):
                     return b"fixture-secret"
                 args = ["--output", str(output)] + (["--sudo"] if sudo else [])
                 with mock.patch.object(tool.transport, "Remote", return_value=remote), \
-                     mock.patch.object(tool.transport, "run_bounded", return_value=(b"List of devices attached\nprivate-selector\tdevice\n", 0, "")), \
+                     mock.patch.object(tool.transport, "run_bounded", return_value=(b"List of devices attached\nprivate-selector\tdevice usb:1-1 transport_id:1\n", 0, "")), \
                      mock.patch.object(tool.transport, "prompt_password", side_effect=prompt) as password, \
                      contextlib.redirect_stdout(io.StringIO()) as stdout, contextlib.redirect_stderr(io.StringIO()) as stderr:
                     code = tool.main(args)

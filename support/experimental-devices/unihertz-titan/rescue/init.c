@@ -40,7 +40,42 @@ int titan_usb_pipeline_run(void);
 
 #ifdef TITAN_RESCUE_VM_TEST
 int titan_rescue_vm_test(void);
+/* Disposable VM fixtures attach one virtio disk with a varying partition set. */
+#define TITAN_RESCUE_DISK "vda"
+#define TITAN_RESCUE_PARTITION_PREFIX "vda"
+#define TITAN_RESCUE_PARTITIONS 0u
+static const char *const titan_rescue_aux_devices[] = { NULL };
+#else
+/* The measured original-Titan eMMC user area, its 38 GPT partitions and the
+ * separately registered boot areas and RPMB node (block devices on 4.14). */
+#define TITAN_RESCUE_DISK "mmcblk0"
+#define TITAN_RESCUE_PARTITION_PREFIX "mmcblk0p"
+#define TITAN_RESCUE_PARTITIONS 38u
+static const char *const titan_rescue_aux_devices[] = {
+    "mmcblk0boot0", "mmcblk0boot1", "mmcblk0rpmb", NULL
+};
 #endif
+/* Consecutive scans in which a listed device may still lack its sysfs
+ * identity or /dev node while the kernel finishes registering it. */
+#define TITAN_RESCUE_PENDING_SCANS 5u
+
+struct block_scan {
+    unsigned disk, partitions, aux, pending;
+};
+
+static int aux_device(const char *name) {
+    for (const char *const *aux = titan_rescue_aux_devices; *aux; ++aux)
+        if (strcmp(name, *aux) == 0)
+            return 1;
+    return 0;
+}
+
+static unsigned aux_device_count(void) {
+    unsigned count = 0;
+    for (const char *const *aux = titan_rescue_aux_devices; *aux; ++aux)
+        ++count;
+    return count;
+}
 
 static void reap_children(void) {
     while (waitpid(-1, NULL, WNOHANG) > 0) {}
@@ -141,7 +176,9 @@ static int safe_device_name(const char *name) {
     return 1;
 }
 
-static void sysfs_device_number(int directory, const char *name,
+/* Returns 1 when the kernel has listed the device but not yet created its
+ * `dev` attribute: device_add() creates the class link first. */
+static int sysfs_device_number(int directory, const char *name,
                                unsigned *device_major, unsigned *device_minor) {
     char path[264], data[64], extra;
     ssize_t count;
@@ -150,6 +187,8 @@ static void sysfs_device_number(int directory, const char *name,
         failed("block-name-too-long");
     /* sysfs class entries are kernel-owned symlinks to the device tree. */
     fd = openat(directory, path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0 && errno == ENOENT)
+        return 1;
     if (fd < 0)
         failed("block-identity-unavailable");
     count = read(fd, data, sizeof(data) - 1);
@@ -159,13 +198,28 @@ static void sysfs_device_number(int directory, const char *name,
     data[count] = '\0';
     if (sscanf(data, "%u:%u %c", device_major, device_minor, &extra) != 2)
         failed("block-identity-invalid");
+    return 0;
 }
 
-static unsigned guard_block_devices(void) {
+static int expected_partition(const char *name) {
+    size_t prefix = strlen(TITAN_RESCUE_PARTITION_PREFIX);
+    if (strncmp(name, TITAN_RESCUE_PARTITION_PREFIX, prefix) != 0 || name[prefix] == '\0'
+            || name[prefix] == '0')
+        return 0;
+    for (const char *p = name + prefix; *p; ++p)
+        if (!isdigit((unsigned char)*p))
+            return 0;
+    return 1;
+}
+
+/* Set and verify the read-only flag on every completely registered block
+ * node. Only the fixed disk and its partitions establish storage presence:
+ * RAM, loop and zram devices are guarded too but never count. */
+static void guard_block_devices(struct block_scan *scan) {
     DIR *directory = opendir("/sys/class/block");
     struct dirent *entry;
-    unsigned storage = 0;
     int devices = open("/dev", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    memset(scan, 0, sizeof(*scan));
     if (!directory || devices < 0)
         failed("block-inventory-unavailable");
     for (;;) {
@@ -183,10 +237,18 @@ static unsigned guard_block_devices(void) {
             continue;
         if (!safe_device_name(entry->d_name))
             failed("block-name-invalid");
-        sysfs_device_number(dirfd(directory), entry->d_name, &device_major, &device_minor);
+        if (sysfs_device_number(dirfd(directory), entry->d_name, &device_major, &device_minor)) {
+            ++scan->pending;
+            continue;
+        }
         /* Never follow a /dev symlink or open a node with mismatched identity. */
         fd = openat(devices, entry->d_name,
                     O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+        if (fd < 0 && errno == ENOENT) {
+            /* devtmpfs creates the node after the sysfs identity appears. */
+            ++scan->pending;
+            continue;
+        }
         if (fd < 0 || fstat(fd, &st) < 0 || !S_ISBLK(st.st_mode)
                 || major(st.st_rdev) != device_major || minor(st.st_rdev) != device_minor)
             failed("block-node-missing-or-mismatched");
@@ -196,15 +258,41 @@ static unsigned guard_block_devices(void) {
         if (ioctl(fd, BLKROGET, &read_only) < 0 || read_only != 1)
             failed("block-read-only-verification-failed");
         close(fd);
-        /* RAM disks (major 1) and loop devices (major 7) are guarded too, but
-         * their presence does not establish that physical storage appeared. */
-        if (device_major != 1 && device_major != 7)
-            ++storage;
+        if (strcmp(entry->d_name, TITAN_RESCUE_DISK) == 0)
+            ++scan->disk;
+        else if (expected_partition(entry->d_name))
+            ++scan->partitions;
+        else if (aux_device(entry->d_name))
+            ++scan->aux;
     }
     close(devices);
     closedir(directory);
-    return storage;
 }
+
+/* Complete means: no partly registered device, the fixed disk and (outside
+ * the VM fixtures) exactly the measured partition count plus the boot areas
+ * and RPMB node were guarded. */
+static int storage_complete(const struct block_scan *scan) {
+    return scan->pending == 0 && scan->disk == 1
+        && (TITAN_RESCUE_PARTITIONS == 0 || scan->partitions == TITAN_RESCUE_PARTITIONS)
+        && scan->aux == aux_device_count();
+}
+
+#ifdef TITAN_USB_PIPELINE_PROFILE
+/* Re-guard immediately before USB setup; the USB profile does not rescan.
+ * Devices still registering get the same bounded retry as discovery. */
+int titan_rescue_guard_storage(void) {
+    for (unsigned attempt = 1;; ++attempt) {
+        struct block_scan scan;
+        guard_block_devices(&scan);
+        if (storage_complete(&scan))
+            return 0;
+        if (scan.pending == 0 || attempt >= TITAN_RESCUE_PENDING_SCANS)
+            return 1;
+        wait_one_second();
+    }
+}
+#endif
 
 int main(void) {
     unsigned elapsed = 0;
@@ -234,11 +322,13 @@ int main(void) {
     mount_virtual("tmpfs", "/run", restricted, "size=16m,mode=0700");
     mount_virtual("tmpfs", "/tmp", restricted, "size=16m,mode=0700");
     for (;;) {
+        struct block_scan scan;
         verify_mounts();
-        if (guard_block_devices() > 0)
+        guard_block_devices(&scan);
+        if (storage_complete(&scan))
             break;
         if (elapsed >= TITAN_RESCUE_DISCOVERY_SECONDS)
-            failed("no-storage-before-deadline");
+            failed(scan.disk ? "storage-incomplete-before-deadline" : "no-storage-before-deadline");
         wait_one_second();
         ++elapsed;
     }
@@ -251,10 +341,18 @@ int main(void) {
     (void)titan_usb_pipeline_run();
     failed("usb-pipeline-returned");
 #endif
-    for (;;) {
+    for (unsigned pending_scans = 0;;) {
+        struct block_scan scan;
         wait_one_second();
         verify_mounts();
-        if (guard_block_devices() == 0)
-            failed("storage-disappeared");
+        guard_block_devices(&scan);
+        if (scan.pending) {
+            if (++pending_scans >= TITAN_RESCUE_PENDING_SCANS)
+                failed("block-registration-incomplete");
+            continue;
+        }
+        pending_scans = 0;
+        if (!storage_complete(&scan))
+            failed("storage-disappeared-or-changed");
     }
 }

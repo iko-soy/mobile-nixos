@@ -44,8 +44,12 @@ class AcquisitionError(Exception):
     pass
 
 
-def guard_script(label):
-    """Return fixed read-only checks immediately preceding every block read."""
+def identity_script(label):
+    """Return identity checks that an unprivileged ADB shell can already run.
+
+    They tie the label, block node, sysfs partition and size together, so a
+    different phone or layout is rejected before any sudo credential is sent.
+    """
     if label not in PARTITIONS:
         raise ValueError("Only boot, recovery and dtbo are supported.")
     device, number, size = PARTITIONS[label]
@@ -54,7 +58,7 @@ mmc_type=$(cat /sys/class/block/mmcblk0/device/type)
 [ "$mmc_type" = MMC ] || exit 10
 target=$(readlink -f /dev/disk/by-partlabel/{label})
 [ "$target" = /dev/{device} ] || exit 11
-[ -b /dev/{device} ] || exit 12
+[ ! -L /dev/{device} ] && [ -b /dev/{device} ] || exit 12
 sysfs=$(readlink -f /sys/class/block/{device})
 sysfs_disk=$(readlink -f /sys/class/block/mmcblk0)
 [ "${{sysfs%/*}}" = "$sysfs_disk" ] || exit 13
@@ -62,10 +66,21 @@ partition=$(cat /sys/class/block/{device}/partition)
 [ "$partition" = {number} ] || exit 14
 sectors=$(cat /sys/class/block/{device}/size)
 [ "$sectors" = {size // 512} ] || exit 15
-[ -r /dev/{device} ] || exit 16
+device_number=$(cat /sys/class/block/{device}/dev)
+node_hex=$(stat -c '%t:%T' /dev/{device})
+case "$node_hex" in ''|*[!0-9a-fA-F:]*|:*|*:|*:*:*) exit 21;; esac
+[ "${{#node_hex}}" -le 17 ] || exit 21
+[ "$((0x${{node_hex%:*}})):$((0x${{node_hex#*:}}))" = "$device_number" ] || exit 21
+"""
+
+
+def guard_script(label):
+    """Return fixed read-only checks immediately preceding every block read."""
+    identity = identity_script(label)
+    device, _, size = PARTITIONS[label]
+    return identity + f"""[ -r /dev/{device} ] || exit 16
 bytes=$(/usr/sbin/blockdev --getsize64 /dev/{device})
 [ "$bytes" = {size} ] || exit 17
-device_number=$(cat /sys/class/block/{device}/dev)
 [ -r /proc/self/mountinfo ] && [ -r /proc/1/mountinfo ] || exit 18
 awk -v device_number="$device_number" '$3 == device_number {{ mounted = 1 }} END {{ exit mounted ? 1 : 0 }}' /proc/self/mountinfo /proc/1/mountinfo || exit 19
 for holder in /sys/class/block/{device}/holders/*; do
@@ -237,7 +252,7 @@ def prepare_output(requested):
     state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
     base = (state / "mobile-nixos/titan-recovery").expanduser().resolve()
     if inventory.inside_git_checkout(base):
-        raise ValueError("Backup output must be outside every Git checkout.")
+        raise ValueError("Backup output must be outside every Git or jj checkout and the Nix store.")
     base.mkdir(mode=0o700, parents=True, exist_ok=True)
     prefix = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ-installed-")
     return Path(tempfile.mkdtemp(prefix=prefix, dir=base))
@@ -295,6 +310,16 @@ def acquire_one(remote, output, label):
             pending.unlink()
 
 
+def source_digests(*names):
+    """Return SHA-256 digests of the exact helper sources writing a manifest.
+
+    Recording them binds a private manifest to the reviewed code that produced
+    it, so later fixes cannot be confused with an earlier acquisition.
+    """
+    here = Path(__file__).resolve().parent
+    return {name: hashlib.sha256((here / name).read_bytes()).hexdigest() for name in names}
+
+
 def prompt_password():
     if not sys.stdin.isatty() or not sys.stderr.isatty():
         raise AcquisitionError("--sudo requires a local interactive terminal; no password accepted from files or pipes.")
@@ -315,18 +340,24 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adb", default="adb", help="host ADB executable")
     parser.add_argument("--serial", help="select the Titan when multiple ADB transports exist")
-    parser.add_argument("--output", help="new private directory outside every Git checkout")
+    parser.add_argument("--output", help="new private directory outside every Git or jj checkout")
     parser.add_argument("--timeout", type=int, default=120, help="seconds per remote operation (default: 120)")
     parser.add_argument("--sudo", action="store_true", help="prompt in this terminal for the phone's sudo password")
     args = parser.parse_args(argv)
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     output, remote = None, None
+    # Newly created parent directories and files are private as well.
+    previous_umask = os.umask(0o077)
     try:
-        devices, _, _ = run_bounded([args.adb, "devices"], 65536, args.timeout)
-        serial = inventory.select_device(inventory.parse_devices(devices.decode()), args.serial)
+        devices, _, _ = run_bounded([args.adb, "devices", "-l"], 65536, args.timeout)
+        serial = inventory.select_usb_device(devices.decode(), args.serial)
         remote = Remote(args.adb, serial, args.timeout)
         remote.check_protocol()
+        # Establish this Titan's partition identity as the unprivileged USB ADB
+        # user before any credential is requested or sent.
+        for label in PARTITIONS:
+            remote.run(identity_script(label))
         if args.sudo:
             remote.password = prompt_password()
         # Fail before creating an output directory if any partition is unreadable.
@@ -337,6 +368,7 @@ def main(argv=None):
             "format": 1, "status": "incomplete", "transport": "adb-shell-v2-no-pty",
             "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "scope": "boot, recovery and dtbo only; not a userdata or calibration backup",
+            "helper_sources": source_digests("acquire-partitions.py", "collect-inventory.py"),
             "partitions": {},
         }
         write_manifest(output, manifest)
@@ -358,6 +390,7 @@ def main(argv=None):
     finally:
         if remote is not None:
             remote.password = None
+        os.umask(previous_umask)
 
 
 if __name__ == "__main__":

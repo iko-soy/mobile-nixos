@@ -382,13 +382,23 @@ static int mount_options(char *options, int index)
     return (flags & required) != required;
 }
 
+#ifdef TITAN_SOURCE_PARSER_TEST
+/* Host parser fixtures only; production builds read this process's table. */
+static const char *mountinfo_path = "/proc/self/mountinfo";
+int titan_source_test_mount_inventory(const char *path, const char **reason);
+#define TITAN_SOURCE_MOUNTINFO mountinfo_path
+#else
+#define TITAN_SOURCE_MOUNTINFO "/proc/self/mountinfo"
+#endif
+
 static int mount_inventory(const char **reason)
 {
     char text[65536];
-    uint64_t mount_ids[6];
+    uint64_t mount_ids[6], parent_ids[6];
+    int indexes[6];
     unsigned int seen = 0;
     size_t count = 0;
-    if (read_text_at(AT_FDCWD, "/proc/self/mountinfo", text, sizeof(text)) != 0)
+    if (read_text_at(AT_FDCWD, TITAN_SOURCE_MOUNTINFO, text, sizeof(text)) != 0)
         return fail(reason, "mount-inventory-unavailable");
     char *line = text;
     while (*line != '\0') {
@@ -410,9 +420,10 @@ static int mount_inventory(const char **reason)
             ++separator;
         uint64_t id, parent;
         dev_t device;
+        /* Mount ID 0 is valid: Linux 4.14 numbers the initramfs rootfs 0. */
         if (token_count < 10 || separator + 4 != token_count ||
-            !decimal(tokens[0], UINT64_MAX, &id) || id == 0 ||
-            !decimal(tokens[1], UINT64_MAX, &parent) || parent == 0 ||
+            !decimal(tokens[0], UINT64_MAX, &id) ||
+            !decimal(tokens[1], UINT64_MAX, &parent) ||
             parse_device(tokens[2], &device) != 0 || major(device) != 0 ||
             strcmp(tokens[3], "/") != 0)
             return fail(reason, "unexpected-mount");
@@ -435,12 +446,33 @@ static int mount_inventory(const char **reason)
                 !decimal(colon + 1, UINT64_MAX, &group) || group == 0)
                 return fail(reason, "unexpected-mount");
         }
-        mount_ids[count++] = id;
+        mount_ids[count] = id;
+        parent_ids[count] = parent;
+        indexes[count++] = index;
         seen |= 1U << index;
         line = end + 1;
     }
-    return count == 6 && seen == 63U ? 0 : fail(reason, "mount-inventory-incomplete");
+    if (count != 6 || seen != 63U)
+        return fail(reason, "mount-inventory-incomplete");
+    /* The five virtual mounts must sit directly on the '/' record. Its own
+     * parent number is not assumed (itself on 4.14, possibly hidden elsewhere). */
+    uint64_t root = 0;
+    for (size_t i = 0; i < count; ++i)
+        if (indexes[i] == 0)
+            root = mount_ids[i];
+    for (size_t i = 0; i < count; ++i)
+        if (indexes[i] != 0 && parent_ids[i] != root)
+            return fail(reason, "unexpected-mount");
+    return 0;
 }
+
+#ifdef TITAN_SOURCE_PARSER_TEST
+int titan_source_test_mount_inventory(const char *path, const char **reason)
+{
+    mountinfo_path = path;
+    return mount_inventory(reason);
+}
+#endif
 #endif
 
 static int swap_inventory(const char **reason)

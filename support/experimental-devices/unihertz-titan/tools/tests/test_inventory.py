@@ -39,7 +39,38 @@ class DeviceSelectionTests(unittest.TestCase):
                 inventory.select_device(devices, selected)
 
 
+    def test_usb_selection_never_uses_network_or_emulator_transports(self):
+        usb = "private-usb\tdevice usb:1-1 product:titan transport_id:3\n"
+        network = "192.0.2.10:5555\tdevice product:titan transport_id:4\n"
+        emulator = "emulator-5554\tdevice product:sdk transport_id:5\n"
+        header = "List of devices attached\n"
+        self.assertEqual(inventory.select_usb_device(header + usb + network + emulator, None), "private-usb")
+        for listing, selected in [(header + network, None), (header + emulator, None),
+                                  (header + usb + network, "192.0.2.10:5555"),
+                                  (header + "private-usb\tdevice usb: transport_id:3\n", None)]:
+            with self.subTest(listing=listing, selected=selected), self.assertRaises(ValueError):
+                inventory.select_usb_device(listing, selected)
+        with self.assertRaisesRegex(ValueError, "not ready"):
+            inventory.select_usb_device(header + "private-usb\tunauthorized usb:1-1\n", None)
+
+
 class OutputTests(unittest.TestCase):
+    def test_output_parents_are_private_and_checkouts_or_nix_are_refused(self):
+        previous = os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                base = Path(temporary).resolve()
+                output = inventory.prepare_output(str(base / "new-parent" / "child" / "inventory"))
+                for path in (base / "new-parent", base / "new-parent" / "child", output):
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
+                (base / "workspace" / ".jj").mkdir(parents=True)
+                with self.assertRaisesRegex(ValueError, "jj"):
+                    inventory.prepare_output(str(base / "workspace" / "private"))
+                self.assertFalse((base / "workspace" / "private").exists())
+        finally:
+            os.umask(previous)
+        self.assertTrue(inventory.inside_git_checkout(Path("/nix/store/fixture-output")))
+
     def test_output_is_new_and_private(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = inventory.prepare_output(str(Path(temporary) / "inventory"))
@@ -175,7 +206,7 @@ class AdbBoundaryTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as temporary, patch.object(inventory.subprocess, "run") as run:
                 run.side_effect = [
-                    subprocess.CompletedProcess([], 0, b"List of devices attached\nsecret-id\tdevice\n", b""),
+                    subprocess.CompletedProcess([], 0, b"List of devices attached\nsecret-id\tdevice usb:1-1 transport_id:1\n", b""),
                     subprocess.CompletedProcess([], 0, b"cmd\n", b""),
                 ]
                 output = Path(temporary) / "inventory"
@@ -200,8 +231,8 @@ class AdbBoundaryTests(unittest.TestCase):
 
         def mock_adb(command, **kwargs):
             calls.append(command)
-            if command == ["adb", "devices"]:
-                return subprocess.CompletedProcess(command, 0, b"List of devices attached\nsecret-id\tdevice\n", b"")
+            if command == ["adb", "devices", "-l"]:
+                return subprocess.CompletedProcess(command, 0, b"List of devices attached\nsecret-id\tdevice usb:1-1 transport_id:1\n", b"")
             if command == ["adb", "-s", "secret-id", "features"]:
                 return subprocess.CompletedProcess(command, 0, b"shell_v2\n", b"")
             self.assertEqual(command[:6], ["adb", "-s", "secret-id", "shell", "-T", "-n"])

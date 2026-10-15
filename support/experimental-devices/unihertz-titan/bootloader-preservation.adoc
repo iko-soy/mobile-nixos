@@ -118,8 +118,11 @@ not matching LK source provenance.
 
 The raw FDT is byte-for-byte identical to the FDT inside the preserved installed
 boot image's Android DT table. The existing software-board clue
-`g61v71c2k_dfl_tee` also occurs in the image. No unambiguous LK version/build date
-or runtime load address was established. DTB equality does not show which DTB
+`g61v71c2k_dfl_tee` also occurs in the image. A board-prefixed literal stored next
+to an `LK_VER_TAG` format string is a candidate version tag; its value stays
+private and is not confirmed as the runtime value. A `getvar version-bootloader`
+answer from an authorized entry trial can be compared with it privately. No
+unambiguous LK version/build date or runtime load address was established. DTB equality does not show which DTB
 the bootloader selects or modifies at runtime.
 
 Bounded string inspection found literals including `getvar:`, `boot`,

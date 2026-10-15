@@ -1,0 +1,100 @@
+= Remaining consistent preservation requirements
+
+Research date: 2026-10-15. This record lists what still has to be preserved
+before any later rollback write, and the conditions under which a copy counts as
+consistent. It adds no acquisition and authorizes no phone action. See
+link:backup-catalog.adoc[the backup catalog] for what is already preserved and
+link:recovery-preparation.adoc[the recovery record] for the staged procedure.
+
+== Uncovered regions
+
+The private copies cover 21 of 38 GPT partitions, both eMMC boot areas, both GPT
+windows and two live filesystem backing files. The remaining regions, their
+fixed sizes and the mount state in the saved 2026-10-14 host mount table are:
+
+[cols="1,1,1,3",options="header"]
+|===
+|Partition |Node |Bytes |Saved host mount state
+|`userdata` |`p36` |119878418432 |Writable ext4 at `/userdata`, with bind mounts for `/home`, `/nix`, Android `data`/`cache` and many system state paths
+|`nvcfg` |`p6` |33554432 |Writable ext4 at `/mnt/vendor/nvcfg`, the Android view and the LXC rootfs path
+|`nvdata` |`p7` |67108864 |Writable ext4 at `/mnt/vendor/nvdata`, the Android view and the LXC rootfs path
+|`protect1` |`p9` |8388608 |Writable ext4 at `/mnt/vendor/protect_f`, the Android view and the LXC rootfs path
+|`protect2` |`p10` |9928704 |Writable ext4 at `/mnt/vendor/protect_s`, the Android view and the LXC rootfs path
+|`nvram` |`p25` |67108864 |No host mount
+|`proinfo` |`p13` |3145728 |No host mount
+|`para` |`p3` |524288 |No host mount
+|`expdb` |`p4` |20971520 |No host mount
+|`boot_para` |`p1` |1048576 |No host mount
+|`frp` |`p5` |1048576 |No host mount
+|`metadata` |`p8` |33554432 |No host mount
+|`seccfg` |`p11` |8388608 |No host mount
+|`sec1` |`p12` |2097152 |No host mount
+|`cache` |`p35` |452984832 |No host mount; Android `/cache` paths bind userdata instead
+|`otp` |`p37` |45088768 |No host mount
+|`flashinfo` |`p38` |16777216 |No host mount
+|===
+
+The four mounted calibration/radio filesystems total 118980608 bytes; the twelve
+unmounted regions total 652738560 bytes. These states come from one saved host
+mount table. The Android container's own namespaces and raw block writers were
+not inventoried for these regions, so "no host mount" does not mean unused or
+unchanging. Labels suggest roles; they do not establish formats or uniqueness.
+RPMB is not ordinary block data, has not been opened and is out of scope.
+
+== What counts as a consistent copy
+
+A copy of a region is consistent only when all of the following hold for the
+whole acquisition window:
+
+. *No writers.* No Ubuntu Touch services, LXC/Android container, Android
+  hardware services, modem userspace or NVRAM services are running, and no
+  filesystem on the target is mounted in any namespace. The rescue profile must
+  not start the modem: read `/sys/kernel/ccci/boot` only as recorded in the
+  recovery record, and never open CCCI character devices.
+. *Read-only enforcement.* Every visible block node carries the kernel
+  read-only flag before content reads, as the rescue PID 1 already requires.
+  This does not stop firmware or bootloader writers, so the environment must
+  also not have started them.
+. *Fixed identity.* Each target matches its recorded GPT number, label, start,
+  length and parent disk before and after reading.
+. *Stability.* Raw regions have matching before/after hashes from independent
+  reads. ext4 regions must report a clean state with no pending journal
+  recovery or orphan cleanup; they must not be repaired, replayed or mounted
+  writable to pass. Inspect copies with read-only backing and `ro,noload`.
+. *Verified transfer.* Bytes are length- and hash-verified on the Mac before
+  completion is acknowledged, as the TTR1 transport does.
+. *Retention.* Two verified copies on separate storage. Only the Mac copy exists;
+  the owner has no second destination, so this requirement stays open.
+
+A shutdown or abrupt reset of the live system does not by itself establish
+these conditions. Stable normal-mode hashes of unmounted regions show stability
+during the reads, not absence of writers before or after them.
+
+== Gaps in the current build-only tooling
+
+* The integrated link:usb-pipeline/README.adoc[USB acquisition profile] selects
+  only `userdata`. No fixed raw-region producer exists yet for the small
+  calibration and control regions in the same offline environment.
+* No rescue image has been accepted or booted by the installed bootloader, and
+  the USB ACM path has not been recognized by the Mac. The entry and return
+  route is still unverified; see
+  link:entry-return-trial.adoc[the proposed entry and return trial].
+* The four mounted ext4 regions need a clean-state check like the userdata
+  guard; raw copies of them are small, so a sparse filesystem image is not
+  required.
+
+== Ordering
+
+This sequence keeps the dependencies one-directional:
+
+. A reviewed and separately authorized entry and return trial. It sends no
+  image and needs no offline backup first, because it writes no partition by
+  intent. Its residual risks are listed in the trial proposal.
+. Optionally, before that trial, a fixed normal-mode read of the twelve
+  unmounted regions with independent rereads, like the firmware acquisition.
+  This would give pre-trial private copies for comparison. It is not a
+  consistency claim and needs its own review and the owner's sudo credential;
+  no helper for it exists yet.
+. A reviewed offline acquisition boot that meets the conditions above for
+  `userdata` and all sixteen other regions, with a demonstrated return.
+. Only then any rollback write, separately authorized.

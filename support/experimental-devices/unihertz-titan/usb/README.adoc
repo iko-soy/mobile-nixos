@@ -44,8 +44,9 @@ Cleanup explicitly unbinds with a newline write, closes owned TTY descriptors,
 removes only the fixture's objects and normally unmounts its configfs mount.
 Function removal must follow descriptor closure: the serial function's release
 can wait for open descriptors. No lazy unmount or mount-namespace hiding is used.
-Read-only configfs sealing is a tested phase inside this disposable callback;
-it is not yet a production startup/mount policy.
+This fixture exercises read-only configfs sealing inside its disposable
+callback. The separate production USB acquisition profile implements sealing in
+`usb/owner.c` and requires it through the shared mount policy.
 
 The harness gives each guest a 90-second deadline and a combined 4 MiB console
 and QEMU diagnostic bound. Guest polling has shorter monotonic deadlines, but

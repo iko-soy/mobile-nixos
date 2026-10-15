@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import stat
 import struct
 import sys
@@ -207,6 +208,68 @@ class AcquisitionTests(unittest.TestCase):
             if target == "system.img": raise OSError("Synthetic publication failure")
             return original(source, target, **kwargs)
         with mock.patch.object(tool.os, "link", side_effect=fail_second), self.assertRaises(OSError):
+            tool.acquire(self.remote, self.output)
+        self.assert_unpublished()
+        for label in self.remote.data:
+            self.assertEqual((self.output / f"{label}.img.part").read_bytes(), self.remote.data[label])
+
+    def test_failure_after_publication_commit_keeps_the_verified_files(self):
+        for failing_name in ("vendor.img.part", "manifest.json.part"):
+            with self.subTest(after=failing_name):
+                if self.output.exists():
+                    shutil.rmtree(self.output)
+                original, failed = os.unlink, []
+
+                def unlink(path, *args, **kwargs):
+                    result = original(path, *args, **kwargs)
+                    if path == failing_name and not failed:
+                        failed.append(path)
+                        raise OSError("Synthetic failure after the commit point")
+                    return result
+
+                with mock.patch.object(tool.os, "unlink", side_effect=unlink), \
+                        self.assertRaises(tool.PublicationRetained):
+                    tool.acquire(self.remote, self.output)
+                self.assertEqual(failed, [failing_name])
+                for label in self.remote.data:
+                    names = [self.output / f"{label}.img", self.output / f"{label}.img.part"]
+                    kept = [path for path in names if path.exists()]
+                    self.assertTrue(kept, label)
+                    for path in kept:
+                        self.assertEqual(path.read_bytes(), self.remote.data[label])
+                # The retained set must not look complete: only the .part name
+                # of the manifest remains.
+                self.assertFalse((self.output / "manifest.json").exists())
+                self.assertTrue((self.output / "manifest.json.part").is_file())
+
+    def test_rollback_keeps_bytes_when_a_part_name_vanished(self):
+        original = tool.PrivateOutput.check_published
+
+        def remove_part_then_check(output, links):
+            if links == 2:
+                os.unlink("vendor.img.part", dir_fd=output.fd)
+            return original(output, links)
+
+        with mock.patch.object(tool.PrivateOutput, "check_published", autospec=True,
+                               side_effect=remove_part_then_check), self.assertRaises(tool.AcquisitionError):
+            tool.acquire(self.remote, self.output)
+        for label in self.remote.data:
+            kept = [path for path in (self.output / f"{label}.img", self.output / f"{label}.img.part") if path.exists()]
+            self.assertTrue(kept, label)
+            for path in kept:
+                self.assertEqual(path.read_bytes(), self.remote.data[label])
+        self.assertFalse((self.output / "manifest.json").exists())
+
+    def test_checks_before_the_commit_point_roll_back_but_keep_parts(self):
+        original = tool.PrivateOutput.check_published
+
+        def fail_first_check(output, links):
+            if links == 2:
+                raise tool.AcquisitionError("Synthetic pre-commit check failure")
+            return original(output, links)
+
+        with mock.patch.object(tool.PrivateOutput, "check_published", autospec=True, side_effect=fail_first_check), \
+                self.assertRaisesRegex(tool.AcquisitionError, "pre-commit"):
             tool.acquire(self.remote, self.output)
         self.assert_unpublished()
         for label in self.remote.data:

@@ -1,6 +1,7 @@
 """Synthetic sockets/files/pipes/PTYs only; optionally exercise the built C sender."""
 
 import contextlib
+import errno
 import hashlib
 import importlib.util
 import io
@@ -95,6 +96,24 @@ def normal_peer(peer, payload=PATTERN, *, receipt="complete", observed=None, fra
         send(packet(6, sequence, nonce, bytes(40)))
     elif receipt == "stale":
         send(packet(6, sequence, bytes(32), end))
+
+
+def reject_after(build):
+    """Send one invalid sequence, then hold the peer open until the receiver closes.
+
+    Holding the connection prevents a disconnect or deadline from satisfying a
+    negative case: the receiver must reject the bytes themselves.
+    """
+    def handler(peer):
+        peer.sendall(build(hello(peer)))
+        try:
+            while peer.recv(65536):
+                pass
+        except ConnectionResetError:
+            # Linux resets a Unix stream socket closed with unread input; any
+            # frame queued before that close is still delivered first.
+            pass
+    return handler
 
 
 def exchange(output, handler, *, timeout=2):
@@ -208,47 +227,64 @@ class ReceiverTests(unittest.TestCase):
 
     def test_invalid_headers_and_begin_fields_fail_without_resynchronization(self):
         variants = [
-            lambda n: packet(2, 0, n, magic=b"BAD!"),
-            lambda n: packet(2, 0, n, reserved=b"\0\1\0"),
-            lambda n: packet(2, 0, bytes(32)),
-            lambda n: packet(2, 1, n),
-            lambda n: packet(99, 0, n),
-            lambda n: packet(2, 0, n, length=32769),
-            lambda n: packet(2, 0, n, b"short"),
-            lambda n: begin(n, 0, effective=LIMIT + 1),
-            lambda n: begin(n, 0, effective=0),
-            lambda n: begin(n, LIMIT + 1),
-            lambda n: begin(n, 0, source_kind=2),
-            lambda n: begin(n, 0, source_kind=1),
-            lambda n: begin(n, 0, label=b"wrong"),
-            lambda n: packet(7, 0, n, struct.pack("!I", 0)),
+            (lambda n: packet(2, 0, n, magic=b"BAD!"), "Invalid frame magic, reserved bytes or session nonce."),
+            (lambda n: packet(2, 0, n, reserved=b"\0\1\0"), "Invalid frame magic, reserved bytes or session nonce."),
+            (lambda n: packet(2, 0, bytes(32)), "Invalid frame magic, reserved bytes or session nonce."),
+            (lambda n: packet(2, 1, n), "Unexpected frame type or sequence."),
+            (lambda n: packet(99, 0, n), "Unexpected frame type or sequence."),
+            (lambda n: packet(2, 0, n, length=32769), "Frame payload exceeds the protocol bound."),
+            (lambda n: packet(2, 0, n, b"short"), "Truncated BEGIN payload."),
+            (lambda n: begin(n, 0, effective=LIMIT + 1), "Invalid effective limit or source kind."),
+            (lambda n: begin(n, 0, effective=0), "Invalid effective limit or source kind."),
+            (lambda n: begin(n, LIMIT + 1), "Invalid source length or declared length exceeds the effective limit."),
+            (lambda n: begin(n, 0, source_kind=2), "Invalid effective limit or source kind."),
+            (lambda n: begin(n, 0, source_kind=1), "Invalid source length or declared length exceeds the effective limit."),
+            (lambda n: begin(n, 0, label=b"wrong"), "BEGIN label does not match the independent local label."),
+            (lambda n: packet(7, 0, n, struct.pack("!I", 0)), "Malformed remote error frame."),
         ]
-        for index, variant in enumerate(variants):
+        for index, (variant, expected) in enumerate(variants):
             with self.subTest(case=index), tempfile.TemporaryDirectory() as temporary:
                 output = Path(temporary) / "transfer"
-                _, error = exchange(output, lambda peer: peer.sendall(variant(hello(peer))))
-                self.assertIsNotNone(error)
-                self.assert_incomplete(output)
+                _, error = exchange(output, reject_after(variant))
+                self.assertIsInstance(error, receiver.TransferError)
+                self.assertEqual(str(error), expected)
+                self.assertEqual(self.assert_incomplete(output)["stored_bytes"], 0)
 
     def test_data_sequence_lengths_limits_hashes_and_declared_length(self):
         variants = [
-            lambda n: begin(n, 1) + packet(3, 2, n, b"x"),
-            lambda n: begin(n, 1) + packet(3, 1, n),
-            lambda n: begin(n, 1) + packet(3, 1, n, length=32769),
-            lambda n: begin(n, receiver.UINT64_MAX, source_kind=1, effective=1) + packet(3, 1, n, b"xx"),
-            lambda n: begin(n, 1) + packet(3, 1, n, b"xx"),
-            lambda n: begin(n, 0) + packet(4, 1, n, bytes(39)),
-            lambda n: begin(n, 0) + packet(4, 1, n, struct.pack("!Q32s", 1, hashlib.sha256(b"").digest())),
-            lambda n: begin(n, 0) + packet(4, 1, n, bytes(40)),
-            lambda n: begin(n, 2) + packet(3, 1, n, b"x") + packet(4, 2, n, struct.pack("!Q32s", 1, hashlib.sha256(b"x").digest())),
-            lambda n: begin(n, 0) + packet(7, 1, n, struct.pack("!I", 5)),
+            (lambda n: begin(n, 1) + packet(3, 2, n, b"x"), "Unexpected frame type or sequence.", 0),
+            (lambda n: begin(n, 1) + packet(3, 1, n), "Empty DATA or forbidden sequence wrap.", 0),
+            (lambda n: begin(n, 1) + packet(3, 1, n, length=32769), "Frame payload exceeds the protocol bound.", 0),
+            (lambda n: begin(n, receiver.UINT64_MAX, source_kind=1, effective=1) + packet(3, 1, n, b"xx"),
+             "DATA exceeds the effective local byte limit.", 0),
+            (lambda n: begin(n, 1) + packet(3, 1, n, b"xx"), "DATA exceeds the declared regular-file length.", 0),
+            (lambda n: begin(n, 0) + packet(4, 1, n, bytes(39)), "END must contain exactly 40 bytes.", 0),
+            (lambda n: begin(n, 0) + packet(4, 1, n, struct.pack("!Q32s", 1, hashlib.sha256(b"").digest())), "END count/hash or declared regular-file length did not match.", 0),
+            (lambda n: begin(n, 0) + packet(4, 1, n, bytes(40)), "END count/hash or declared regular-file length did not match.", 0),
+            (lambda n: begin(n, 2) + packet(3, 1, n, b"x")
+             + packet(4, 2, n, struct.pack("!Q32s", 1, hashlib.sha256(b"x").digest())), "END count/hash or declared regular-file length did not match.", 1),
+            (lambda n: begin(n, 0) + packet(7, 1, n, struct.pack("!I", 5)), "Sender reported error code 5.", 0),
         ]
-        for index, variant in enumerate(variants):
+        for index, (variant, expected, stored) in enumerate(variants):
             with self.subTest(case=index), tempfile.TemporaryDirectory() as temporary:
                 output = Path(temporary) / "transfer"
-                _, error = exchange(output, lambda peer: peer.sendall(variant(hello(peer))))
-                self.assertIsNotNone(error)
-                self.assert_incomplete(output)
+                _, error = exchange(output, reject_after(variant))
+                self.assertIsInstance(error, receiver.TransferError)
+                self.assertEqual(str(error), expected)
+                self.assertEqual(self.assert_incomplete(output)["stored_bytes"], stored)
+
+    def test_data_frame_that_would_consume_the_free_space_reserve_is_refused(self):
+        class Space:
+            f_frsize = 1
+            f_bavail = receiver.FREE_RESERVE + receiver.REPORT_RESERVE + 100
+
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(receiver.os, "statvfs", return_value=Space()):
+            output = Path(temporary) / "transfer"
+            _, error = exchange(output, reject_after(lambda n: begin(n, 101) + packet(3, 1, n, b"x" * 101)))
+            self.assertIsInstance(error, receiver.TransferError)
+            self.assertEqual(str(error), "Insufficient free storage to preserve the 64 MiB reserve.")
+            self.assertEqual(self.assert_incomplete(output)["stored_bytes"], 0)
 
     def test_early_eof_and_absolute_timeout_preserve_staging(self):
         handlers = (
@@ -284,6 +320,58 @@ class ReceiverTests(unittest.TestCase):
                 self.assertIsNotNone(error)
                 self.assertEqual(observed, [b""])
                 self.assert_incomplete(output)
+
+    def test_payload_full_flush_precedes_ack_and_only_unsupported_falls_back(self):
+        # Simulate the macOS F_FULLFSYNC request on every host and record which
+        # descriptors are flushed, by inode, relative to the observed ACK.
+        command = getattr(receiver.fcntl, "F_FULLFSYNC", 51)
+        real_fcntl, real_fsync = receiver.fcntl.fcntl, receiver.os.fsync
+        for mode in ("full", "unsupported", "media-failure"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "transfer"
+                events = []
+
+                def payload_inode():
+                    partial = output / "payload.partial"
+                    return partial.stat().st_ino if partial.exists() else None
+
+                def fake_fcntl(fd, cmd, *args):
+                    if cmd != command:
+                        return real_fcntl(fd, cmd, *args)
+                    inode = os.fstat(fd).st_ino
+                    events.append(("full", inode))
+                    if mode == "unsupported":
+                        raise OSError(errno.ENOTSUP, "fixture: unsupported")
+                    if mode == "media-failure" and inode == payload_inode():
+                        raise OSError(errno.EIO, "fixture: media flush failed")
+                    return 0
+
+                def fake_fsync(fd):
+                    events.append(("fsync", os.fstat(fd).st_ino))
+                    return real_fsync(fd)
+
+                observed = events if mode != "media-failure" else []
+                receipt = "expect-no-ack" if mode == "media-failure" else "complete"
+                with patch.object(receiver.fcntl, "F_FULLFSYNC", command, create=True), \
+                        patch.object(receiver.fcntl, "fcntl", side_effect=fake_fcntl), \
+                        patch.object(receiver.os, "fsync", side_effect=fake_fsync):
+                    report, error = exchange(output, lambda peer: normal_peer(peer, receipt=receipt, observed=observed))
+                if mode == "media-failure":
+                    self.assertIsInstance(error, OSError)
+                    self.assertEqual(error.errno, errno.EIO)
+                    self.assertEqual(observed, [b""])
+                    self.assert_incomplete(output)
+                    continue
+                self.assertIsNone(error)
+                self.assertTrue(report["completed"])
+                payload = (output / "payload.bin").stat().st_ino
+                directory = output.stat().st_ino
+                ack = next(index for index, event in enumerate(events) if event[0] == 5)
+                kind = "full" if mode == "full" else "fsync"
+                self.assertIn((kind, payload), events[:ack])
+                self.assertIn((kind, directory), events[:ack])
+                if mode == "full":
+                    self.assertNotIn(("fsync", payload), events)
 
     def test_independent_readback_detects_actual_saved_file_corruption(self):
         original = receiver.readback
@@ -579,8 +667,16 @@ class SenderTests(unittest.TestCase):
                         else:
                             host.close()
                     stdout, stderr = process.communicate(timeout=4)
-                    self.assertNotEqual(process.returncode, 0, stderr)
+                    # ERR_PROTOCOL, not a deadline or I/O failure after streaming.
+                    self.assertEqual(process.returncode, 3, stderr)
                     self.assertEqual(stdout, b"")
+                    if mode == "bad-hello":
+                        try:
+                            answered = host.recv(1)
+                        except ConnectionResetError:
+                            # The sender closed with the rejected HELLO unread.
+                            answered = b""
+                        self.assertEqual(answered, b"", "sender answered an invalid HELLO")
                 finally:
                     if process.poll() is None:
                         process.kill()

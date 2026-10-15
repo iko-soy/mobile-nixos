@@ -21,4 +21,9 @@ enum titan_mount_phase {
  */
 int titan_mount_inventory(enum titan_mount_phase phase, const char **reason);
 
+#ifdef TITAN_MOUNT_POLICY_PARSER_TEST
+/* Host parser fixtures only: read a synthetic inventory instead. */
+void titan_mount_policy_test_path(const char *path);
+#endif
+
 #endif

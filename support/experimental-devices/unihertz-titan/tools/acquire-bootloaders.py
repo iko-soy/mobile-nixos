@@ -261,6 +261,10 @@ def remote_script(mode, label=""):
     return "/usr/bin/python3 -I -S -B -c " + shlex.quote(program)
 
 
+class PublicationRetained(AcquisitionError):
+    """A check failed after the commit point; published copies were kept."""
+
+
 def require(condition, message="Bootloader metadata did not match the fixed profile."):
     if not condition:
         raise AcquisitionError(message)
@@ -448,8 +452,41 @@ class PrivateOutput:
             os.fsync(stream.fileno())
         require(self.saved_hash("manifest.json.part", len(data)) == hashlib.sha256(data).hexdigest())
 
+    def withdraw(self, name):
+        """Remove a published name only while its .part link keeps the bytes."""
+        pending = name + ".part"
+        try:
+            if inode(os.stat(name, dir_fd=self.fd, follow_symlinks=False)) != self.owned[name]:
+                return
+            try:
+                os.link(name, pending, src_dir_fd=self.fd, dst_dir_fd=self.fd, follow_symlinks=False)
+            except FileExistsError:
+                pass
+            if inode(os.stat(pending, dir_fd=self.fd, follow_symlinks=False)) == self.owned[name]:
+                os.unlink(name, dir_fd=self.fd)
+        except OSError:
+            pass
+
+    def demote_manifest(self):
+        """After the commit point, keep the manifest only as manifest.json.part."""
+        self.withdraw("manifest.json")
+        try:
+            os.fsync(self.fd)
+        except OSError:
+            pass
+
+    def check_published(self, links):
+        for name in self.published:
+            metadata = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
+            require(inode(metadata) == self.owned[name] and stat.S_ISREG(metadata.st_mode)
+                    and metadata.st_uid == os.getuid() and metadata.st_nlink == links
+                    and stat.S_IMODE(metadata.st_mode) == 0o600 and metadata.st_size == self.sizes[name + ".part"]
+                    and metadata.st_mtime_ns == self.modified[name + ".part"],
+                    "Published file identity or privacy changed.")
+
     def publish(self):
         self.recheck()
+        committed = False
         try:
             for name in ("lk.img", "lk2.img", "manifest.json"):
                 pending = name + ".part"
@@ -457,25 +494,29 @@ class PrivateOutput:
                 self.owned[name] = self.owned[pending]
                 self.published.append(name)
             os.fsync(self.fd)
+            # Check every published name while its .part name still exists, so
+            # a failure up to here can roll back without losing verified bytes.
+            self.recheck()
+            self.check_published(links=2)
+            committed = True
             for name in self.published:
                 os.unlink(name + ".part", dir_fd=self.fd)
             os.fsync(self.fd)
             os.fsync(self.parent_fd)
             self.recheck()
+            self.check_published(links=1)
+        except BaseException as error:
+            if committed:
+                # Some .part names may already be gone, leaving the published
+                # names as the only copies: never delete an image after this
+                # point. Demote only the manifest name so that the retained set
+                # cannot be taken for a completed acquisition.
+                self.demote_manifest()
+                raise PublicationRetained(
+                    "The verified files were published and kept, but a final check failed; "
+                    "inspect them before relying on this set.") from error
             for name in self.published:
-                metadata = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
-                require(inode(metadata) == self.owned[name] and stat.S_ISREG(metadata.st_mode)
-                        and metadata.st_uid == os.getuid() and metadata.st_nlink == 1
-                        and stat.S_IMODE(metadata.st_mode) == 0o600 and metadata.st_size == self.sizes[name + ".part"]
-                        and metadata.st_mtime_ns == self.modified[name + ".part"],
-                        "Published file identity or privacy changed.")
-        except BaseException:
-            for name in self.published:
-                try:
-                    if inode(os.stat(name, dir_fd=self.fd, follow_symlinks=False)) == self.owned[name]:
-                        os.unlink(name, dir_fd=self.fd)
-                except OSError:
-                    pass
+                self.withdraw(name)
             raise
 
     def close(self):
@@ -495,6 +536,8 @@ def acquire(remote, requested):
             "transport": "adb-shell-v2-no-pty-framed-status", "kernel_map": baseline,
             "scope": "fixed lk and lk2 only; observed read agreement, not an atomic snapshot or recovery validation",
             "bytes_preserved": 2 * IMAGE_BYTES, "partitions": {},
+            "helper_sources": transport.source_digests("acquire-bootloaders.py", "acquire-partitions.py",
+                                                       "collect-inventory.py"),
             "validation": {"atomic_snapshot": False, "authentication_performed": False,
                            "restoration_tested": False, "device_changes_performed": False}}
         for label in TARGETS:
@@ -542,8 +585,8 @@ def main(argv=None):
         # Validate the requested location before transport or credential work.
         candidate = private_path(args.output)
         require(not os.path.lexists(candidate), "Output must be a new private directory.")
-        devices, _, _ = transport.run_bounded([args.adb, "devices"], 65536, args.timeout)
-        serial = transport.inventory.select_device(transport.inventory.parse_devices(devices.decode("ascii")), args.serial)
+        devices, _, _ = transport.run_bounded([args.adb, "devices", "-l"], 65536, args.timeout)
+        serial = transport.inventory.select_usb_device(devices.decode("ascii"), args.serial)
         remote = transport.Remote(args.adb, serial, args.timeout)
         remote.check_protocol()
         # This also verifies isolated Python availability and complete metadata
@@ -557,6 +600,10 @@ def main(argv=None):
         print(f"Verified lk and lk2: 2097152 private bytes with saved-file and repeat phone SHA-256 agreement. Output: {output}")
         print("Observed read agreement only; no atomic snapshot or restoration test was established.")
         return 0
+    except PublicationRetained as error:
+        print(f"Bootloader acquisition stopped after publication: {error}", file=sys.stderr)
+        print("The published files were kept; this run is not reported as complete.", file=sys.stderr)
+        return 1
     except AcquisitionError as error:
         # These messages are fixed local text or numeric transport status; no
         # subprocess stderr, remote metadata, password or raw image is included.

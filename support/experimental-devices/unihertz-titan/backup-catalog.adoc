@@ -30,7 +30,8 @@ but requires only space for the catalog and does not expand the images.
 The backup root, acquisition directories and output directory must be owned by
 the current user with mode `0700`. Input images and manifests must be regular
 files with mode `0600` and one link. Keep the tree outside Git and the Nix store. The output
-parent must already exist, and the output directory must be new.
+parent must already exist, be owned by the current user with mode `0700`, and lie
+outside Git, jj and the Nix store; the output directory must be new.
 
 [source,sh]
 ----
@@ -68,6 +69,11 @@ The Mac Nix target passed 265 tests and the boot-packaging fixture. Eighteen new
 synthetic catalog tests cover bounded hashing, malformed metadata, GPT/report
 mismatches, unsafe paths and permissions, input changes and failed publication
 cleanup. These checks verify the host tool, not a restoration procedure.
+
+Two further passes on 2026-10-15, before and after the audit's tool changes,
+wrote new private catalogs. Both again matched all 27 payloads, and their
+content equals the first catalog apart from timestamps. A new test pins the
+value-free key shapes of the historical manifests that the catalog revalidates.
 
 == What a passing catalog establishes
 

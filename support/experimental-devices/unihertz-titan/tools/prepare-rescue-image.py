@@ -24,8 +24,11 @@ KERNEL_BYTES = 9537534
 KERNEL_SHA256 = "f11ae9a7d90cdd9f1bad0b59b79b38c83ff9fd9f11133b119d480a60e9621787"
 DTB_BYTES = 112135
 DTB_SHA256 = "51a6baed284c9caaec627cf402c4925db133856a4eecbaa87cfefe070915ce69"
-RAMDISK_BYTES = 3054712
-RAMDISK_SHA256 = "27d2a3da8f23391a4d280eb37fd145a8f63b13a6a051b969a23bcac6ca6aed88"
+# Corrected 2026-10-15 build: accepts mount ID 0, requires the complete measured
+# eMMC block-device set and retries devices still registering. Earlier builds
+# (3054712 bytes 27d2a3da..., 3055165 bytes 65ac5adf...) must not be repackaged.
+RAMDISK_BYTES = 3055279
+RAMDISK_SHA256 = "0ed6d547c282b8a93d206d747cdb2b5535a7175726265f04e8085fb62671eb74"
 SOURCE_CMDLINE = (
     "bootopt=64S3,32N2,64N2 buildvariant=user "
     "systempart=/dev/disk/by-partlabel/system halium_lvm_vg=ubports "

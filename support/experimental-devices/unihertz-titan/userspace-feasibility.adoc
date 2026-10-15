@@ -1,0 +1,142 @@
+= Kernel and userspace feasibility record
+:kernel-src: https://gitlab.com/ubports/porting/community-ports/android10/unihertz-titan/kernel-alps-mt6771/-/blob/fc94895e6dccf5f8f2cc34abc0255e2a3e4edebe
+:sd: https://github.com/systemd/systemd/blob
+:np: https://github.com/NixOS/nixpkgs/blob
+
+Research date: 2026-10-15. This record narrows the M2 userspace question for the
+installed Ubuntu Touch kernel. It is based on upstream documentation, Nix
+evaluation, pinned sources and earlier read-only phone measurements. No NixOS
+system or generated image has booted on the Titan; nothing here is a boot result.
+
+== Question
+
+Can a Mobile NixOS userspace run on the installed reconstructed Linux
+`4.14.141+` kernel (runtime configuration SHA-256
+`1113327761998175c8cc78dbce10ac23c7fed8a8418f1072e553e8c0acc4286b`) without
+kernel work, and if so, with which package set?
+
+== Evidence and its type
+
+[cols="2,1,3",options="header"]
+|===
+|Evidence |Type |Result
+|link:hardware-inventory.adoc#_direct_kernel_api_measurements[Direct API probes], 2026-10-14
+|Live read-only observation
+|`pidfd_open`, `close_range`, `name_to_handle_at` and `openat2` return `ENOSYS`
+with seccomp disabled; `statx` returns neither `STATX_MNT_ID` nor a supported
+`STATX_ATTR_MOUNT_ROOT`.
+|link:README.adoc#_first_userspace_configuration_audit[Runtime configuration audit]
+|Configuration comparison
+|`FHANDLE=n`, `CGROUP_PIDS=n`, ACL/xattr and nftables gaps; configuration
+changes cannot add the missing syscall implementations.
+|link:hardware-inventory.adoc#runtime-cgroups[cgroup observation]
+|Live read-only observation
+|The cgroup v2 root advertises only `memory`.
+|Active Ubuntu Touch manager
+|Live read-only observation
+|`255.4-1ubuntu8.17` runs as PID 1 on this kernel. This demonstrates Ubuntu's
+patched build and configuration, not a NixOS package set.
+|`nix-instantiate --eval` of `pkgs.nix`
+|Evaluation
+|The repository pin is `nixos-26.11pre1031299.0bb7ec54c848`; `systemd` and
+`systemdMinimal` are both version `261`.
+|Upstream systemd `README` at each release tag
+|Upstream documentation
+|Kernel baselines in the table below.
+|===
+
+== Upstream systemd kernel baselines
+
+Below the minimum baseline, upstream states that the version is not supported
+and lacks required functionality. Below the recommended baseline, it sets the
+`old-kernel` taint and "will most likely still function", with limited support.
+
+[cols="1,1,1,3",options="header"]
+|===
+|systemd |Minimum |Recommended |Linux 4.14
+|link:{sd}/v252/README[252]–link:{sd}/v256/README[256] |3.15 |4.15 |Above minimum, below recommendation
+|link:{sd}/v257/README[257] |3.15 |5.4 |Above minimum, below recommendation
+|link:{sd}/v258/README[258]–link:{sd}/v259/README[259] |5.4 |5.7 |Unsupported
+|link:{sd}/v260/README[260]–link:{sd}/v261/README[261] |5.10 |5.14 |Unsupported
+|===
+
+The v261 minimum explicitly covers pidfd (5.4), `STATX_ATTR_MOUNT_ROOT` (5.8),
+`close_range()` (5.9) and `STATX_MNT_ID` (5.10), all absent in the measurements
+above. Versions 255, 257 and 261 also list `CONFIG_FHANDLE` as a required option.
+The running Ubuntu Touch manager shows that this listing is not an immediate
+PID 1 failure for Ubuntu's 255 build; it does not show which udev, mount or
+service operations degrade.
+
+== Package sets and support status
+
+Branch heads were queried on 2026-10-15. Support end dates for 25.05, 25.11 and
+26.05 are from the official
+link:https://nixos.org/blog/announcements/2026/nixos-2605/[NixOS release announcements];
+the earlier dates are from the link:https://endoflife.date/nixos[endoflife.date]
+summary of the same schedule.
+
+[cols="1,1,1,2",options="header"]
+|===
+|Package set |systemd |Supported until |Relation to the installed kernel
+|link:{np}/b134951a4c9f3c995fd7be05f3243f8ecd65d798/pkgs/os-specific/linux/systemd/default.nix[NixOS 24.05] |255.9 |2024-12-31 |Above minimum; ended
+|link:{np}/50ab793786d9de88ee30ec4e4c24fb4236fc2674/pkgs/os-specific/linux/systemd/default.nix[NixOS 24.11] |256.10 |2025-06-30 |Above minimum; ended
+|link:{np}/ac62194c3917d5f474c1a844b6fd6da2db95077d/pkgs/os-specific/linux/systemd/default.nix[NixOS 25.05] |257.10 |2025-12-31 |Above minimum; ended
+|link:{np}/b6018f87da91d19d0ab4cf979885689b469cdd41/pkgs/os-specific/linux/systemd/default.nix[NixOS 25.11] |258.7 |2026-06-30 |Below minimum; ended
+|link:{np}/a033e66ab94a6bedf2c3d58d93a36319d3cbbbaf/pkgs/os-specific/linux/systemd/default.nix[NixOS 26.05] |260.5 |2026-12-31 |Below minimum
+|Repository pin (unstable) |261 |Rolling |Below minimum
+|===
+
+The repository's own Nixpkgs pin history maps to these systemd versions:
+
+[cols="1,2,1",options="header"]
+|===
+|Mobile NixOS commit |Pinned channel snapshot |systemd
+|`fa0c9024e822` (2024-12-19) |`nixos-25.05beta723344.d3c42f187194` |256.8
+|`66b3ba073446` (2025-05-24) |`nixos-25.11pre804993.063f43f2dbde` |257.5
+|`4d90c64e742e` (2025-08-02) |`nixos-25.11pre833752.fc02ee70efb8` |257.6
+|`37c3589c414a` (2026-02-16) |`nixos-26.05pre940249.00c21e4c93d9` |258.3
+|`466f91842d2d` (2026-07-11) |`nixos-26.11pre1031299.0bb7ec54c848` |261
+|===
+
+== Findings
+
+. *Current userspace on the installed kernel: not viable without kernel work.*
+  Every currently supported NixOS package set uses a systemd whose documented
+  minimum baseline excludes Linux 4.14. The direct probes confirm several of
+  the missing baseline interfaces, and the v261 source references in the API
+  record show hard failures in path traversal, child tracking and service
+  execution. Version 260 was not separately traced.
+  Stage 1 uses `systemdMinimal` of the same version, so replacing only stage 2
+  does not avoid the gap.
+. *Older userspace: possible experiment, not a support path.* Only package sets
+  with systemd 257 or older place 4.14 above the minimum baseline, and all have
+  passed their support periods. The last such repository pin is `4d90c64e742e`
+  (systemd 257.6), an unstable snapshot. Version 257 recommends 5.4 and
+  255/256 recommend 4.15, so even these run tainted and with reduced
+  functionality. Ubuntu Touch's working 255 manager makes a bounded boot
+  experiment plausible; it does not validate a NixOS configuration, udev rules,
+  mount handling or service isolation. Any such experiment needs the explicit
+  maintenance/security assessment required by the porting plan.
+. *Kernel backports: open-ended.* Meeting the v260/v261 minimum would require at
+  least pidfd, `close_range()`, `statx` mount-ID and mount-root support, the
+  mount API and other post-4.14 interfaces in the reconstructed vendor tree, in
+  addition to configuration changes. This is substantial kernel development on
+  an unmaintained Android 4.14 base.
+. *Native kernel route: consistent with current userspace and upstream policy.*
+  A modern MT6771 kernel removes the baseline conflict but needs board
+  bring-up; the porting plan's N0 audit applies. The recovery prerequisites
+  below are shared by both routes.
+
+== Recommendation for decision D1
+
+Do not plan M2 around the current package set on the installed 4.14 kernel.
+For sustained work, prefer the native route (N0/N1). A downstream boot on the
+old kernel is justified only as a separately bounded diagnostic experiment with
+an explicitly unsupported package set (systemd 257 or older), isolated from the
+current tree's assumptions, and only after the recovery gates in
+link:recovery-preparation.adoc[the recovery record] are met. The owner records
+the final D1 decision; this record supplies the evidence for it.
+
+Evidence that would change this assessment: a maintained package set whose
+systemd supports 4.14, verified kernel backports passing the systemd test suite
+on the Titan, or hardware results showing that the native route is blocked.

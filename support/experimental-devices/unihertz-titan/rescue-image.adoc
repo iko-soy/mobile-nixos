@@ -1,7 +1,9 @@
 = Private rescue boot-image envelope
 
 This local packaging experiment combines the preserved installed boot image's
-kernel and DTB with the separately tested USB acquisition ramdisk. It creates
+kernel and DTB with the separately reviewed AArch64 USB acquisition ramdisk. An
+x86_64 VM-test variant of that ramdisk's sources passed its disposable VM cases;
+the AArch64 binaries themselves ran only qemu-user refusal checks. It creates
 an unsigned Android v2 image for inspection. It supplies no phone command,
 bootloader acceptance evidence, installation procedure or recovery guarantee.
 No generated image has booted on the Titan, and this does not boot NixOS.
@@ -11,8 +13,11 @@ No generated image has booted on the Titan, and this does not boot NixOS.
 `tools/prepare-rescue-image.py` accepts only the recorded 33554432-byte installed
 boot image with SHA-256
 `6829a8bcaa696a6fe283184a874450357dd81e7e203eedaf79329bdc55745e83`
-and the 3054712-byte USB acquisition ramdisk with SHA-256
-`27d2a3da8f23391a4d280eb37fd145a8f63b13a6a051b969a23bcac6ca6aed88`.
+and the corrected 3055279-byte USB acquisition ramdisk with SHA-256
+`0ed6d547c282b8a93d206d747cdb2b5535a7175726265f04e8085fb62671eb74`. The earlier
+3054712-byte build (`27d2a3da...`) contains the mount-ID-0 and zram defects found
+by the 2026-10-15 audit; an intermediate corrected build (`65ac5adf...`) lacked
+the later readiness and re-guard changes. Neither is accepted.
 These constants select reviewed inputs; there is no runtime hash, source-profile
 or command-line override. A future ramdisk build requires a reviewed profile
 update. Matching a digest establishes byte identity, not hardware suitability.
@@ -32,8 +37,10 @@ python3 support/experimental-devices/unihertz-titan/tools/prepare-rescue-image.p
 
 The output `UNTESTED-UNSIGNED-rescue.img` ends after the page-aligned DTB. It is
 not padded to partition size and has no AVB footer, vbmeta block or signature.
-The accompanying manifest records inputs, sections, command-line policy and
-saved-image verification. Keep these files private with the retained originals.
+The accompanying manifest records inputs, sections, command-line policy and the
+expected image hash; the helper verifies the saved bytes by readback before
+publishing, but that readback result is not a manifest field. Keep these files
+private with the retained originals.
 
 == Preserved fields and changed startup arguments
 
@@ -55,9 +62,15 @@ bootopt=64S3,32N2,64N2 buildvariant=user security=apparmor rodata=0 rdinit=/init
 Ubuntu Touch's `systempart` and `halium_lvm_vg` arguments are removed. The
 independent ramdisk's `/init` is selected explicitly. `rodata=0` is retained as
 an inherited vendor-kernel compatibility assumption; its necessity has not been
-demonstrated. `panic=0` requests no ordinary panic-timer reboot, overriding the
-kernel's configured one-second default. It does not disable or validate vendor
-watchdogs, firmware resets, charging behavior or power failure handling.
+demonstrated. `panic=0` requests no ordinary panic-timer reboot, but it does not
+keep this kernel halted. With the preserved configuration
+(`CONFIG_MTK_AEE_IPANIC=y`), the pinned vendor exception handler registers panic
+and oops notifiers that request an immediate watchdog reset before the panic
+timeout is consulted. This is source and configuration analysis, not a hardware
+observation. How the bootloader treats that exception reset is unknown,
+including possible dump writes to regions without a private copy, such as
+`expdb`, and whether it boots the same image again. `panic=0` also does not
+address charging behavior or power failure handling.
 
 The unchanged DTB also contains `/chosen/bootargs`:
 
@@ -95,9 +108,16 @@ deliberately does not satisfy that inspector's `--check-titan` requirement for
 the Ubuntu Touch reference package's appended footer. Do not relax that existing
 profile or treat its expected rejection as a malformed raw boot envelope.
 
-The private Mac packaging run produced 12707840 bytes with SHA-256
-`87caa6956fb512d61d466fca6b3e92c524480c5e921fbb18656743e6aecae5d5`.
-A separate invocation of the pinned LineageOS `mkbootimg.py` at revision
+The first private Mac packaging run produced 12707840 bytes with SHA-256
+`87caa6956fb512d61d466fca6b3e92c524480c5e921fbb18656743e6aecae5d5`. It embeds the
+defective `27d2a3da...` ramdisk: it would stop at its first mount check on the
+Titan and must not be used. It is retained privately only as historical
+evidence. On 2026-10-15 the helper repackaged the final corrected ramdisk, also
+12707840 bytes, with SHA-256
+`52f48e749024c97a0582b718b6c5188c27eb8e2fcdd5553205e59d42a2923dd3`; an
+intermediate envelope (`694869a4...`) from the superseded `65ac5adf...` ramdisk is
+retained privately only as evidence. For each envelope a separate invocation of
+the pinned LineageOS `mkbootimg.py` at revision
 `40a19c4c5ffe8b86c6c61318c8aa4ffe35d6e7ad` produced identical bytes from the
 same preserved kernel, DTB and ramdisk. Independent readback verified the image
 hash, unchanged input hashes, directory mode `0700` and file mode `0600`.
@@ -105,8 +125,9 @@ The generic inspector accepted its geometry; the reference-profile check
 rejected only the intentionally absent AVB footer/vbmeta. Both build manifests
 also matched the independently parsed ramdisk and its six ELF payloads.
 
-All 186 host tools tests and the existing boot-packaging fixture passed through
-Nix on the Mac, including 15 archive-inspector and 18 rescue-envelope tests.
+For the first envelope, at commit `bae47c7a`, all 186 host tools tests and the
+existing boot-packaging fixture passed through Nix on the Mac, including 15
+archive-inspector and 18 rescue-envelope tests.
 The independent synthetic `mkbootimg.py` comparison ran without a skip.
 Synthetic filesystem fixtures use private temporary directories outside `/nix`
 so that the production helper's Nix-path refusal remains exercised unchanged.
@@ -118,9 +139,11 @@ https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/ma
 and https://android.googlesource.com/platform/external/avb/+/refs/heads/main/README.md[AOSP AVB documentation]
 for the distinction between layout, hash descriptors and bootloader policy.
 
-Before a hardware trial, the unresolved requirements in
-link:recovery-preparation.adoc[the recovery record] still apply: verified entry
-and return, bootloader identity and acceptance policy, separately authorized
-temporary boot if supported, writer quiescence, consistent userdata/calibration
-preservation, and a concrete restoration procedure. Building or inspecting this
-envelope supplies none of those permissions or runtime results.
+Before any rescue boot, the staged order in
+link:recovery-preparation.adoc[the recovery record] applies: a verified entry
+and return, bootloader identity and acceptance review, separately authorized
+temporary boot if supported, transport readiness and reviewed failure behavior.
+Writer quiescence and consistent userdata/calibration preservation are what the
+booted environment must then establish and check; rollback writes stay gated on
+them. Building or inspecting this envelope supplies none of those permissions
+or runtime results.

@@ -1,0 +1,149 @@
+= Proposed bootloader entry and return trial
+
+Status on 2026-10-15: *proposal only, not authorized and not run.* It changes
+the phone's boot mode twice, so it needs the owner's explicit approval of this
+exact procedure. It sends no image and issues no flash, erase, `oem`, `flashing`
+or `boot` command. It is not a recovery demonstration and does not boot NixOS.
+
+== Purpose
+
+Answer four questions about the installed bootloader on this phone:
+
+. Does an orderly reboot with the `bootloader` argument reach bootloader
+  fastboot mode?
+. Does the Mac recognize that mode over USB?
+. What do standard read-only `getvar` queries report, including whether this is
+  bootloader fastboot or userspace `fastbootd`?
+. Does the standard `fastboot reboot` command return to the existing Ubuntu
+  Touch installation?
+
+The answers decide whether a later, separately reviewed offline acquisition boot
+is worth proposing. They do not establish rescue-image acceptance, temporary
+boot support, writer quiescence or a restore procedure.
+
+== Basis
+
+* The installed `/sbin/reboot` is systemd `255.4-1ubuntu8.17`. Its exact-version
+  source stores the `bootloader` argument before asking logind, and the ADB user
+  lacks write access to that file, so an unprivileged request is predicted to
+  fail first. The trial therefore uses the phone's existing sudo credential; see
+  link:recovery-preparation.adoc#_installed_reboot_path_and_persistent_rtc_state[the reboot-path record].
+* The pinned kernel maps that argument to the persistent RTC fast-boot marker
+  and then resets. Whether the installed bootloader clears the marker is
+  unknown, and it will not be determined by reverse engineering.
+* Android properties report an unlocked bootloader (`flash.locked=0`, `orange`).
+  This trial does not depend on that state because it sends no image.
+* The Mac has Platform-Tools `37.0.1-15733141` (`adb` 1.0.41 and `fastboot`).
+
+== Preconditions
+
+All of these must hold, or the trial is postponed:
+
+* The owner is present with the phone connected directly to the Mac by a
+  known-good data cable, not through a hub.
+* Battery at least 60%, and no system-image update in progress.
+* A fresh private catalog pass has succeeded (done on 2026-10-15).
+* The owner has decided, before starting, the stop conditions below.
+
+== Procedure
+
+. *Baseline, normal mode, read-only.* Save privately: `adb -d get-state`,
+  `uname -r`, `systemctl is-system-running`, `systemctl --failed --no-legend`,
+  the battery capacity and `/proc/cmdline`. These are compared after return.
+. *Entry, owner-run.* In a local Terminal:
++
+[source,sh]
+----
+adb -d shell
+sudo /sbin/reboot bootloader
+----
++
+The password is typed only at the phone's sudo prompt in that Terminal, never
+in chat, a file or a command line. Expected: an orderly shutdown and a restart
+into the bootloader's fastboot mode.
+. *Recognition, read-only.* Within two minutes, run `fastboot devices`. Exactly
+  one device must be listed; keep its serial private. Then query only:
+  `product`, `version-bootloader`, `version-baseband`, `secure`, `unlocked`,
+  `is-userspace`, `max-download-size`, `current-slot`, `slot-count`, and
+  `partition-size:` / `partition-type:` for `boot`, `recovery` and `dtbo`.
+  `is-userspace` is `yes` only in `fastbootd`. An unsupported variable is
+  recorded as unknown, not retried another way.
+. *Return.* Run `fastboot reboot`. Wait up to five minutes for `adb -d get-state`
+  to report `device`.
+. *After return, read-only.* Repeat the baseline and compare. Record the
+  observed screens, timings and any difference.
+
+The `tools/observe-fastboot.py` helper runs steps 3 and 4 with exactly this
+allowlist, fixed timeouts and private output; it refuses every other command.
+It requires exactly one listed device, keeps its serial out of terminal output,
+and writes one private record per step:
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/observe-fastboot.py observe \
+  --output /absolute/private/new-fastboot-observation
+python3 support/experimental-devices/unihertz-titan/tools/observe-fastboot.py return \
+  --output /absolute/private/new-fastboot-return
+----
+
+Its nine synthetic tests use a fake executable; it has never run against the
+phone.
+
+== Stop conditions and failure handling
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The reboot command fails without restarting
+|Stop. Record the error. Do not retry with `adb reboot`, D-Bus or other routes.
+A stored `bootloader` parameter may remain in `/run/systemd/reboot-param`, so the
+next reboot of any origin can enter fastboot; handle that with step 4.
+|The phone restarts into Ubuntu Touch instead
+|Stop and record. The marker may still be set; a later reboot may enter
+fastboot, which is then handled with step 4.
+|The phone shows a recovery screen
+|Touch nothing except the option that reboots the system normally. Record it;
+the installed recovery can write logs and is not presumed passive.
+|Fastboot mode is shown but the Mac lists no device
+|Try another direct port and cable for up to ten minutes. If still absent, go to
+the physical fallback below.
+|More than one device is listed
+|Stop and disconnect other devices before any query.
+|`fastboot reboot` returns to fastboot mode again
+|Run `fastboot continue` once (the helper's `return --command continue`). If the
+phone still does not boot Ubuntu Touch, stop and seek OEM guidance; issue no
+other command.
+|Ubuntu Touch does not finish booting after return
+|Stop. Do not flash or erase. A boot rollback is a separate, later write that
+requires its own authorization.
+|Battery below 30% at any point
+|Stop after returning, and charge in normal mode.
+|===
+
+*Physical fallback (unverified).* With the runtime configuration
+(`ONEKEY_REBOOT_NORMAL_MODE=y`, `KPD_PMIC_LPRST_TD=0`), the pinned keypad driver
+enables the PMIC power-key long-press reset at its 8-second setting while this
+kernel runs. That is source and configuration evidence only, and the kernel is
+not running in the bootloader, so the behavior there is unknown. Holding Power
+until the phone restarts is the only remaining fallback, and it may land in
+fastboot again. There is no verified emergency restore for macOS.
+
+== Residual risks
+
+* The bootloader's handling of the persistent fast-boot marker is unknown, so
+  later resets could repeatedly enter fastboot.
+* The shutdown is the ordinary systemd reboot path with an argument. It does not
+  prove clean filesystems or modem quiescence, the same as any reboot.
+* The bootloader may update its own state in regions that have no private copy
+  yet (`para`, `expdb`, `boot_para`, `seccfg` and others). The optional normal-mode
+  read in link:consistent-preservation.adoc[the preservation requirements]
+  would make such changes detectable afterwards; it does not prevent them.
+* Mac USB recognition of this bootloader is untested.
+
+== What the trial can and cannot show
+
+A successful run shows that this phone entered and left bootloader fastboot
+once by this route and reported the recorded variables. It does not show
+acceptance of an unsigned rescue image, `fastboot boot` support, offline
+acquisition, a restore path or anything about NixOS. Keep raw output, serials
+and screens private; publish only sanitized findings.

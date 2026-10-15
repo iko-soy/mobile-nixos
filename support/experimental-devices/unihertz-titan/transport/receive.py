@@ -3,6 +3,7 @@
 
 import argparse
 import contextlib
+import errno
 import fcntl
 import hashlib
 import json
@@ -146,10 +147,28 @@ def prepare_output(requested):
     return output
 
 
+def durable_sync(descriptor):
+    """fsync, and on macOS also ask the drive to flush its write cache.
+
+    Darwin's plain fsync(2) does not request a media flush; F_FULLFSYNC does.
+    Fall back to fsync only where a filesystem rejects the stronger request;
+    any other failure, such as EIO, propagates and prevents acknowledgement.
+    """
+    full = getattr(fcntl, "F_FULLFSYNC", None)
+    if full is not None:
+        try:
+            fcntl.fcntl(descriptor, full)
+            return
+        except OSError as error:
+            if error.errno not in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOTTY, errno.EINVAL):
+                raise
+    os.fsync(descriptor)
+
+
 def sync_directory(output):
     descriptor = os.open(output, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        os.fsync(descriptor)
+        durable_sync(descriptor)
     finally:
         os.close(descriptor)
 
@@ -161,7 +180,7 @@ def write_report(output, report, durable=True):
             stream.write((json.dumps(report, indent=2) + "\n").encode())
             stream.flush()
             if durable:
-                os.fsync(stream.fileno())
+                durable_sync(stream.fileno())
         os.replace(name, output / "report.json")
         if durable:
             sync_directory(output)
@@ -191,7 +210,7 @@ def write_file(fd, payload, deadline):
 
 def sync_payload(fd, output, deadline):
     check_deadline(deadline)
-    os.fsync(fd)
+    durable_sync(fd)
     sync_directory(output)
     check_deadline(deadline)
 

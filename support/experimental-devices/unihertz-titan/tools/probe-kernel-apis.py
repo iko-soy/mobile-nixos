@@ -291,10 +291,10 @@ def main(argv=None):
         if args.local:
             report = probe_kernel_apis()
         else:
-            stdout, _, code, timed_out = inventory.run_command([args.adb, "devices"], args.timeout)
+            stdout, _, code, timed_out = inventory.run_command([args.adb, "devices", "-l"], args.timeout)
             if code != 0 or timed_out:
                 raise ProbeError("ADB transport enumeration failed.")
-            serial = inventory.select_device(inventory.parse_devices(stdout.decode()), args.serial)
+            serial = inventory.select_usb_device(stdout.decode(), args.serial)
             inventory.check_adb_transport(args.adb, serial, args.timeout)
             command = "python3 -B -c " + shlex.quote(Path(__file__).read_text()) + " --probe-stdout"
             stdout, stderr, code, timed_out = inventory.run_probe(args.adb, serial, command, args.timeout)

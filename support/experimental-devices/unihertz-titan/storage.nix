@@ -121,6 +121,17 @@ let
     grep -Fx 'TITAN_SOURCE_REFUSED arguments' "$out/override.stderr"
     sha256sum ${checker}/bin/titan-storage-preflight > "$out/checker-SHA256SUMS"
   '';
+  # Host parser fixtures with Linux 4.14 numbering (initramfs rootfs = mount 0),
+  # which the disposable 6.18 VMs cannot produce. No storage is opened.
+  parserTests = pkgs.runCommandCC "titan-storage-mount-parser-tests" {
+    meta = { platforms = lib.platforms.linux; hydraPlatforms = []; };
+  } ''
+    $CC -std=c11 -O2 -Wall -Wextra -Werror -DTITAN_SOURCE_PARSER_TEST \
+      -I ${source} ${source}/guard.c ${source}/mount-parser-test.c -o mount-parser-test
+    ./mount-parser-test > results || { cat results; exit 1; }
+    cat results
+    cp results "$out"
+  '';
 in {
-  inherit checker vmRamdisk vmTests;
+  inherit checker vmRamdisk vmTests parserTests;
 }

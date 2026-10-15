@@ -251,6 +251,9 @@ def acquire(remote, requested):
             "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "transport": "adb-shell-v2-no-pty-framed-status", "kernel_map": baseline,
             "scope": "fixed fourteen firmware GPT partitions and two eMMC boot areas; no calibration, control or RPMB",
+            "helper_sources": transport.source_digests("acquire-firmware.py", "acquire-os-partitions.py",
+                                                       "acquire-bootloaders.py", "acquire-partitions.py",
+                                                       "collect-inventory.py"),
             "mount_view_scope": ["acquisition process", "PID1", "identified Android init"],
             "bytes_preserved": sum(sizes.values()), "partitions": {},
             "validation": {"atomic_snapshot": False, "global_quiescence": False,
@@ -280,7 +283,7 @@ def acquire(remote, requested):
             report["partitions"][label] = {"file": label + ".img", "bytes": expected, "sha256": digest,
                 "transfer_sha256": digest, "readback_sha256": digest, "phone_repeat_sha256": digest,
                 "zero_bytes_skipped": sink.zero_bytes,
-                "storage": "raw logical image with zero-only chunks stored as holes where supported",
+                "storage": "raw logical image; zero-only chunks skipped by seeking, allocation left to the filesystem",
                 "geometry": baseline["targets"][label]}
         require(probe(remote) == baseline, "Final kernel map or read safety changed.")
         progress("All sixteen images verified; publishing the private set and manifest")
@@ -306,8 +309,8 @@ def main(argv=None):
     try:
         candidate = bootloaders.private_path(args.output)
         require(not os.path.lexists(candidate), "Output must be a new private directory.")
-        devices, _, _ = transport.run_bounded([args.adb, "devices"], 65536, args.timeout)
-        serial = transport.inventory.select_device(transport.inventory.parse_devices(devices.decode("ascii")), args.serial)
+        devices, _, _ = transport.run_bounded([args.adb, "devices", "-l"], 65536, args.timeout)
+        serial = transport.inventory.select_usb_device(devices.decode("ascii"), args.serial)
         remote = transport.Remote(args.adb, serial, args.timeout)
         remote.check_protocol()
         permission = probe(remote, permission_only=True)
@@ -320,6 +323,10 @@ def main(argv=None):
         print(f"Verified sixteen firmware/boot-area images: {report['bytes_preserved']} private logical bytes with saved-file and repeat phone SHA-256 agreement. Output: {output}")
         print("Observed agreement is not atomic, firmware immutability, authentication or a restoration test.")
         return 0
+    except os_partitions.PublicationRetained as error:
+        print(f"Firmware acquisition stopped after publication: {error}", file=sys.stderr)
+        print("The published files were kept; this run is not reported as complete.", file=sys.stderr)
+        return 1
     except AcquisitionError as error:
         print(f"Firmware acquisition stopped: {error}", file=sys.stderr)
         print("Any retained .part files are incomplete private evidence; no completed result is reported.", file=sys.stderr)

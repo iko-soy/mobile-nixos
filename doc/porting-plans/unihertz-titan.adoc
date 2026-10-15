@@ -52,8 +52,9 @@ tests exercise the sealed configfs policy, complete sparse restoration and
 failure cleanup. These software results do not establish a quiescent Titan
 backup, macOS ACM operation or a hardware boot/return route; M0 remains open.
 
-A private raw Android v2 envelope now combines that tested acquisition ramdisk
-with the preserved installed kernel and DTB. Its bytes match an independent
+A private raw Android v2 envelope now combines that reviewed AArch64 acquisition
+ramdisk, whose x86_64 VM-test variant passed, with the preserved installed kernel
+and DTB. Its bytes match an independent
 invocation of the pinned Android assembler. It has no AVB metadata and has not
 been sent to or booted on the phone; bootloader acceptance and a return path
 remain prerequisites for any separately authorized hardware trial.
@@ -83,6 +84,22 @@ It records the remaining 17 GPT gaps and distinguishes current local integrity
 from historical source checks, unique device identity and atomic consistency.
 This does not replace consistent userdata/calibration preservation or a tested
 recovery path.
+
+A 2026-10-15 audit of all branch work found that the USB acquisition build's
+mount guards rejected mount ID 0, which Linux 4.14 gives the initramfs root when
+the bootloader supplies `root=`. Every boot of that build, including the first
+rescue envelope, would have stopped at its first mount check. It also found that
+the built-in zram device counted as storage, which could declare readiness
+before the eMMC was guarded. Both are fixed. The mount-ID fix has 4.14 parser
+fixtures; the production readiness rule (the eMMC disk, 38 partitions, boot
+areas and RPMB node) is compiled for AArch64 but only its VM variant has run.
+The envelope built from the earlier ramdisk must not be used. The audit also corrected
+credential ordering, publication rollback and documentation claims. A
+link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/experimental-devices/unihertz-titan/userspace-feasibility.adoc[feasibility record]
+finds that no supported NixOS release lists Linux 4.14 within its systemd
+baseline, and recommends the native route for sustained work. A
+link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/experimental-devices/unihertz-titan/entry-return-trial.adoc[bootloader entry and return trial]
+is proposed but not authorized or run. M0 remains open.
 
 toc::[]
 
@@ -289,7 +306,9 @@ The 2026-10-14 normal-mode USB probes now demonstrate missing APIs, not just a
 version mismatch: `pidfd_open`, `close_range` and `name_to_handle_at` return
 `ENOSYS`, and `statx` lacks mount IDs and mount-root attributes. The inspected
 systemd 261 uses these interfaces in process, path and service handling.
-See link:../../support/experimental-devices/unihertz-titan/hardware-inventory.adoc#_direct_kernel_api_measurements[measurements and source analysis].
+See link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/experimental-devices/unihertz-titan/hardware-inventory.adoc#_direct_kernel_api_measurements[measurements and source analysis]
+and the
+link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/experimental-devices/unihertz-titan/userspace-feasibility.adoc[package-set feasibility record].
 The unmodified current userspace/kernel combination is not ready for an M2 boot
 attempt. No systemd 261 or generated-image hardware boot was performed.
 

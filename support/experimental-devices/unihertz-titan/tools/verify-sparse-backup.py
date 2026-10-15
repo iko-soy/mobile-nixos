@@ -7,6 +7,7 @@ consistency, complete calibration preservation, or a working restore procedure.
 """
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import importlib.util
@@ -326,7 +327,7 @@ def validate_archive(archive, output, *, expected, allocation_budget, minimum_fr
         "limitation": LIMITATION,
     }
     pending, destination = output / "filesystem.img.part", output / "filesystem.img"
-    descriptor, created = None, False
+    descriptor, created, published_identity = None, False, None
     try:
         write_manifest(output, manifest)
         if destination.exists():
@@ -392,11 +393,29 @@ def validate_archive(archive, output, *, expected, allocation_budget, minimum_fr
         # Exclusive hard-link publication cannot overwrite a path created after
         # the initial destination check, and exposes only a fully checked image.
         os.link(pending, destination)
+        # The new name is ours even if the pending path changed before link().
+        # Record that identity so a later failure removes only this alias.
+        linked = os.stat(destination, follow_symlinks=False)
+        published_identity = linked.st_dev, linked.st_ino
+        if published_identity != (after_check.st_dev, after_check.st_ino):
+            raise ValidationError("The published image is not the checked image.")
         pending.unlink()
         manifest.update({"status": "complete", "stage": "complete"})
         write_manifest(output, manifest)
         return manifest
     except BaseException as error:
+        if published_identity is not None:
+            # A failed run must not leave a published image behind.
+            with contextlib.suppress(OSError):
+                current = os.stat(destination, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == published_identity:
+                    destination.unlink()
+                    directory = os.open(output, os.O_RDONLY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+            manifest.pop("file", None)
         manifest.update({"status": "failed", "error": str(error) or type(error).__name__})
         write_manifest(output, manifest)
         raise
