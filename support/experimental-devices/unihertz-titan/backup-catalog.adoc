@@ -75,6 +75,18 @@ wrote new private catalogs. Both again matched all 27 payloads, and their
 content equals the first catalog apart from timestamps. A new test pins the
 value-free key shapes of the historical manifests that the catalog revalidates.
 
+[[second-copy]]
+== Second copy
+
+On 2026-10-15 the owner copied the rollback set to a remote server under the
+owner's control: the six sets above and the
+link:control-acquisition-trial.adoc[offline copy] of the sixteen regions other
+than `userdata` (`offline-copy-2/regions`). A SHA-256 list of all 57 files,
+with paths relative to the backup root, was written and checked on the Mac;
+`sha256sum -c` against it on the server reported every file matching. The list
+and a private record of the check stay with the Mac files. Repeat the check
+after any change to either copy.
+
 == What a passing catalog establishes
 
 A pass establishes that the checked local bytes still agree with the retained

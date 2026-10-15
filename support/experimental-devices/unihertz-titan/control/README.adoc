@@ -208,8 +208,8 @@ stops a worker. These limits remain:
   journal or the filesystem.
 * Two reads in one boot show stability during the run, not the absence of
   firmware or kernel writers outside it.
-* The Mac copy is the only copy; the requirement for two copies on separate
-  storage stays open.
+* The trial's copy is kept on the Mac and, since 2026-10-15, verified on a
+  remote server as part of the owner's second copy of the rollback set.
 
 == Hardware boundary
 

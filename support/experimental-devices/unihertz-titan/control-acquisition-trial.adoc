@@ -62,7 +62,8 @@ the Volume Up starts; watchers ran the fastboot steps and the receiver.
 
 The sixteen regions other than `userdata` therefore have an offline copy that
 meets the consistency conditions of link:consistent-preservation.adoc[the
-preservation requirements] except retention: the Mac holds the only copy. The
+preservation requirements]; retention followed the same day, when the owner
+verified a second copy on a remote server against the Mac's hashes. The
 macOS serial stall remains a limit for long transfers at full speed; a repeat
 cleared it here. Not shown: the absence of firmware or kernel writers outside
 the run, the restore of any region, or anything about NixOS.
@@ -261,6 +262,7 @@ twice through exclusive read-only claims, with the kernel read-only flag set
 and no Ubuntu Touch, Android or modem software running, its identity checked
 before and after, its ext4 state recorded where it has one, and its transfer
 verified on the Mac before the acknowledgement. That meets the conditions of a
-consistent copy except retention, since the Mac holds the only copy. It does
+consistent copy except retention, which needs a second verified copy on
+separate storage (made after the trial). It does
 not rule out firmware or kernel writers outside the run, restore any region or
 boot NixOS. `userdata` is excluded by the owner's decision.

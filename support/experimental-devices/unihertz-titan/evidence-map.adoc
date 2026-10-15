@@ -78,8 +78,15 @@ regions other than `userdata`, stable across two passes, the four ext4 regions
 clean, verified on the Mac; restart into fastboot and byte-exact restore of the
 original recovery
 |2026-10-15
-|A second, separate copy (retention); firmware writers outside the run; see
+|Firmware writers outside the run; see
 link:control-acquisition-trial.adoc[the trial record]
+
+|Second copy of the rollback set
+|The owner's remote copy of the six cataloged sets and the offline region
+copy, all 57 files matching a SHA-256 list made on the Mac
+|2026-10-15
+|Later changes to the set; see link:backup-catalog.adoc#second-copy[the backup
+catalog]
 
 |USB probe profile and its deadline reboot
 |Linux 6.18.38 VM cases (4): success, stuck PID 1, killed deadline process,

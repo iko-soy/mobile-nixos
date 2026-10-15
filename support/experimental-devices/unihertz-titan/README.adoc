@@ -498,8 +498,9 @@ Ubuntu Touch CI candidates, their hashes, stock-firmware research limits and
 read-only preparation using the owner's Mac. Private boot/recovery/dtbo copies
 are verified by exact sizes, saved-file hashes and independent phone hashes.
 Installed boot exactly matches the documented CI candidate; installed recovery
-is different and has been preserved separately. Data/calibration backup and a
-second copy on separate storage remain outstanding.
+is different and has been preserved separately. The calibration and control
+regions have since been copied offline, and the whole rollback set has a
+verified second copy on separate storage.
 Separate LK and vendor/system captures brought the private partition set to
 seven images. The vendor/system files retain their complete
 partition tails, have matching Mac/phone hashes and pass read-only ext4 checks;
@@ -523,8 +524,8 @@ collection. A USB recovery route must still be established before replacing the
 phone's boot path; an SSH connection cannot provide access after a failed boot.
 
 M0 remains open until firmware/restore provenance and outstanding hardware
-details are recorded and the offline copy has a second copy on separate
-storage. Rescue boots from the recovery partition and their returns into
+details are recorded; the rollback set has a verified second copy on separate
+storage since 2026-10-15. Rescue boots from the recovery partition and their returns into
 fastboot have worked three times, the original recovery has been restored byte
 for byte twice, and the sixteen regions other than `userdata` have a consistent
 offline copy. M1 hardware validation remains open until a generated image with
@@ -1207,4 +1208,6 @@ verified the stream before acknowledging it. The phone restarted into fastboot
 about ten seconds later, and the preserved original recovery was restored byte
 for byte, with boot and dtbo unchanged throughout. The twelve raw regions match
 the normal-mode copies except `expdb`, and a read-only `e2fsck` found no errors
-in the four ext4 copies. The copy is consistent but not yet retained twice.
+in the four ext4 copies. The same day the owner made a second copy of the
+whole rollback set on a remote server and verified all 57 files against a
+SHA-256 list made on the Mac.

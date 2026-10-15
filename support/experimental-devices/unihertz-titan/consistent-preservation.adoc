@@ -23,8 +23,8 @@ mount table are listed below. The twelve unmounted ones have since received
 verified link:control-region-preservation.adoc[normal-mode copies] outside the
 catalog. Those show stability during the reads only. On 2026-10-15 the
 link:control-acquisition-trial.adoc[offline acquisition trial] copied all
-sixteen regions other than userdata under the conditions below, except
-retention:
+sixteen regions other than userdata under the conditions below, and the same
+day a second verified copy met the retention condition:
 
 [cols="1,1,1,3",options="header"]
 |===
@@ -77,8 +77,10 @@ whole acquisition window:
   writable to pass. Inspect copies with read-only backing and `ro,noload`.
 . *Verified transfer.* Bytes are length- and hash-verified on the Mac before
   completion is acknowledged, as the TTR1 transport does.
-. *Retention.* Two verified copies on separate storage. Only the Mac copy exists;
-  the owner has no second destination, so this requirement stays open.
+. *Retention.* Two verified copies on separate storage. Met on 2026-10-15:
+  besides the Mac copy, the owner keeps a second copy of the rollback set on a
+  remote server, verified against a SHA-256 list of all 57 files made on the
+  Mac; see link:backup-catalog.adoc#second-copy[the backup catalog].
 
 A shutdown or abrupt reset of the live system does not by itself establish
 these conditions. Stable normal-mode hashes of unmounted regions show stability
@@ -94,7 +96,8 @@ during the reads, not absence of writers before or after them.
   and after, records the primary-superblock state of the four ext4 regions and
   sends raw copies over TTR1. It ran in the offline acquisition trial on
   2026-10-15.
-* Retention is open: the offline copy exists only on the Mac.
+* Retention is met by the owner's verified remote copy; refresh it whenever
+  the rollback set changes.
 
 == Ordering
 
@@ -117,5 +120,5 @@ This sequence keeps the dependencies one-directional:
 . A reviewed offline acquisition boot that meets the conditions above for the
   sixteen regions other than `userdata`, with a demonstrated return. Done on
   2026-10-15 in the link:control-acquisition-trial.adoc[offline control-region
-  acquisition trial], except retention.
+  acquisition trial]; the verified remote copy met retention the same day.
 . Only then any rollback write, separately authorized.
