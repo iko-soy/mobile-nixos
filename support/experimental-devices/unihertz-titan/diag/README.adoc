@@ -7,8 +7,9 @@ starts, guards the eMMC and brings up USB device mode. The display is not
 driven and there is no serial console, so this is the only way to read the
 kernel's own log from the phone. `nativeDiagImage` packages it with the native
 kernel, the Titan device tree and the minimal overlay in the recovery layout.
-Building it does not authorize starting it; see
-link:../native-diag-trial.adoc[the trial proposal].
+It ran once on the Titan on 2026-10-16 with the owner's approval; see
+link:../native-diag-trial.adoc[the trial record] for what it found. Building it
+does not authorize starting it again.
 
 [source,sh]
 ----

@@ -66,10 +66,13 @@ hardware works under NixOS.
   the probe, built for modern device naming, reported kernel `7.3.0-rc3` after
   guarding the eMMC and binding USB device mode. The phone then restarted into
   Ubuntu Touch, and the original recovery was restored.
-* A link:diag/README.adoc[native-route diagnostic image], built and checked
-  in a VM, and its link:native-diag-trial.adoc[trial proposal], not run: the
-  same modern kernel sends its own log, the device tree the bootloader passed
-  and which devices found drivers to the Mac, reading nothing from storage.
+* The link:native-diag-trial.adoc[native-route diagnostic trial], run on
+  2026-10-16 with the owner's approval: the same modern kernel, with the
+  link:diag/README.adoc[diagnostic ramdisk], sent its complete log, the device
+  tree the bootloader passed and a device-driver table to the Mac, reading
+  nothing from storage. The bootloader applied the image's own overlay; all
+  eight CPUs, the eMMC, USB, the PMIC regulators and the GPU came up. The
+  original recovery was restored.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1261,6 +1264,11 @@ on the phone. The link:diag/README.adoc[diagnostic image] (`nativeDiagImage`)
 starts the same kernel, tree and overlay with a ramdisk that, after the same
 storage guard and USB gadget, sends the kernel log, the device tree as the
 bootloader passed it, a device-driver binding table and a few procfs files to
-the Mac over the TTR1 transport, then restarts. It is built and checked in a
-VM; the link:native-diag-trial.adoc[trial proposal] awaits the owner's
-approval.
+the Mac over the TTR1 transport, then restarts. The owner approved and ran the
+link:native-diag-trial.adoc[diagnostic trial] on 2026-10-16: all eight
+sections arrived verified, the phone restarted into Ubuntu Touch, and the
+original recovery was restored byte for byte. The bootloader applied the
+image's own overlay on a recovery start. All eight CPUs, the eMMC, USB device
+mode, the MT6358 regulators, the clock controllers and the Mali GPU came up;
+the display stops at the missing DSI output, and no I2C controller is enabled
+yet.

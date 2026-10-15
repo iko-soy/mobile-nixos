@@ -158,9 +158,11 @@ link:native-boot-trial.adoc[first native-route boot trial] ran it: the modern
 kernel booted, the eMMC enumerated, USB device mode worked and the phone
 restarted into Ubuntu Touch.
 
-Next, the link:diag/README.adoc[diagnostic image] (`nativeDiagImage`, built
-2026-10-15) collects the kernel's own view of the phone, and its
-link:native-diag-trial.adoc[trial proposal] awaits approval: the boot log, the
-device tree the bootloader passed with its overlay and reserved memory, and
-which devices found drivers. That is the basis for the next device-tree and
-driver work, such as the NT35595 command-mode panel.
+On 2026-10-16 the link:native-diag-trial.adoc[diagnostic trial] ran the
+link:diag/README.adoc[diagnostic image] (`nativeDiagImage`) and brought back
+the kernel's own view of the phone: the bootloader applies the image's own
+overlay on a recovery start; all eight CPUs, the eMMC, USB, the MT6358
+regulators, the clock controllers and the Mali GPU come up; the display stops
+at the missing DSI0 output, and no I2C controller is enabled. Next: DSI0 with
+the NT35595 command-mode panel, the I2C controllers for the keyboard,
+touchscreen and MT6370, and a 2 MiB aligned kernel load address.

@@ -1,7 +1,8 @@
 = Native-route diagnostic trial
 
-Status on 2026-10-15: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-16: *run once with the owner's explicit approval; all three
+questions were answered yes. See <<result,the result>>.* Each repetition needs
+the owner's explicit approval of this exact procedure.
 
 The link:native-boot-trial.adoc[first native-route boot] showed that the modern
 kernel starts on the Titan, guards the eMMC and brings up USB device mode, but
@@ -12,6 +13,83 @@ link:diag/README.adoc[diagnostic ramdisk], which sends the kernel log and a
 fixed set of kernel and firmware state to the Mac, then restores the original
 recovery. Ubuntu Touch's boot and `dtbo` partitions are never written, and the
 image reads nothing from storage.
+
+[[result]]
+== Result (2026-10-16)
+
+The owner approved the procedure and ran the partition reads, the entries, the
+Volume Up start and the unlocks; watchers ran the fastboot steps and the
+receiver.
+
+* *Preconditions.* The baseline found the battery full and charging, no update
+  pending or running and empty recovery command directories. Step 2 found
+  boot, recovery and dtbo identical to their preserved copies, and no control
+  region changed since the latest copy.
+* *Part 1.* `fastboot flash recovery` reported `Writing 'recovery' OKAY`, and
+  step 7 read recovery back as `5a55f9d7...`, with boot and dtbo unchanged.
+* *Question 1, yes.* After the Volume Up start the boot ROM and preloader
+  devices passed through, and 21 seconds after the boot ROM the image's USB
+  device appeared. At 40 seconds of uptime the eight sections followed:
+  610309 bytes, verified by count, hash and readback, with no section missing,
+  truncated or unreadable.
+* *Question 2, yes.* The image's device disappeared five seconds after the
+  acknowledgement, the preloader passed through and Ubuntu Touch booted
+  (`bootreason=reboot`). Its ADB interface appeared only once the owner had
+  unlocked the screen, as after every boot.
+* *Question 3, yes.* From Ubuntu Touch, `sudo /sbin/reboot bootloader` reached
+  fastboot, the preserved original was written (`Writing 'recovery' OKAY`) and
+  Ubuntu Touch returned. Step 13 read recovery back as `4dd1c1f7...`, with boot
+  and dtbo unchanged throughout; of the control regions only `expdb` changed,
+  as after every boot.
+
+=== What the sections show
+
+The sections are in the private evidence directory; identifiers are withheld
+here.
+
+* *Bootloader.* On a recovery start it applied the image's own overlay from
+  the recovery-DTBO section: both of its nodes are in the passed tree and none
+  of the 92 node names of the stock `dtbo` overlay. It added its usual
+  `/chosen` boot tags and initrd location, all fourteen reserved-memory
+  regions in the tree's empty `/reserved-memory` node (eleven `mblock-*`
+  regions for DRAM calibration, the log store, ATF and its log, SSPM, TEE,
+  the RAM console, pstore, `minirdump` and the framebuffer at `0x7e340000`,
+  plus a movable CMA zone and two DRAM dummy-read areas), and a command line
+  that starts with the tree's `bootargs` and keeps every argument of the
+  image's own.
+* *Kernel log.* 5926 records from the first one, so the 2 MiB buffer was in
+  effect; the producer read them at 41 seconds of uptime. All eight CPUs (four
+  Cortex-A53, four Cortex-A73) came up through PSCI 1.0, and 5.66 GiB of the
+  6 GiB were available. Unused clocks, power domains and regulators were all
+  left on. The only deferred probe still pending was the SVS block, which
+  needs the CPU frequency tables this tree omits.
+* *Drivers.* 60 of 81 platform devices found drivers: the clock controllers
+  (through the MT8183 drivers), pin control, power domains, the watchdog, the
+  PMIC wrapper and the MT6358 with its regulators and audio codec, the thermal
+  sensor, the eMMC (high speed; 38 partitions, both boot areas, RPMB as a
+  character device), the USB device controller (high speed), the Mali-G72
+  under panfrost, the display blocks and MIPI D-PHY, the audio front end and
+  the efuse.
+* *Not yet working, as expected.* The display pipeline creates no output
+  because DSI0 and DPI0 are absent from the tree. No I2C controller is
+  enabled, so the keyboard, touchscreen, sensors and MT6370 are unreachable.
+  The CPU interconnect frequency driver has no regulator, and the MT6358 RTC
+  and AUXADC have no driver bound.
+* *Regulators.* The regulator driver logged one voltage change: `vxo22` from
+  the bootloader's 2.24 V to 2.2 V, the value the vendor kernel also sets in
+  Ubuntu Touch.
+* *Warnings to address.* "Kernel image misaligned at boot": the bootloader
+  loads the kernel at `0x40080000`, and arm64 kernels now expect a 2 MiB
+  aligned address. A known upstream warning about the `mtu3` trace events and
+  a T-PHY device-link message appear at boot; USB works regardless. The random
+  number generator finished initializing only at 37 seconds, since no hardware
+  RNG driver runs.
+
+This is the modern kernel's own view of the Titan, and it sets the next steps:
+DSI0 with the NT35595 command-mode panel for the display, the I2C controllers
+for the keyboard, touchscreen and MT6370, the RTC, a 2 MiB aligned kernel load
+address, and possibly a RAM log on the bootloader's pstore region so that a
+later crash can be read back after a restart.
 
 == Questions
 

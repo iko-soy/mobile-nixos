@@ -1,11 +1,11 @@
 = Evidence map
 
-Status on 2026-10-15. Each row names the strongest evidence behind a claim,
+Status on 2026-10-16. Each row names the strongest evidence behind a claim,
 the revision or environment it applies to, and what it does not establish.
 Evidence types, weakest to strongest for hardware questions: evaluation,
 compilation, packaging, host tests, emulated execution (qemu-user or VMs),
 live read-only phone observation, hardware boot, demonstrated restoration.
-No row reaches hardware boot or restoration.
+Only the rows for owner-approved trials reach hardware boot and restoration.
 
 [cols="2,2,2,3",options="header"]
 |===
@@ -99,13 +99,13 @@ restore of the original recovery
 bootloader applied; see link:native-boot-trial.adoc[the trial record]
 
 |Native-route diagnostic image
-|Linux 6.18.38 VM case: the sections received over TTR1, split and checked
-against the guest, then a restart before the deadline with the disk unchanged;
-qemu-user refusal checks; Mac splitter tests; other ramdisks and the first
-native image byte-identical
-|Builder runs on 2026-10-15
-|Any run on the Titan, including the modern kernel's Mac-to-phone USB traffic;
-see link:native-diag-trial.adoc[the proposal]
+|One owner-approved trial: the eight sections (kernel log, the passed device
+tree, a device-driver table, procfs files) arrived verified over TTR1 in both
+directions; a restart into Ubuntu Touch; byte-exact restore. Before it: a
+Linux 6.18.38 VM case, qemu-user refusal checks, Mac splitter tests
+|2026-10-16; builds of 2026-10-15
+|Display, input, charging, audio, radios, NixOS userspace; behavior beyond
+one run; see link:native-diag-trial.adoc[the trial record]
 
 |Second copy of the rollback set
 |The owner's remote copy of the six cataloged sets and the offline region
