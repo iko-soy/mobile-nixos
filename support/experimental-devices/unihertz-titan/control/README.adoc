@@ -7,9 +7,12 @@ list. It starts from the recovery partition, as the
 link:../usb-probe/README.adoc[USB probe] did in the
 link:../recovery-route-trial.adoc[recovery-partition trial]. It streams the
 regions to the Mac over the probe's USB gadget and then restarts into
-bootloader fastboot by itself. It has not run on the Titan. Building it does
-not authorize writing or starting it; see
-link:../control-acquisition-trial.adoc[the trial proposal].
+bootloader fastboot by itself. On 2026-10-15 it ran on the Titan in the
+link:../control-acquisition-trial.adoc[offline acquisition trial]: the first
+attempt stalled when macOS's serial driver stopped reading, and the phone
+restarted into fastboot at its time limits; the repeat copied all sixteen
+regions, stable and consistent, and restarted into fastboot about ten seconds
+later. Building it does not authorize writing or starting it.
 
 [source,sh]
 ----
@@ -197,9 +200,10 @@ are fixed, and a second review confirmed the fixes. The `host-absent` and
 `receiver-limit` cases close its remaining gap, VM coverage of both ways PID 1
 stops a worker. These limits remain:
 
-* The USB rate of the phone's ACM gadget is unmeasured. The transfer needs an
-  average of about 0.45 MB/s to finish within the producer's limit; otherwise
-  the run fails and the phone restarts.
+* The phone's gadget sustained about 23 MB/s in the trial, faster than
+  macOS's serial driver reliably accepts: twice its receive buffer filled, and
+  once it never resumed reading. The phone then waits for its time limits, about
+  29 minutes. A repeat cleared it; pacing the producer would avoid it.
 * The ext4 check reads only the primary superblock; it does not inspect the
   journal or the filesystem.
 * Two reads in one boot show stability during the run, not the absence of
@@ -209,7 +213,7 @@ stops a worker. These limits remain:
 
 == Hardware boundary
 
-The x86_64 VM kernel does not exercise the Titan's vendor 4.14 kernel, its
-eMMC driver, the MTU3 USB controller, macOS enumeration, the vendor restart
-path, watchdogs or charging during a long transfer. A guarded storage set does
-not establish quiescence of firmware or kernel writers.
+The x86_64 VM checks do not exercise the Titan's vendor 4.14 kernel, its eMMC
+driver, the USB controller, macOS enumeration or the vendor restart path; the
+trial exercised those once, with two runs. A guarded storage set does not
+establish quiescence of firmware or kernel writers.

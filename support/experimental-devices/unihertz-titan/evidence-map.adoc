@@ -69,8 +69,17 @@ wrong partition label, no listening host, a host byte limit below the stream;
 disk-read counters for both passes; qemu-user refusal checks; Mac splitter
 tests
 |Builder runs on 2026-10-15
-|Any Titan run, the phone's USB rate, the vendor kernel's claims and ioctls;
-see link:control/README.adoc[the image record]
+|Behavior beyond the trial's two runs; see link:control/README.adoc[the image
+record]
+
+|Offline control-region acquisition
+|One owner-approved trial with one repeat: the repeat copied all sixteen
+regions other than `userdata`, stable across two passes, the four ext4 regions
+clean, verified on the Mac; restart into fastboot and byte-exact restore of the
+original recovery
+|2026-10-15
+|A second, separate copy (retention); firmware writers outside the run; see
+link:control-acquisition-trial.adoc[the trial record]
 
 |USB probe profile and its deadline reboot
 |Linux 6.18.38 VM cases (4): success, stuck PID 1, killed deadline process,

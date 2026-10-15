@@ -45,11 +45,13 @@ hardware works under NixOS.
   on 2026-10-15 with the owner's approval: `fastboot flash` wrote the probe
   into recovery, a Volume Up start ran it on the phone, its deadline restart
   reached fastboot, and the original recovery was restored byte for byte.
-* A build-only link:control/README.adoc[offline control-region acquisition
-  image] and its link:control-acquisition-trial.adoc[trial proposal]. Started
-  from the recovery partition, it copies the sixteen regions other than
-  `userdata` to the Mac with two hash passes and restarts into fastboot. It has
-  passed its VM checks and has not run on the phone.
+* An link:control/README.adoc[offline control-region acquisition image] and
+  its link:control-acquisition-trial.adoc[trial], run on 2026-10-15 with the
+  owner's approval. Started from the recovery partition, it copied the sixteen
+  regions other than `userdata` to the Mac, each read twice, stable and
+  consistent, then restarted into fastboot, and the original recovery was
+  restored. The first attempt stalled in macOS's serial driver; the repeat
+  succeeded.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1182,3 +1184,20 @@ passed; the plain probe ramdisk stayed byte-identical (`cdb87d51...`); and the
 `tests` target (354) passed. On the Mac, the host suite (354 tests, two
 comparisons skipped outside Nix) and the Nix `tests` target (354) passed. The
 control envelope is byte-identical to the pinned `mkbootimg`.
+
+=== Follow-up: offline control-region acquisition trial
+
+The owner approved and ran the
+link:control-acquisition-trial.adoc[offline acquisition trial] on 2026-10-15.
+`fastboot flash recovery` wrote the control image, read back by hash. On the
+first Volume Up start the transfer ran at about 23 MB/s and stopped at 97.7%,
+when macOS's serial driver filled its receive buffer and stopped reading; the
+phone restarted into fastboot at its own time limits. With the owner's approval
+of the one allowed repeat, the second start copied all sixteen regions other
+than `userdata`: every region was read twice through exclusive read-only
+claims, both passes agreed, the four ext4 regions were clean, and the Mac
+verified the stream before acknowledging it. The phone restarted into fastboot
+about ten seconds later, and the preserved original recovery was restored byte
+for byte, with boot and dtbo unchanged throughout. The twelve raw regions match
+the normal-mode copies except `expdb`, and a read-only `e2fsck` found no errors
+in the four ext4 copies. The copy is consistent but not yet retained twice.

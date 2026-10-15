@@ -1,8 +1,9 @@
 = Offline control-region acquisition trial
 
-Status on 2026-10-15: proposal only. Nothing in it has run on the phone, and
-it authorizes no phone action. Each part needs the owner's explicit approval
-of this procedure, and that approval covers one run.
+Status on 2026-10-15: *run once with the owner's explicit approval, including
+the one allowed repeat of Part 2; all four questions were answered yes. See
+<<result,the result>>.* Each repetition needs the owner's explicit approval of
+this exact procedure.
 
 The trial reuses the link:recovery-route-trial.adoc[recovery-partition route]:
 write a pinned image to recovery with `fastboot flash`, start it with Volume
@@ -12,6 +13,59 @@ acquisition initramfs]. It copies the sixteen regions other than `userdata` to
 the Mac while nothing else runs on the phone. That is the offline copy that
 link:consistent-preservation.adoc[the preservation requirements] place before
 any rollback write.
+
+[[result]]
+== Result (2026-10-15)
+
+The owner approved the procedure and ran the entries, the partition reads and
+the Volume Up starts; watchers ran the fastboot steps and the receiver.
+
+* *Preconditions.* Step 2 found boot, recovery and dtbo identical to their
+  preserved copies and `para` unchanged since the recovery-route trial; of the
+  control regions only `expdb` had changed. The battery was full and charging.
+* *Part 1.* `fastboot flash recovery` sent the padded control image and
+  reported `Writing 'recovery' OKAY` in 1.2 seconds. Step 7 read recovery back
+  as `6729b146...`, with boot and dtbo unchanged.
+* *First attempt.* After the Volume Up start the Mac found the image's USB
+  device and the transfer began. It ran at about 23 MB/s and delivered
+  753696768 bytes, 97.7% of the stream, in 33 seconds, then stopped in the
+  middle of a frame. At that second macOS's serial driver logged
+  `AppleUSBSerial::armRead() - no space left`: its receive buffer had filled
+  and it never resumed reading from the phone, although the receiver had
+  drained the buffer. The same condition had occurred at the start of the
+  transfer and cleared by itself. The phone held the stalled link until its own
+  time limits and restarted into fastboot by itself about 29 minutes after it
+  started. Every byte received matched the normal-mode copies, except in
+  `expdb`.
+* *Repeat.* The owner approved the one repeat. From fastboot the phone returned
+  to Ubuntu Touch, the receiver started and the owner made the second Volume Up
+  start. The stream of all sixteen regions took about 35 seconds, the second
+  pass about 14 more, and the receiver verified the 771722026-byte payload
+  (the regions and a 2858-byte manifest) by count, hash, sync and readback
+  before acknowledging it.
+* *Question 1, yes.* Both starts ran the image and bound its gadget.
+* *Question 2, yes,* on the repeat: every region matched its first-pass hash
+  on the Mac. The phone's USB link sustained about 23 MB/s; the limit was the
+  Mac's serial driver.
+* *Question 3, yes.* All sixteen regions were stable across the two passes, and
+  `nvcfg`, `nvdata`, `protect1` and `protect2` were `clean`; the report marks
+  all sixteen consistent.
+* *Question 4, yes.* Fastboot appeared about ten seconds after the transfer
+  completed. From there `fastboot flash recovery` wrote the preserved original
+  (`Writing 'recovery' OKAY`) and `fastboot reboot` started Ubuntu Touch. Step 13
+  read recovery back as `4dd1c1f7...`, with boot and dtbo unchanged throughout.
+* *Part 4.* The twelve raw regions are byte-identical to the normal-mode copies
+  taken in step 2, except `expdb`. A read-only `e2fsck -fn` found no errors in
+  the four ext4 copies. Those differ from the first attempt's copies because
+  the Ubuntu Touch boot between the attempts mounted each once more (mount count
+  21 to 22), with unchanged free-block counts.
+
+The sixteen regions other than `userdata` therefore have an offline copy that
+meets the consistency conditions of link:consistent-preservation.adoc[the
+preservation requirements] except retention: the Mac holds the only copy. The
+macOS serial stall remains a limit for long transfers at full speed; a repeat
+cleared it here. Not shown: the absence of firmware or kernel writers outside
+the run, the restore of any region, or anything about NixOS.
 
 == Questions
 
