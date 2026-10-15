@@ -1,0 +1,196 @@
+= Experimental USB acquisition initramfs
+
+`usbAcquisition.ramdisk` is a separate, build-only AArch64 initramfs profile
+combining rescue PID 1, a fixed configfs ACM gadget owner, the guarded userdata
+producer and the TTR1 sender. It does not replace the minimal `rescue.ramdisk`
+profile. No generated image has been booted on the Titan, and this does not boot
+NixOS. Building this target does not authorize booting it or changing the
+currently running phone's USB configuration.
+
+[source,sh]
+----
+# Run on the x86_64 Linux builder, from the repository root.
+nix-build support/experimental-devices/unihertz-titan -A usbAcquisition.ramdisk --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbAcquisition.vmTests --no-out-link
+----
+
+The second target exercises a separate x86_64 profile in disposable QEMU guests.
+The cases and acceptance checks below describe the harness requirements;
+successful runtime results must be recorded separately.
+
+== Fixed production profile
+
+PID 1 creates only `/run/usb-config/usb_gadget/titan-rescue`, with configuration
+`configs/c.1` and function `functions/acm.usb0`. It requires the unoccupied
+`musb-hdrc` controller, its canonical device
+`/sys/devices/platform/11201000.usb3`, and the `mtu3_phone` driver. These checks
+use the observed normal-mode identities; they have not been exercised by this
+initramfs on the Titan.
+
+The gadget uses VID/PID `1209:0005`, manufacturer `Titan rescue experiment`,
+product `Titan read-only acquisition`, and the fixed synthetic serial
+`TITAN-RESCUE-EXPERIMENT-0001`. The
+https://pid.codes/1209/0005/[pid.codes test PID] is reserved for private in-house
+testing. It is not universally unique and must not identify a redistributed,
+sold or manufactured device. Neither these descriptors nor the fixed serial
+authenticate a particular phone.
+
+Creating the function exposes `/dev/ttyGS0` before binding. The owner validates
+the direct character node and sysfs identity, sets and reads back raw termios
+with flow control disabled, and retains the descriptor before writing the UDC
+attribute. The sender inherits that descriptor; PID 1 keeps its own copy open
+throughout the session. There is no endpoint discovery, interactive shell,
+runtime program selection or peer-supplied storage path.
+
+After binding, the owner remounts configfs read-only, verifies the mount and
+superblock state, and requires an attempted attribute write to fail with
+`EROFS`. The shared mount policy requires exactly seven visible mounts: the RAM
+root, `/dev`, `/proc`, `/sys`, `/run`, `/tmp`, and configfs at
+`/run/usb-config`. It checks the expected filesystem types, flags and private
+mount relationships. Configfs must be read-only at both the mount and
+superblock levels; an extra alias or a per-mount read-only bind over a writable
+superblock is rejected. Acquisition is disabled during writable gadget setup
+and cleanup. The original six-mount source profile is unchanged.
+
+The fixed workers are `/bin/titan-block-produce` and
+`/bin/titan-rescue-send`. The producer selects `/dev/mmcblk0p36`, named
+`userdata`, under `/dev/mmcblk0`; it accepts no input path or descriptor override.
+Its source guard checks the measured parent and partition geometry, direct
+block-node and sysfs identities, read-only flags, holder/slave and swap state,
+mount namespace and the sealed seven-mount policy. The partition's read-only
+exclusive claim remains held through imaging, final checks and producer status
+closure. The imaging commands remain fixed:
+`/bin/e2image -ra /proc/self/fd/N -` and `/bin/zstd -q -c`.
+
+The link:../block/README.adoc[block producer] describes the clean-superblock,
+geometry, diagnostic and final source checks. A successful `TPST` record is
+forwarded through a separate bounded status pipe to the sender. The
+link:../transport/protocol.adoc[TTR1 protocol] uses the production label
+`userdata-sparse`; a missing or unsuccessful producer record prevents END and
+host publication. PID 1 launches each worker with only its intended descriptors
+and a fixed minimal environment.
+
+== Completion and failure ownership
+
+Successful transfer requires normal zero exits from both workers, an exact
+successful producer status and status EOF, and no remaining children. The host
+receiver acknowledges only after byte-count/hash verification, file fsync and
+independent saved-file readback. It publishes `payload.bin` only after the
+sender's final COMPLETE frame.
+
+TTR1 has no acknowledgement after COMPLETE. Sender exit therefore does not
+establish that the host received that final frame. Production PID 1 keeps the
+gadget bound and the original raw TTY descriptor open indefinitely after
+successful worker completion. It acquires a fresh idle source guard and repeats
+source and USB checks while waiting. It does not automatically unbind, retry,
+reboot or accept a command to start another read. A failure in this retained
+state leaves any held claim and gadget descriptors in place.
+
+On startup or acquisition failure, PID 1 stops and reaps its worker tree. This includes producer helpers
+adopted by PID 1 when their parent dies: cleanup enumerates bounded numeric
+`/proc` entries, validates their `Pid`/`PPid` status fields and waits for
+`ECHILD`, rather than relying only on the producer's process group or the
+optional proc children interface. It permits two seconds for termination before
+using SIGKILL, within a ten-second cleanup window. If children cannot be reaped,
+remaining gadget ownership is retained and the rescue failure path waits. A process
+stuck in kernel I/O may prevent cleanup.
+
+After any worker-start attempt, production failure also retains the bound raw
+gadget after child cleanup and performs no further reads. A sender may have
+queued COMPLETE before an observed failure; exit status or timeout does not
+prove that unbinding would preserve delivery. There is no automatic USB
+teardown after a production transfer attempt, including failed attempts.
+
+For setup failures before a worker-start attempt, only after child cleanup may
+the owner remount configfs writable, explicitly unbind, close its retained TTY,
+remove its own objects and ordinarily unmount configfs. The VM-only receipt
+provides a separate teardown gate for disposable tests. Cleanup does not use
+lazy unmounts or hide mounts in another namespace. Cleanup failure retains
+remaining ownership and reports failure.
+
+Production limits are 125074145280 compressed bytes, 21600 seconds for the
+producer, 21900 seconds for the sender, and a 21960-second supervisor deadline.
+These are rejection bounds, not storage reservations, throughput measurements
+or promises that every syscall can be interrupted. USB setup and cleanup also
+have polling deadlines; blocked kernel operations can exceed them.
+
+== Combined disposable VM checks
+
+The VM profile substitutes a generated 64 MiB virtio disk with a 16 MiB ext4
+`userdata` partition and the `dummy_udc.0` controller. It uses the real configfs
+ACM function, `dummy_hcd` and `cdc_acm` inside the guest. No phone, host USB
+passthrough or network participates.
+
+The complete data route is producer, sender, guest `ttyGS0`, emulated USB,
+guest `ttyACM0`, bounded VM-only relay, guest `ttyS1`, private QEMU Unix socket,
+and the existing Python host receiver. Console diagnostics use `ttyS0`.
+The relay opens and verifies raw UARTs before transfer readiness, uses two
+64 KiB queues, and neither transforms nor drops bytes. Its drained predicate
+covers those userspace queues only; it does not establish delivery through
+kernel or USB queues.
+
+The host sends a separate fixed fixture receipt through `ttyS2`. `TVM1 VERIFIED`
+is permitted only after receiver completion, sparse decompression into a
+regular file, exact logical-size verification, successful `e2fsck -fn`, and
+debugfs extraction matching the known fixture payload. `TVM1 INCOMPLETE` is
+permitted only after checking the expected failed transfer's incomplete report,
+staging file and absence of `payload.bin`. An unexpected host validation failure
+sends `TVM1 ABORT`. This fixture channel does not exist in the production
+profile and does not add a production TTR1 command or completion claim.
+
+[cols="1,3",options="header"]
+|===
+|Case |Required observation
+|`valid`
+|Complete transfer through real guest ACM, independent host archive and restored
+filesystem validation, then a VERIFIED fixture receipt.
+|`dirty-filesystem`
+|Reject the dirty primary superblock before transmitting filesystem bytes;
+retain an incomplete host archive.
+|`wrong-label`
+|Reject the fixed partition identity before transmitting filesystem bytes;
+retain an incomplete host archive.
+|`output-limit`
+|Enforce a one-byte compressed-output limit and prevent host publication.
+|`post-readonly-change`
+|Hold the real compressor's completion, verify the source claim is still held,
+clear only the synthetic disk's volatile read-only flags, and require the final
+guard to reject completion after payload transfer.
+|`forced-producer-death`
+|At the same held-claim completion gate, kill the producer, require adopted
+helpers to be stopped and reaped through the proc-status child scan, verify
+claims are released, and leave the host archive incomplete with no successful
+producer attestation.
+|===
+
+The last two cases install a test-only compressor proxy at the fixed path in
+the guest RAM filesystem. This is not a production executable override. Exact
+worker/status results, stage markers and the expected host receipt must agree;
+an unrelated boot or setup failure cannot pass a negative case. Passing-case
+teardown and poweroff require all workers to be reaped and the host receipt
+to be checked. An unexpected fixture failure may clean up without a receipt,
+but emits failure and cannot pass the test.
+
+Each case has a 90-second host deadline and a combined 4 MiB console/diagnostic
+bound. All synthetic disk bytes are hashed before and after the run and must
+match. Private results record the expected/observed kernel version, kernel and
+initramfs hashes, stage markers, host outcome and disk hashes. The separate
+`mountPolicy.vmTests` checks the seven-mount policy's rejection and retained-claim
+behavior; the standalone `usb.vmTests` checks USB lifecycle failures, including
+partial-transfer disconnect. Those suites do not establish combined pipeline
+coverage for every physical disconnect or controller failure.
+
+== Hardware and recovery boundary
+
+The modern x86_64 VM kernel does not validate the Titan vendor 4.14 USB stack,
+block-claim behavior, controller role selection, macOS enumeration, charging or
+watchdogs. The production profile has not run on the phone. A clean superblock,
+read-only flags, exclusive claim and matching observations do not establish
+quiescence of ordinary raw writers, sibling partitions, modem/kernel activity
+or firmware. They do not establish a consistent live userdata backup.
+
+This profile selects userdata only. Calibration, remaining device-specific
+partitions, consistent inactive acquisition, restore verification, and an
+explicitly authorized and demonstrated hardware boot/return path remain
+separate requirements. The initramfs supplies neither an OEM restoration route
+nor a rollback guarantee and must not be treated as a ready-to-flash image.

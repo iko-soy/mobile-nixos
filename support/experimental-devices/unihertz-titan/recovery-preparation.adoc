@@ -668,17 +668,23 @@ disconnect, with explicit owned cleanup and unchanged generated disk hashes.
 An off-device link:transport/protocol.adoc[serial transfer prototype] now defines
 bounded nonce/sequence framing, SHA-256 verification and a two-way completion
 exchange. Its separate sender/receiver tests use synthetic sockets and PTYs.
-It is not included in rescue PID 1 and does not configure configfs or bind ACM.
-Future gadget setup must establish raw sender readiness before UDC binding;
+The default `rescue.ramdisk` remains separate; the integrated build described
+below adds fixed configfs/ACM ownership. Gadget setup must establish raw sender
+readiness before UDC binding;
 bytes sent to a canonical/echoing TTY during startup cannot be recovered by
 assuming the later raw-mode setting repairs them. A producer supervisor must
 also validate imaging/compression exits and diagnostics before attesting success.
 The link:producer/README.adoc[regular-image producer] exercises that supervision
 against ext4 files. The separate link:block/README.adoc[guarded block producer]
 adds fixed userdata selection and retained claims, with a disposable VM fixture
-covering the full transfer and restore path. Production USB/startup integration
-remains unimplemented. Transport completion alone does not establish a valid or
-consistent backup.
+covering the full transfer and restore path. The separate
+link:usb-pipeline/README.adoc[USB acquisition build] now combines fixed startup,
+raw retained TTY ownership, a sealed seven-mount policy and supervised guarded
+imaging. It retains the gadget after any transfer-start attempt, even on failure,
+since sender exit cannot establish delivery of its final completion message.
+Its bounded adopted-child cleanup uses `/proc/<pid>/status`; the normal Titan
+kernel omits the optional `children` file. No integrated artifact has run on the
+Titan. Transport completion alone does not establish a valid or consistent backup.
 
 No independent physical bootloader entry/exit or temporary-boot capability was
 established. The link:https://www.unihertz.com/pages/faqs[manufacturer FAQ]

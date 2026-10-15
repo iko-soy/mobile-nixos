@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MIT
- * Build-only rescue PID 1. No storage mounts, acquisition, shell or transport.
+ * Build-only rescue PID 1. The default profile has no acquisition or transport;
+ * a separate explicit USB pipeline profile supplies its own lifecycle callback.
+ * No profile mounts storage filesystems or starts an interactive shell.
  * BLKROSET changes the kernel's volatile block-device flag, not storage bytes.
  * This does not prevent kernel/firmware writers or establish hardware safety.
  */
@@ -21,6 +23,13 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifdef TITAN_USB_MOUNT_PROFILE
+#include "mount-policy.h"
+#endif
+#ifdef TITAN_USB_PIPELINE_PROFILE
+int titan_usb_pipeline_run(void);
+#endif
 
 #ifndef TITAN_RESCUE_DISCOVERY_SECONDS
 #define TITAN_RESCUE_DISCOVERY_SECONDS 10
@@ -77,6 +86,7 @@ static void open_console(void) {
         close(fd);
 }
 
+#ifndef TITAN_USB_MOUNT_PROFILE
 static int expected_mount(const char *path, const char *type) {
     if (strcmp(path, "/") == 0)
         return (strcmp(type, "rootfs") == 0 || strcmp(type, "ramfs") == 0
@@ -113,6 +123,13 @@ static void verify_mounts(void) {
         failed("mount-inventory-incomplete");
     fclose(stream);
 }
+#else
+static void verify_mounts(void) {
+    const char *reason = NULL;
+    if (titan_mount_inventory(TITAN_MOUNTS_BASELINE_6, &reason) != 0)
+        failed(reason ? reason : "usb-baseline-mount-check-failed");
+}
+#endif
 
 static int safe_device_name(const char *name) {
     if (!*name || strlen(name) > 255 || strcmp(name, ".") == 0
@@ -229,6 +246,10 @@ int main(void) {
 #ifdef TITAN_RESCUE_VM_TEST
     (void)titan_rescue_vm_test();
     failed("vm-test-returned");
+#endif
+#ifdef TITAN_USB_PIPELINE_PROFILE
+    (void)titan_usb_pipeline_run();
+    failed("usb-pipeline-returned");
 #endif
     for (;;) {
         wait_one_second();

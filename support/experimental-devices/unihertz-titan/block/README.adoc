@@ -154,8 +154,9 @@ and return route.
 
 This integration selects userdata only. Independent primary/backup GPT checks,
 complete storage discovery and private partition-table, calibration and other
-device-specific preservation remain separate work. A production rescue launcher,
-reviewed USB startup and failure handling, filesystem consistency and restoration
-checks, and an explicitly authorized, demonstrated hardware boot/return procedure
-are still required. These artifacts have not been executed on the Titan and do
+device-specific preservation remain separate work. The separate
+link:../usb-pipeline/README.adoc[USB acquisition profile] supplies a build-only
+launcher with fixed USB ownership and failure handling. Filesystem consistency,
+restoration checks and an explicitly authorized, demonstrated hardware boot/return
+procedure are still required. These artifacts have not been executed on the Titan and do
 not supply a hardware acquisition or flashing procedure.

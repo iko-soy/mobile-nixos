@@ -22,8 +22,8 @@ hardware works under NixOS.
 * A reproduction of the Ubuntu Touch reference boot-image recipe, using the
   pinned Ubuntu Touch initramfs, adaptation overlay and prebuilt Titan DT table.
 * A separate source-built AArch64 rescue ramdisk with a small independent
-  PID 1 and static backup tools. It has no acquisition transport or phone boot
-  validation; see the build-only rescue section below.
+  PID 1 and static backup tools, plus a separate experimental USB acquisition
+  profile. Neither has phone boot validation; see the build-only sections below.
 * Host-side inventory, kernel configuration comparison, read-only kernel API
   probes, boot-image inspection and bounded private boot/recovery/dtbo
   acquisition tools, bounded GPT capture/validation, and a host-only sparse ext4
@@ -142,8 +142,9 @@ requires a separate local producer-status pipe. The separate
 link:producer/README.adoc[producer prototype] exercises pipeline supervision
 against regular ext4 image files, including e2image read-error diagnostics with
 exit status zero. The separate link:block/README.adoc[guarded block producer]
-adds the fixed userdata source profile; phone startup and USB integration remain
-unimplemented.
+adds the fixed userdata source profile. The separate
+link:usb-pipeline/README.adoc[USB acquisition profile] integrates these pieces
+for build-only review and disposable VM validation.
 
 Limits apply to transmitted bytes, so a future compressed sparse acquisition can
 stream without retaining userdata in RAM or reserving its entire logical size
@@ -207,8 +208,8 @@ compression supervisor in a separate static AArch64 executable. It accepts
 only output/status pipe descriptors, a compressed-byte limit and a deadline.
 It retains the checked exclusive partition descriptor through child cleanup,
 repeated source checks and status EOF. The caller cannot override its source
-or helper executable paths. No acquisition-enabled production ramdisk or phone
-startup is supplied.
+or helper executable paths. This standalone target does not supply startup; the
+separate `usbAcquisition.ramdisk` experiment below provides a fixed PID 1 launcher.
 
 The link:block/README.adoc[block acquisition contract] describes its preflight,
 completion rules and remaining consistency limits. `acquisition.vmTests` runs
@@ -229,10 +230,36 @@ All five cases passed with Linux 6.18.38 on 2026-10-15; the Mac independently
 verified all downloaded fixture disks against their unchanged before/after hashes.
 
 The callback temporarily owns a visible configfs mount after the existing
-rescue guard's VM handoff. Production PID 1 and the source guard still require
-their original six mounts; the production AArch64 rescue ramdisk remains
-without USB startup. Combining USB with acquisition requires a separately
-reviewed mount policy and lifetime supervisor, followed by hardware validation.
+rescue guard's VM handoff. The default `rescue.ramdisk` and source checker keep
+their original six-mount policy. The separate integrated profile below uses an
+explicit seven-mount policy and owns the full acquisition lifetime.
+
+== Build-only USB acquisition profile
+
+`usbAcquisition.ramdisk` builds a separate static AArch64 initramfs with a fixed
+ACM owner, guarded userdata producer, sender, `e2image` and Zstandard. It uses the
+measured MTU3 device/driver path, sets and retains raw `ttyGS0` before binding,
+then seals its visible configfs mount read-only before starting acquisition.
+The explicit USB source profile accepts exactly seven RAM/virtual mounts; it
+never falls back to the default six-mount policy. See the
+link:usb-pipeline/README.adoc[full lifecycle, limits and VM contract].
+
+[source,sh]
+----
+nix-build support/experimental-devices/unihertz-titan -A usbAcquisition.ramdisk --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbAcquisition.toolTests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbAcquisition.vmTests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A mountPolicy.vmTests --no-out-link
+----
+
+After transfer starts, production retains the gadget even on failure: sender
+exit or an empty software queue cannot prove that its final bytes reached the
+Mac. Worker cancellation must reap all children before any pre-transfer cleanup.
+The VM-only receipt channel permits teardown after the host has verified a
+complete archive or confirmed an incomplete result. It is absent from the
+AArch64 artifact. This output is not an Android boot image, a consistent Titan
+backup or a demonstrated recovery environment. Hardware boot/exit, writer
+quiescence, calibration preservation and Mac USB recognition remain unverified.
 
 == Reference inputs
 
@@ -737,6 +764,56 @@ documents rendered without warnings.
 These reads did not change partitions, block flags, phone software or boot mode.
 They preserve partition-table metadata, not userdata, calibration, eMMC boot/RPMB
 regions or a complete firmware set. The Mac remains the only backup destination.
-Quiescent data preservation, production USB/acquisition startup and a demonstrated
-boot/return and restoration route remain required. No generated image has booted
+Quiescent data preservation, hardware validation of USB/acquisition startup and a
+demonstrated boot/return and restoration route remain required. No generated image has booted
 on the Titan, and NixOS boot compatibility remains unresolved.
+
+
+=== Follow-up: integrated USB acquisition in disposable VMs
+
+On 2026-10-15, the separate `usbAcquisition.ramdisk` built as static AArch64
+userspace. Its fixed PID 1 now owns raw ACM startup and the guarded imaging and
+transport workers. Both PID 1 and the producer use an explicit sealed
+seven-mount profile; the default six-mount rescue/checker paths remain separate.
+The link:usb-pipeline/README.adoc[integration contract] records ownership,
+completion semantics, bounded cleanup and the absence of any phone boot claim.
+
+The compressed ramdisk is 3054712 bytes, SHA-256
+`27d2a3da8f23391a4d280eb37fd145a8f63b13a6a051b969a23bcac6ca6aed88`.
+Its 7827968-byte CPIO archive contains six static AArch64 executables. The Mac
+independently checked the archive against its inspectable payload tree and
+hash manifest, every downloaded fixture disk against its unchanged before/after
+hashes, and private `0700`/`0600` artifact permissions.
+
+All six combined cases passed on Linux 6.18.38 with QEMU 11.0.1: successful
+transfer and restored filesystem/payload verification, dirty filesystem, wrong
+partition label, compressed-output limit, read-only flag change before
+completion, and forced producer death with adopted-helper cleanup. Data passed
+through real guest ACM and `cdc_acm`, then a VM-only bounded UART relay to the
+host receiver. An independent VM receipt allowed successful fixture teardown
+only after host validation. The production artifact contains neither relay nor receipt channel.
+Seven separate mount-policy cases passed, including rejection of a read-only
+bind mount over writable configfs and retained source claims after unsealing.
+
+Normal-mode phone probes confirmed the MTU3 device/driver paths and absence of
+the optional procfs children interface. Cleanup now uses bounded PID/PPid
+status enumeration, with 13 parser fixtures and a real VM orphan-cleanup case.
+The production gadget remains bound after any worker-start attempt, including
+failure, because neither sender exit nor an empty TTY queue proves delivery of
+its final COMPLETE message. Successful completion adds an idle source guard;
+a failed attempt performs no new acquisition or automatic USB teardown.
+
+Regression runs also passed the three rescue, ten storage-source, five guarded
+block-acquisition and five USB-lifecycle VM cases, plus the 153 host tests and
+packaging fixture. Three new serial-marker tests cover a corrected rescue
+harness race involving incomplete console lines. The AArch64 init refuses
+non-PID1 execution, and the producer rejects non-rescue execution and source or
+helper overrides under user-mode emulation. These are host/VM results, not
+Titan runtime validation.
+
+Only sanitized sources and findings are retained in Git. Built artifacts,
+fixture reports and probe logs remain private on the Mac. No phone software,
+partition contents, block flags, gadget configuration or boot mode changed in
+this stage. Consistent userdata/calibration preservation, a second independent
+backup destination and a demonstrated boot/return/restoration route remain
+open; NixOS compatibility is still unresolved.

@@ -82,18 +82,18 @@ baseline and power off the disposable guest. The writable host disk fixture's
 complete SHA-256 must remain unchanged. Unexpected failure markers, missing
 markers, timeout, diagnostic overflow or a changed disk fail the test.
 
-== Remaining integration
+== Separate integration and remaining hardware work
 
 These checks exercise the pinned modern Linux USB software stack. Titan uses
 the vendor 4.14 MTU3 phone driver, not `dummy_hcd`. They do not establish Titan
 USB role selection, macOS recognition, watchdog/charging behavior or boot/return
 safety. No generated image has been booted on the phone.
 
-Before combining USB and acquisition, define an explicit configfs mount policy
-in both PID 1 and the source guard, with acquisition disabled during writable
-setup/cleanup. Retain a supervisor that owns the gadget and all worker
-descriptors through failure and completion. Source/transport completion and
-host receipt must precede any successful teardown; a drained TTY buffer alone
-does not prove that USB requests reached the host. Test the combined pipeline
-and failure paths separately. Consistent userdata/calibration preservation and
-a verified recovery route remain open gates.
+The separate link:../usb-pipeline/README.adoc[USB acquisition profile] now supplies
+an explicit configfs mount policy in PID 1 and the source guard, with acquisition
+disabled during writable setup/cleanup. Its supervisor owns the gadget and worker
+descriptors through failure and completion. This fixture remains a separate USB
+lifecycle test; the combined pipeline has its own VM cases. A drained TTY buffer
+does not establish host receipt, and the production integrated profile retains
+the bound gadget after transfer starts. Consistent userdata/calibration
+preservation and a verified recovery route remain open gates.

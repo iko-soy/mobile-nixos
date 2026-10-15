@@ -46,8 +46,11 @@ def disk_hash(path):
 
 def has_marker(console, marker):
     marker = marker.encode("ascii")
+    # Serial reads can stop after a marker prefix but before its reason. Only
+    # complete lines may affect a case's outcome; retain the trailing fragment
+    # for the next read instead of mistaking it for an unexpected failure.
     return any(line == marker or line.startswith(marker + b" ")
-               for line in console.replace(b"\r", b"").split(b"\n"))
+               for line in console.replace(b"\r", b"").split(b"\n")[:-1])
 
 
 def run_case(name, output, qemu, kernel, initrd):

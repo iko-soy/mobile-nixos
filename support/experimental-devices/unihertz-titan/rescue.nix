@@ -159,6 +159,8 @@ let
     nativeBuildInputs = [ pkgs.python3 ];
     meta = { platforms = [ "x86_64-linux" ]; hydraPlatforms = []; };
   } ''
+    export PYTHONDONTWRITEBYTECODE=1
+    python3 ${./rescue/test-vm-markers.py} ${./rescue/vm-check.py}
     python3 ${./rescue/vm-check.py} \
       --qemu ${pkgs.qemu}/bin/qemu-system-x86_64 \
       --kernel ${vmKernel}/bzImage \

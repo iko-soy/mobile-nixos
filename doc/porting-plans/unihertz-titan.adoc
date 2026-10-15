@@ -45,6 +45,13 @@ data preservation, bootloader-only entry/exit, a later authorized boot rollback,
 and the still-unverified OEM emergency path. These advances do not close M0 or
 authorize boot experiments.
 
+Private primary/backup GPT windows have since been preserved and checked against
+all 38 kernel partitions. A separate build-only USB acquisition initramfs now
+combines fixed ACM ownership with the guarded userdata producer. Disposable VM
+tests exercise the sealed configfs policy, complete sparse restoration and
+failure cleanup. These software results do not establish a quiescent Titan
+backup, macOS ACM operation or a hardware boot/return route; M0 remains open.
+
 toc::[]
 
 == Objective and recommended approach

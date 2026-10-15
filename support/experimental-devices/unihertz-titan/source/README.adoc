@@ -23,11 +23,19 @@ flags, and empty parent/partition holder sets. The parent's slave set must be
 empty. This kernel has no partition `slaves` directory: absence is accepted only
 there; an existing directory must be empty.
 
-Only the existing rescue environment's six RAM/virtual mounts are accepted:
+The default profile accepts only the existing rescue environment's six RAM/virtual mounts:
 RAM root, devtmpfs `/dev`, proc `/proc`, sysfs `/sys`, and tmpfs `/run` and `/tmp`.
 Swap must be absent and the mount namespace must agree with PID 1. These checks
 describe the current kernel namespace; they do not prove that no other namespace,
 kernel thread, firmware component or ordinary raw-device writer exists.
+
+The separate link:../usb-pipeline/README.adoc[USB acquisition build] explicitly
+compiles `TITAN_USB_MOUNT_PROFILE`. It requires those six mounts plus configfs at
+`/run/usb-config`, with both mount and superblock read-only and restricted flags.
+No storage acquisition is allowed during writable gadget setup/cleanup. The
+shared parser rejects extra mounts, propagation tags, a wrong configfs mount parent and
+unsealed configfs; it does not weaken the default checker. Seven disposable VM
+cases cover sealed acceptance and six concrete failure/recheck conditions.
 
 The parent descriptor is read-only and nonexclusive. The partition descriptor
 adds `O_EXCL`, remains open across a second complete check, and is returned to

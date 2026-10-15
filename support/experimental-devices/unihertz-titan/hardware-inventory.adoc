@@ -278,6 +278,19 @@ was bound, and this is a running Ubuntu Touch observation, not rescue USB
 validation. The UDC name alone must not be mistaken for the alternative disabled
 vendor USB2 driver.
 
+A read-only follow-up on 2026-10-15 resolved the UDC device to
+`/sys/devices/platform/11201000.usb3` and its driver to
+`/sys/bus/platform/drivers/mtu3_phone`; its state remained `configured`. These
+fixed paths now constrain the experimental USB owner. No gadget was rebound.
+
+The same session found `/proc/<shell-pid>/task/<shell-pid>/children` absent while
+its task directory existed and `/proc/<shell-pid>/status` supplied a readable
+`PPid`. The running configuration explicitly disables `CONFIG_PROC_CHILDREN`
+and `CONFIG_CHECKPOINT_RESTORE`. The integrated PID 1 therefore uses bounded
+numeric `/proc` enumeration and status parent fields for adopted-worker cleanup;
+it does not depend on the optional children listing. Raw probe output remains
+private, and the normal-mode probes changed no phone configuration.
+
 === Direct userdata source geometry
 
 A later normal-mode ADB probe revalidated the original eMMC layout without

@@ -6,6 +6,9 @@
 #define _DEFAULT_SOURCE 1
 
 #include "guard.h"
+#ifdef TITAN_USB_MOUNT_PROFILE
+#include "mount-policy.h"
+#endif
 
 #include <dirent.h>
 #include <errno.h>
@@ -328,6 +331,13 @@ static int sysfs_profile(const struct titan_source *source, dev_t *disk_device,
     return 0;
 }
 
+#ifdef TITAN_USB_MOUNT_PROFILE
+static int mount_inventory(const char **reason)
+{
+    /* USB acquisition never falls back to the pre-setup six-mount inventory. */
+    return titan_mount_inventory(TITAN_MOUNTS_USB_SEALED_7, reason);
+}
+#else
 static int expected_mount(const char *path, const char *type)
 {
     if (strcmp(path, "/") == 0 && (strcmp(type, "rootfs") == 0 ||
@@ -431,6 +441,7 @@ static int mount_inventory(const char **reason)
     }
     return count == 6 && seen == 63U ? 0 : fail(reason, "mount-inventory-incomplete");
 }
+#endif
 
 static int swap_inventory(const char **reason)
 {
