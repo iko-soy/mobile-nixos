@@ -1,0 +1,150 @@
+= Native route N0: MT6771 starting point and Titan gap table
+
+Research date: 2026-10-15. On that day the owner chose the native route of the
+link:../../../doc/porting-plans/unihertz-titan.adoc[porting plan] (decision
+D1): a modern kernel with standard Linux interfaces, as the
+link:userspace-feasibility.adoc[feasibility record] recommends. This record is
+N0: a pinned starting point, the Titan's hardware facts, a driver and device-tree
+gap table and a bounded first-boot scope. It adds no build and authorizes no
+phone action. *V* marks a fact verified from the named source; *I* marks an
+inference.
+
+== Pinned starting point
+
+The donor is postmarketOS's `linux-postmarketos-mediatek-mt6771`, the only
+modern kernel package for this SoC (V, pmaports `main` at
+`0e458a2417d6f5ed61c7b70621d5632e30136091`):
+
+[cols="2,3",options="header"]
+|===
+|Input |Pin
+|Linux `v7.3-rc3`
+|commit `fd73f4a6659897191fa0d40695fe370925dd3780`; the snapshot tarball has
+SHA-256 `49b24119d7b92da75bba0daf5da4f7735c8cb948757a282e849092dcc681d8dd`
+|`0001-hx83112a_touchscreen.patch`
+|SHA-256 `19d4596e4038242ea1d0b0208c2a444073ab7d58ed4797c7334a8a3ec0c5618d`;
+a touchscreen used by the Gigaset GS4
+|`0002-add-mt6771-gigaset-gs4.patch`
+|SHA-256 `e11f14be74f56bce72f78799880ecff2bc284d95a3e06c51c9c189c383c0f9a3`;
+adds `mt6771.dtsi`, the GS4 board tree and a minimal overlay
+|`config-postmarketos-mediatek-mt6771.aarch64`
+|SHA-256 `11d1edeb4207642eedfce634f2de2ab4c6a279799466f1777446f22c9004f7e4`
+|===
+
+Mainline has no MT6771 support (V: no `mt6771` or `mt8788` in `v7.3-rc3`,
+current master or linux-next). The donor's `mt6771.dtsi` includes the mainline
+`mt8183.dtsi` and removes CPU idle states and operating points, which its
+authors found broken (V). Mainline supports the MT6358 PMIC completely (V).
+
+Reference only, not build inputs: the
+`linux-mediatek/linux` branch `adomerle/mt6771-next` at
+`96fe48bed8ae4ac1d0d1e3a4b757113c2604a490` (V). Its FPlus T1100 tablet tree
+(MT8788, with the same MT6358 PMIC and MT6370 sub-PMIC as the Titan) runs USB
+in peripheral-only mode, powered from the MT6358 `vusb33` regulator, and the
+branch carries a T-PHY software role-switch fix described as needed on MT6771.
+The older Cosmo Communicator tree (`affenull2345/linux` at `212f7f9c`) has the
+same `mt6771.dtsi` and a board tree with explicit reserved regions (V).
+
+== Titan facts
+
+Sources: the adaptation's device tree, whose SHA-256 equals the installed one
+(`51a6baed...`); the board overlay in the preserved `dtbo` partition (one
+47481-byte overlay); a read-only reading of the live device tree on
+2026-10-15; and the earlier runtime inventory.
+
+* *SoC and memory (V).* `mediatek,mt6771` (`MT6771V/C`), eight cores, GICv3,
+  PSCI. The bootloader reports one 6 GiB region at `0x40000000`.
+* *Bootloader-reserved memory (V, live tree).* The bootloader adds these to
+  `/reserved-memory` at boot: ATF `0x54600000` (256 KiB), ram console and pstore
+  at `0x54400000`, SPM, SSPM and log store below `0x80000000`, SCP
+  `0x9cf00000` (6 MiB), about 280 MiB for the modem from `0x86000000`, the VPU
+  binary, ATF log, TEE `0xedc00000` (36 MiB) and both DRAM-controller pages.
+* *Storage (V).* eMMC on `msdc@11230000`, SD on `msdc@11240000`.
+* *PMIC (V).* MT6358 on the PMIC wrapper, interrupt on GPIO 182. Sub-PMIC
+  MT6370 (charger, USB-C, flash LED, backlight) on `i2c5` at `0x34`, USB-C at
+  `0x4e`; second charger RT9465 (`i2c6` `0x4b`), fuel gauge (`0x2f`), IDT
+  wireless charging (`0x61`) and speaker amplifier (`0x34`) on `i2c6`.
+* *USB (V).* `mediatek,mt6771-mtu3` with its own PHY node.
+* *Display (V).* Panel `nt35595_fhd_dsi_cmd_truly_nt50358_drv`: a Novatek
+  NT35595 DSI panel in command mode with an NT50358 bias supply, 1440×1440 at
+  32 bits per pixel and 59.94 Hz; the bootloader's framebuffer is reserved at
+  `0x7e340000` (`0x1bc0000` bytes).
+* *Input (V).* AW9523 keyboard and LED controller (`i2c4` `0x58`), touchscreen
+  (`i2c0` `0x5d`), the keypad (`mtk-kpd`) and a keyboard touchpad node.
+* *Other (V).* Sensors on `i2c1`, cameras on `i2c2`/`i2c4`/`i2c7`, flash LED and
+  NFC on `i2c3`, fingerprint, infrared, vibrator and notification LEDs.
+* *Bootloader GPIO table (V).* The board overlay carries `gpio_init_default`
+  for all 192 pins under the GPIO node. The postmarketOS documentation states
+  that the bootloader itself reads this table.
+
+== Gap table
+
+[cols="2,3,2",options="header"]
+|===
+|Block |Donor status |First boot
+|CPUs, GIC, timer, PSCI |`mt8183.dtsi` via `mt6771.dtsi`, without idle or
+frequency scaling (V) |Yes
+|Memory and reserved regions |Bootloader fills `/memory` and adds its regions
+(V); the T1100 deletes the SCP node because the bootloader protects that
+memory (V) |Yes, with `/reserved-memory` present
+|eMMC |`mtk-sd` with the MT8183 compatible; works on the GS4 (V, wiki) |Yes,
+guarded read-only
+|USB device mode |Not working on the GS4 (V, wiki); peripheral-only on the T1100
+with the T-PHY fix and `vusb33` (V, source) |Yes: the only feedback channel
+|MT6358 PMIC and regulators |Mainline (V); needed for `vusb33` |Yes, with
+unused regulators, clocks and power domains left on (I)
+|Watchdog and restart |MT8183 watchdog driver (V) |Yes; a plain restart, so the
+phone is expected to boot Ubuntu Touch rather than fastboot (I)
+|Display |GS4 uses simple-framebuffer only (V); the Titan's panel is in command
+mode, which refreshes only when frames are pushed, so a simple framebuffer is
+not expected to show anything (I) |No
+|Keyboard (AW9523) |Mainline GPIO expander driver; the Cosmo tree adds a
+matrix-keyboard driver (V) |No
+|Touchscreen, keypad, sensors |Not assessed |No
+|Charging and fuel gauge |MT6370 charger in mainline (V); RT9465, IDT and the
+gauge not assessed |No; short runs on battery
+|Audio, modem, Wi-Fi, Bluetooth, GPS, cameras, NFC |Not working on the GS4
+(V) |No
+|===
+
+== Bootloader constraints
+
+* The stock DTB section is an Android DT table with one entry (V); the GS4 boots
+  a raw FDT (V). Keep the DT table for the Titan (I: the conservative choice).
+* The bootloader applies an overlay, which must apply successfully (V,
+  postmarketOS MT8183 documentation). For recovery boots it is expected to use
+  the recovery image's own recovery-DTBO section, as postmarketOS's MT6785 port
+  does (I). The stock overlay targets downstream labels and cannot fit a modern
+  tree, and the `dtbo` partition serves Ubuntu Touch, so it must not change.
+  The first boot therefore needs a Titan overlay in the recovery-DTBO section
+  carrying the stock `gpio_init_default` table and the nodes the bootloader
+  expects, as the GS4 overlay does.
+* `/chosen/bootargs` and `/reserved-memory` must exist (V, documentation). The
+  GS4 command line is only `bootopt=64S3,32N2,64N2` (V).
+* The documentation mentions a possible AVB-footer requirement; this bootloader
+  has started unsigned recovery images without one four times (V).
+
+== First-boot scope
+
+The first modern boot reuses the recovery-partition route and the
+link:usb-probe/README.adoc[probe]: the pinned donor kernel with the T-PHY fix,
+a Titan device tree with the bootloader's memory layout, the eMMC and
+peripheral-only USB, a Titan overlay in the recovery-DTBO section, and a probe
+built for modern device naming (on modern kernels the RPMB area is a character
+device, not a block device). Its success signal is the probe's USB report with
+the new kernel release. Unsupported in that boot: display, keyboard,
+touchscreen, keys, charging and every radio, audio, camera and sensor device.
+
+Open risks: whether the bootloader accepts the modern tree and the new overlay;
+whether USB device mode works without the MT6370 USB-C driver; and whether a
+hang leaves the phone without a restart, which the
+link:repo-kernel-trial.adoc[repository-kernel trial] already plans for.
+
+== Next steps (N1, build-only first)
+
+. A pinned Nix build of the donor kernel with the T-PHY fix.
+. A Titan device tree and overlay, packaged as DT tables, with the stock GPIO
+  table.
+. A probe profile for modern device naming, with its VM checks.
+. An envelope profile for a non-installed kernel and DTB with the Titan
+  overlay, a flash profile, an independent review and a trial proposal.

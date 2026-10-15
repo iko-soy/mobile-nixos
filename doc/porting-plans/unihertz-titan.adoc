@@ -116,7 +116,9 @@ second verified copy of the rollback set on separate storage. Finally the
 kernel this repository builds booted from the recovery partition with the probe
 and restarted into fastboot, which passes M1's hardware gate for the kernel.
 M0 remains open for firmware/restore provenance and outstanding hardware
-details.
+details. On 2026-10-15 the owner chose the native route (decision D1); its
+link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/experimental-devices/unihertz-titan/native-n0.adoc[N0 record]
+pins a postmarketOS MT6771 starting point and bounds a first modern boot.
 
 toc::[]
 
