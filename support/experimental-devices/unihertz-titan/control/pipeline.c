@@ -31,6 +31,21 @@
 void titan_usb_probe_tick(void);
 _Noreturn void titan_usb_probe_restart(void);
 
+#ifdef TITAN_PIPELINE_DIAG
+/* The diagnostic variant (diag/README.adoc): the same pipeline with a small
+ * fixed producer of kernel and firmware state; no storage is read. */
+#define PRODUCER_PATH "/bin/titan-diag-produce"
+#define TRANSFER_LABEL "titan-diagnostics"
+#define BYTE_CAP "8388608"
+#ifdef TITAN_USB_PROBE_VM_TEST
+#define PRODUCER_SECONDS "60"
+#define SENDER_SECONDS "90"
+#else
+#define PRODUCER_SECONDS "200"
+#define SENDER_SECONDS "240"
+#endif
+#else
+#define PRODUCER_PATH "/bin/titan-control-produce"
 #ifdef TITAN_USB_PROBE_VM_TEST
 #define BYTE_CAP "33554432"
 /* Longer than the producer's limit plus the sender's grace, as on the phone. */
@@ -44,6 +59,7 @@ _Noreturn void titan_usb_probe_restart(void);
 #define SENDER_SECONDS "1740"
 #endif
 #define TRANSFER_LABEL "control-regions-raw"
+#endif
 #define SUCCESS_GRACE_MS 5000
 #define FAILURE_GRACE_MS 10000
 /* After a failed producer, time for the sender to report the error to a
@@ -119,7 +135,7 @@ static int failed_exit(int status)
     return !WIFEXITED(status) || WEXITSTATUS(status) != 0;
 }
 
-#ifdef TITAN_USB_PROBE_VM_TEST
+#if defined(TITAN_USB_PROBE_VM_TEST) && !defined(TITAN_PIPELINE_DIAG)
 /* Sectors read through each fixture partition, so the host can confirm that
  * both passes reached the disk instead of the page cache. */
 static void vm_read_counters(void)
@@ -165,7 +181,7 @@ int titan_usb_control_run(struct titan_usb *usb)
     workers[0] = fork();
     if (workers[0] == 0) {
         child_descriptors(data[1], status[1], -1);
-        char *const arguments[] = { "/bin/titan-control-produce", "--output-fd", data_write,
+        char *const arguments[] = { PRODUCER_PATH, "--output-fd", data_write,
             "--status-fd", status_write, "--max-bytes", BYTE_CAP, "--timeout-seconds", PRODUCER_SECONDS, NULL };
         execve(arguments[0], arguments, environment);
         _exit(127);
@@ -236,8 +252,10 @@ int titan_usb_control_run(struct titan_usb *usb)
     /* The sender exits zero only after the host's ACK, which follows its own
      * count, hash, sync and readback checks; then it sends COMPLETE. */
     puts("TITAN_CONTROL_COMPLETE");
-#ifdef TITAN_USB_PROBE_VM_TEST
+#if defined(TITAN_USB_PROBE_VM_TEST) && !defined(TITAN_PIPELINE_DIAG)
     vm_read_counters();
+#endif
+#ifdef TITAN_USB_PROBE_VM_TEST
     for (int waited = 0; waited < 30000 && !(bridge.receipt == TITAN_VM_RECEIPT_VERIFIED &&
                                             titan_usb_vm_relay_drained(&bridge)); waited += 10) {
         if (titan_usb_vm_relay_step(&bridge, &reason) != 0) goto failed;

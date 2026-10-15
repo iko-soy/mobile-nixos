@@ -41,7 +41,12 @@
  * disk and partition set. */
 int titan_rescue_guard_storage(void);
 
-#if defined(TITAN_USB_CONTROL_PROFILE) && defined(TITAN_USB_PROBE_VM_TEST)
+#if defined(TITAN_PIPELINE_DIAG) && defined(TITAN_USB_PROBE_VM_TEST)
+#define DEADLINE_SECONDS 180
+#elif defined(TITAN_PIPELINE_DIAG)
+/* The diagnostic transfer is small; restart regardless after five minutes. */
+#define DEADLINE_SECONDS 300
+#elif defined(TITAN_USB_CONTROL_PROFILE) && defined(TITAN_USB_PROBE_VM_TEST)
 #define DEADLINE_SECONDS 180
 #elif defined(TITAN_USB_CONTROL_PROFILE)
 /* The control acquisition transfers about 736 MiB at an unmeasured USB rate;

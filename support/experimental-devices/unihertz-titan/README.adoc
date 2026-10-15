@@ -66,6 +66,10 @@ hardware works under NixOS.
   the probe, built for modern device naming, reported kernel `7.3.0-rc3` after
   guarding the eMMC and binding USB device mode. The phone then restarted into
   Ubuntu Touch, and the original recovery was restored.
+* A link:diag/README.adoc[native-route diagnostic image], built and checked
+  in a VM, and its link:native-diag-trial.adoc[trial proposal], not run: the
+  same modern kernel sends its own log, the device tree the bootloader passed
+  and which devices found drivers to the Mac, reading nothing from storage.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1251,3 +1255,12 @@ recovery, the probe reported kernel `7.3.0-rc3` after guarding the eMMC and
 binding USB device mode, the phone restarted into Ubuntu Touch, and the
 original recovery was restored byte for byte, with boot and dtbo unchanged.
 This is the first mainline-based kernel to run on the Titan.
+
+Without a display driver or serial console, the modern kernel's own log stays
+on the phone. The link:diag/README.adoc[diagnostic image] (`nativeDiagImage`)
+starts the same kernel, tree and overlay with a ramdisk that, after the same
+storage guard and USB gadget, sends the kernel log, the device tree as the
+bootloader passed it, a device-driver binding table and a few procfs files to
+the Mac over the TTR1 transport, then restarts. It is built and checked in a
+VM; the link:native-diag-trial.adoc[trial proposal] awaits the owner's
+approval.

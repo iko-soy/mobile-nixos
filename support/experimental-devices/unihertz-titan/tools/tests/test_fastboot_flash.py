@@ -125,7 +125,7 @@ class RecoveryFlashTests(unittest.TestCase):
 
     def test_pinned_profiles_match_the_reviewed_images(self):
         real = load("titan_fastboot_flash_constants", HERE.parent / "flash-recovery.py")
-        self.assertEqual(set(real.PROFILES), {"rescue-probe", "repo-kernel-probe", "native-probe",
+        self.assertEqual(set(real.PROFILES), {"rescue-probe", "repo-kernel-probe", "native-probe", "native-diag",
                                               "control-acquisition", "original-recovery"})
         self.assertEqual(real.PARTITION_BYTES, 33554432)
         self.assertEqual(real.PARTITION, "recovery")
@@ -148,6 +148,12 @@ class RecoveryFlashTests(unittest.TestCase):
         # overlay table (5765) and DTB table (47337), as built in Nix.
         pages = lambda size: size + (-size) % 2048
         self.assertEqual(native["source_bytes"], 2048 + pages(15585590) + pages(65731) + pages(5765) + pages(47337))
+        diag = real.PROFILES["native-diag"]
+        self.assertEqual((diag["source_bytes"], diag["source_sha256"], diag["sha256"]),
+                         (17606656, "8a58da6ccf326fb6c8432e18a9d5c57b2a9c4b3bfcf44909a93df4c01f029bde",
+                          "5a55f9d7a54c9f5bb757b32955f2488909457a042ba42509182fcacb7ec7c6ee"))
+        # The same kernel, overlay and DTB tables with the diagnostic ramdisk (1960531).
+        self.assertEqual(diag["source_bytes"], 2048 + pages(15585590) + pages(1960531) + pages(5765) + pages(47337))
         control = real.PROFILES["control-acquisition"]
         self.assertEqual((control["source_bytes"], control["source_sha256"], control["sha256"]),
                          (13475840, "41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65",

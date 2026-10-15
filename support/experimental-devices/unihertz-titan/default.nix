@@ -18,11 +18,25 @@ let
   usbAcquisition = import ./usb-acquisition.nix { inherit pkgs rescue transport; };
   usbProbe = import ./usb-probe.nix { inherit pkgs; };
   usbControl = import ./usb-control.nix { inherit pkgs transport; };
+  usbDiag = import ./usb-diag.nix { inherit pkgs transport; };
   nativeKernel = import ./native/kernel.nix { inherit pkgs; };
   nativeProbeImage = import ./native/probe-image.nix {
     inherit pkgs sources;
     kernel = nativeKernel;
     ramdisk = usbProbe.modernRamdisk;
+  };
+  nativeDiagImage = import ./native/probe-image.nix {
+    inherit pkgs sources;
+    kernel = nativeKernel;
+    ramdisk = usbDiag.ramdisk;
+    name = "titan-native-diag-recovery-image";
+    imageName = "UNTESTED-UNSIGNED-native-diag.img";
+    summary = "and the modern diagnostic ramdisk";
+    title = "Build-only native-route diagnostic recovery image";
+    status = "Not booted.";
+    # The configured 128 KiB log buffer could lose the earliest boot records
+    # before the diagnostic producer reads them.
+    extraCmdline = "log_buf_len=2M";
   };
   # This pin's Darwin libffi trampoline dylib aborts on macOS 27 when ctypes
   # loads. Backport the targeted upstream fix for the host test interpreter:
@@ -62,7 +76,7 @@ let
   };
 in
 {
-  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition usb mountPolicy usbAcquisition usbProbe usbControl nativeKernel nativeProbeImage;
+  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition usb mountPolicy usbAcquisition usbProbe usbControl usbDiag nativeKernel nativeProbeImage nativeDiagImage;
 
   tests = pkgs.runCommand "titan-tools-and-boot-packaging-tests" {
     nativeBuildInputs = [ testPython ];
@@ -75,6 +89,7 @@ in
     export TITAN_CONTROL_SOURCE=${./control/producer.c}
     # The native route's DT-table packer, outside tools/.
     export TITAN_NATIVE_DT_TABLE=${./native/dt-table.py}
+    export TITAN_DIAG_PRODUCER_SOURCE=${./diag/producer.c}
     # The inventory collector intentionally rejects output in Git checkouts.
     # Nix's private build directory also keeps temporary inventory fixtures out
     # of the source tree, even when the caller builds from a checkout.

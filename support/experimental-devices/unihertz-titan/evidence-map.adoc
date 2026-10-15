@@ -98,6 +98,15 @@ restore of the original recovery
 |Display, input, charging, audio, radios, NixOS userspace; which overlay the
 bootloader applied; see link:native-boot-trial.adoc[the trial record]
 
+|Native-route diagnostic image
+|Linux 6.18.38 VM case: the sections received over TTR1, split and checked
+against the guest, then a restart before the deadline with the disk unchanged;
+qemu-user refusal checks; Mac splitter tests; other ramdisks and the first
+native image byte-identical
+|Builder runs on 2026-10-15
+|Any run on the Titan, including the modern kernel's Mac-to-phone USB traffic;
+see link:native-diag-trial.adoc[the proposal]
+
 |Second copy of the rollback set
 |The owner's remote copy of the six cataloged sets and the offline region
 copy, all 57 files matching a SHA-256 list made on the Mac

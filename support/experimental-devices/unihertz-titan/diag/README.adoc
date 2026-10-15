@@ -1,0 +1,66 @@
+= Native-route diagnostic image
+
+`usbDiag.ramdisk` is a build-only AArch64 initramfs for the native route's
+modern kernel. It collects what that kernel found on the Titan, now that the
+link:../native-boot-trial.adoc[first native-route boot] has shown that it
+starts, guards the eMMC and brings up USB device mode. The display is not
+driven and there is no serial console, so this is the only way to read the
+kernel's own log from the phone. `nativeDiagImage` packages it with the native
+kernel, the Titan device tree and the minimal overlay in the recovery layout.
+Building it does not authorize starting it; see
+link:../native-diag-trial.adoc[the trial proposal].
+
+[source,sh]
+----
+nix-build support/experimental-devices/unihertz-titan -A usbDiag.ramdisk --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbDiag.toolTests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A usbDiag.vmTests --no-out-link
+nix-build support/experimental-devices/unihertz-titan -A nativeDiagImage --no-out-link
+----
+
+== Behavior
+
+PID 1 is the probe built for the modern kernel with the control pipeline of
+the link:../control/README.adoc[offline acquisition image]: the deadline
+process (here 300 seconds), the read-only storage guard of the complete eMMC
+set, the fixed ACM gadget, then the producer and the unchanged TTR1 sender
+under the label `titan-diagnostics` with an 8 MiB cap. PID 1 restarts the phone
+five seconds after the Mac acknowledges the transfer, within about 35 seconds
+after a failure (a failed producer first leaves the sender up to 20 seconds to
+report it to the Mac), and at the latest at its deadline. On this kernel the
+restart boots Ubuntu Touch.
+
+The producer, `diag/producer.c`, refuses to run unless PID 1 started it in the
+sealed mount set. It waits until 40 seconds of uptime, so that deferred driver
+probes have reported and the regulator core's unused-regulator pass has run,
+then streams a fixed list of sections, each with a byte limit: the command
+line, every kernel log record held in `/dev/kmsg`, the device tree as the
+bootloader passed it (`/sys/firmware/fdt`, which shows the bootloader's fixups
+and which overlay it applied; the kernel blanks only its KASLR and RNG seeds),
+a `BUS DEVICE DRIVER` line for every device in `/sys/bus` (driver `-` while
+unbound), `/proc/interrupts`, `/proc/cpuinfo`, `/proc/partitions` and
+`/proc/iomem`. A section it cannot read is reported as missing or as an
+error, and the rest still follow. The binding table comes only from directory
+listings and link targets: device attributes are not read, because some take
+the device lock and can deadlock against a driver probe in progress, which
+would also block the restart. The producer opens no block device and writes
+nothing but its two pipes.
+
+`tools/receive-diagnostics.py --output <new private directory>` waits for the
+gadget's fixed strings, receives the stream with the unchanged TTR1 receiver,
+and splits it into one private file per section with an index. The sections
+contain device identifiers, such as the serial number on the command line, so
+they stay private; records in the repository describe findings, not raw data.
+
+== Checks
+
+A TCG guest runs the VM build against a blank virtio disk: the host receives
+the stream, the splitter checks that the command line carries the guest's
+marker, the log has the kernel banner, the partitions list the virtio disk,
+the binding table shows it bound to `virtio_blk`, no section is truncated or
+unreadable and the others are present, and the guest must then restart with
+the command `bootloader` before its deadline, leaving the disk unchanged. The
+phone build is checked for static AArch64 binaries, for the modern controller
+and disk names and for the absence of VM and vendor-kernel names; qemu-user
+checks confirm that PID 1 refuses to run outside PID 1 and that the producer
+refuses outside the offline environment without streaming anything.

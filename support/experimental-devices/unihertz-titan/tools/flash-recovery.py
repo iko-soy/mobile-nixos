@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
-This host helper writes only the `recovery` partition, and only one of five
+This host helper writes only the `recovery` partition, and only one of six
 pinned full-partition images: the USB probe envelope, the same probe with the
-repository-built kernel, the native route's first modern-kernel image, or the
-offline control-region acquisition envelope, each padded with zeros to the
-partition size, or the preserved original recovery image that restores it. It
+repository-built kernel, the native route's first modern-kernel image or its
+diagnostic image, or the offline control-region acquisition envelope, each
+padded with zeros to the partition size, or the preserved original recovery
+image that restores it. It
 first sends fixed read-only identity queries, including the recovery
 partition's size and type, from a verified read-only private copy that it
 measures again afterwards. It never writes another partition and never issues
 erase, boot, oem, flashing, set_active or any other command. Running it changes
 the phone's storage and needs the owner's explicit authorization of the
 procedure in recovery-route-trial.adoc, control-acquisition-trial.adoc,
-repo-kernel-trial.adoc or native-boot-trial.adoc.
+repo-kernel-trial.adoc, native-boot-trial.adoc or native-diag-trial.adoc.
 """
 
 import argparse
@@ -58,6 +59,13 @@ PROFILES = {
         "source_bytes": 15712256,
         "source_sha256": "5945dad1ae4041224136a184e49f07abffdef14c63d3797cf43cb9191985da88",
         "sha256": "35a45a98f06d1a5fca462a6f2540e370189a26346ec727b892e9776ca2ba63b3",
+    },
+    # The native route's diagnostic image (diag/README.adoc): the same kernel,
+    # tree and overlay with the diagnostic ramdisk (nativeDiagImage).
+    "native-diag": {
+        "source_bytes": 17606656,
+        "source_sha256": "8a58da6ccf326fb6c8432e18a9d5c57b2a9c4b3bfcf44909a93df4c01f029bde",
+        "sha256": "5a55f9d7a54c9f5bb757b32955f2488909457a042ba42509182fcacb7ec7c6ee",
     },
     # The offline control-region acquisition envelope (control/README.adoc),
     # which restarts into the bootloader after the transfer or at its deadline,

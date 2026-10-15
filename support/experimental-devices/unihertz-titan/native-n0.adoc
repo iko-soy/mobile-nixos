@@ -157,3 +157,10 @@ modern device naming (`usbProbe.modernRamdisk`) and the assembled image
 link:native-boot-trial.adoc[first native-route boot trial] ran it: the modern
 kernel booted, the eMMC enumerated, USB device mode worked and the phone
 restarted into Ubuntu Touch.
+
+Next, the link:diag/README.adoc[diagnostic image] (`nativeDiagImage`, built
+2026-10-15) collects the kernel's own view of the phone, and its
+link:native-diag-trial.adoc[trial proposal] awaits approval: the boot log, the
+device tree the bootloader passed with its overlay and reserved memory, and
+which devices found drivers. That is the basis for the next device-tree and
+driver work, such as the NT35595 command-mode panel.
