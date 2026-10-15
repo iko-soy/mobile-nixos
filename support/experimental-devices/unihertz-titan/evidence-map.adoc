@@ -56,11 +56,12 @@ preflight, publication commit point)
 |Any Titan userdata archive
 
 |Recovery-partition route
-|Proposal; recovery-only flash helper with host tests (9); key entry into
-recovery and the recovery menu's path into fastboot, each seen once
+|One owner-approved trial: `fastboot flash recovery` wrote the probe and later
+the original, each read back by hash; a Volume Up start ran the probe, whose
+USB device the Mac saw; its restart reached fastboot
 |2026-10-15
-|Whether `fastboot flash` works on this bootloader; whether the bootloader
-starts the probe from recovery; see link:recovery-route-trial.adoc[the proposal]
+|The probe's status lines; offline acquisition; repeatability; see
+link:recovery-route-trial.adoc[the trial record]
 
 |USB probe profile and its deadline reboot
 |Linux 6.18.38 VM cases (4): success, stuck PID 1, killed deadline process,

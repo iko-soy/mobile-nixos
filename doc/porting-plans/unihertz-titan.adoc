@@ -107,7 +107,10 @@ Normal-mode copies of the twelve unmounted control regions before and after
 differed only in `expdb`. Stage A of a temporary-boot trial then showed that
 the bootloader accepts a `fastboot boot` download of the installed image but
 crashes and resets into a normal boot instead of starting it; a compact probe
-image crashed it the same way. M0 remains open.
+image crashed it the same way. A recovery-partition trial then succeeded: the
+bootloader wrote a probe image to recovery, ran it on a Volume Up start, the
+probe restarted into fastboot, and the original recovery was restored byte for
+byte. M0 remains open.
 
 toc::[]
 

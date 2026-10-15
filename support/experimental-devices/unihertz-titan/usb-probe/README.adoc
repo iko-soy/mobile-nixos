@@ -5,10 +5,12 @@ temporary boot of a new ramdisk on the Titan, as Stage B of the
 link:../temporary-boot-trial.adoc[temporary boot proposal]. It reports over USB
 and then reboots by itself. It does not replace `rescue.ramdisk` or the USB
 acquisition profile. On 2026-10-15 Stage B sent the first version's envelope
-with `fastboot boot`, but the bootloader crashed before starting it, so the
-probe has never run on the Titan. The second version, described here, is meant
-for the link:../recovery-route-trial.adoc[recovery-partition route]. Building
-it does not authorize booting it.
+with `fastboot boot`, but the bootloader crashed before starting it. The second
+version, described here, then ran once on the Titan from the recovery
+partition in the link:../recovery-route-trial.adoc[recovery-partition trial]:
+the Mac saw its USB device, which it binds only after the storage guard, and
+its deadline restart reached bootloader fastboot. Its status lines were not
+captured. Building it does not authorize booting it.
 
 [source,sh]
 ----

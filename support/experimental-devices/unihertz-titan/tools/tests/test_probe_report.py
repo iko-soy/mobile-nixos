@@ -163,6 +163,17 @@ class ProbeReportTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.assertEqual(tool.probe_ports(self.device("/dev/cu.usbmodem105", **change)), [])
 
+    def test_macos_underscore_spelling_of_the_strings_is_accepted(self):
+        # As recorded on 2026-10-15: macOS showed the product with "_" for "-".
+        seen = self.device("/dev/cu.usbmodem301", product="Titan read_only acquisition",
+                           serial="TITAN_RESCUE_EXPERIMENT_0001")
+        self.assertEqual(tool.probe_ports(seen), [["/dev/cu.usbmodem301"]])
+        alternate = seen.replace('"USB Product Name"', '"kUSBProductString"')
+        self.assertEqual(tool.probe_ports(alternate), [["/dev/cu.usbmodem301"]])
+        # Ubuntu Touch's own gadget still does not match.
+        self.assertEqual(tool.probe_ports(self.device("/dev/cu.usbmodem302", vendor="A-gold", product="Titan",
+                                                      serial="TITA0000")), [])
+
     def test_probe_behind_a_hub_is_found_and_ports_stay_with_their_device(self):
         hub = ('+-o USB2.0 Hub@01100000  <class IOUSBHostDevice, id 0x9>\n'
                '    "idVendor" = 1507\n    "idProduct" = 1552\n    "USB Product Name" = "USB2.0 Hub"\n')

@@ -41,9 +41,10 @@ hardware works under NixOS.
   ordinary reboot afterwards was normal. Stage B crashed the bootloader the
   same way with a compact self-rebooting probe image, so temporary boot through
   `fastboot boot` is not available.
-* A link:recovery-route-trial.adoc[proposed recovery-partition probe trial]
-  with a helper that writes only the recovery partition, and only the padded
-  probe image or the preserved original. Not authorized or run.
+* A link:recovery-route-trial.adoc[recovery-partition probe trial], run once
+  on 2026-10-15 with the owner's approval: `fastboot flash` wrote the probe
+  into recovery, a Volume Up start ran it on the phone, its deadline restart
+  reached fastboot, and the original recovery was restored byte for byte.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1123,3 +1124,25 @@ outside Nix) and the Mac Nix `tests` target (343) passed; on x86_64 Linux,
 `tests` (343) and the four probe VM cases passed, with restart markers 0, 0, 10
 and 0 seconds after the deadline. The only phone actions were the owner's
 recovery-menu checks and a read-only ADB check of the Android container.
+
+=== Follow-up: recovery-partition trial
+
+The owner approved and ran the
+link:recovery-route-trial.adoc[recovery-partition trial] on 2026-10-15. The first write attempt stopped before sending
+anything, because the flash helper read the bootloader's hexadecimal partition
+size as decimal; it was fixed and the entry repeated. Then `fastboot flash
+recovery` wrote the padded probe image, read back by hash from Ubuntu Touch; a
+Volume Up start ran the probe, whose USB device the Mac saw, which it binds only
+after guarding the complete eMMC set; its deadline restart reached bootloader
+fastboot; and `fastboot flash recovery` restored the preserved original, read
+back byte for byte, with boot and dtbo unchanged throughout. This is the first
+code from this repository to run on the Titan.
+
+The listener missed the probe's status lines: macOS recorded the product string
+with an underscore for its hyphen. It now treats the two as equivalent. A
+boot-control command, `bootonce-bootloader`, left in `para` by the stock
+recovery's "Reboot to bootloader" entry, remains there; the bootloader has
+ignored it on every normal boot since.
+
+Validation on 2026-10-15: the host suite (345 tests, two comparisons skipped
+outside Nix) and the Mac Nix `tests` target (345) passed after both fixes.

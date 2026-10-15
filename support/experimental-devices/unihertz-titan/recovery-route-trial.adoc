@@ -1,11 +1,55 @@
-= Proposed recovery-partition probe trial
+= Recovery-partition probe trial
 
-Status on 2026-10-15: *proposal only, not authorized and not run.* It writes
+Status on 2026-10-15: *run once with the owner's explicit approval; all five
+questions were answered yes. See <<result,the result>>.* The procedure writes
 the recovery partition twice, first the probe and then the preserved original,
-and changes the boot mode several times, so it needs the owner's explicit
-approval of this exact procedure. It never writes the boot partition, userdata
+and changes the boot mode several times, so each repetition needs the owner's
+explicit approval of this exact procedure. It never writes the boot partition, userdata
 or any other partition, never erases and never uses `fastboot boot`. It does not
 boot NixOS.
+
+[[result]]
+== Result (2026-10-15)
+
+The owner approved the procedure and ran the entries, the partition reads and
+the Volume Up start; watchers ran the fastboot steps.
+
+* *Preconditions.* Step 2 found boot, recovery and dtbo identical to their
+  preserved copies. `para` had changed since the previous copy, in 19 bytes
+  only: its first field now held the Android boot-control command
+  `bootonce-bootloader`, which the stock recovery's "Reboot to bootloader" entry
+  writes and which nothing had cleared. It is not a recovery request, and the
+  bootloader had ignored it on the normal boots since, so the trial went ahead.
+  `cache` and `expdb` had changed through the recovery's logging and the extra
+  boots.
+* *First write attempt.* The flash helper refused before sending anything: this
+  bootloader reports `partition-size:recovery` as `2000000`, hexadecimal without
+  a prefix, and the helper had read it as decimal. The watcher returned the
+  phone to Ubuntu Touch unchanged. The helper was fixed to read partition sizes
+  as hexadecimal, and the entry was repeated.
+* *Question 1, yes.* `fastboot flash recovery` sent the 32 MiB padded probe
+  image and reported `Writing 'recovery' OKAY` in 1.2 seconds. Step 7 read
+  recovery back as `a97cb154...` on the phone and on the Mac, with boot and dtbo
+  unchanged.
+* *Questions 2 and 3, yes.* After the Volume Up start, the Mac saw the probe's
+  USB device, `1209:0005` from manufacturer `Titan rescue experiment`. The probe
+  binds its gadget only after guarding every block device read-only and finding
+  the complete measured eMMC set, so that sequence ran on the phone's vendor
+  kernel. The listener did not capture the status lines: macOS recorded the
+  product string as `Titan read_only acquisition`, with an underscore, and the
+  listener required the exact string. It was stopped by hand, having sent
+  nothing.
+* *Question 4, yes.* The probe's USB device disappeared at its deadline, and
+  bootloader fastboot (`is-userspace: no`) appeared about eight seconds later.
+* *Question 5, yes.* From that fastboot, `fastboot flash recovery` wrote the
+  preserved original (`Writing 'recovery' OKAY`), and `fastboot reboot` started
+  Ubuntu Touch normally (`bootreason=reboot`). Step 13 read recovery back as
+  `4dd1c1f7...`, with boot and dtbo unchanged.
+
+This bootloader therefore writes recovery through fastboot, starts a new
+ramdisk from the recovery partition on a Volume Up start, and the probe's
+restart is a working way back into fastboot. Not shown: the probe's status
+lines, offline acquisition, repeatability, or anything about NixOS.
 
 == Why this route
 

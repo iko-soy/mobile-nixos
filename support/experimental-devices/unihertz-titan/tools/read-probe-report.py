@@ -32,6 +32,12 @@ LINE = re.compile(rb"TITAN_PROBE v1 seq=([1-9][0-9]{0,5}) uptime=(0|[1-9][0-9]{0
 # 1209:0005, with different strings.
 IDENTITY = {"idVendor": 0x1209, "idProduct": 0x0005, "USB Vendor Name": "Titan rescue experiment",
             "USB Product Name": "Titan read-only acquisition", "USB Serial Number": "TITAN-RESCUE-EXPERIMENT-0001"}
+# macOS records some descriptor strings with "-" replaced by "_": on
+# 2026-10-15 it showed the product as "Titan read_only acquisition". Each
+# string may also appear under its kUSB*String key.
+STRING_KEYS = {"USB Vendor Name": ("USB Vendor Name", "kUSBVendorString"),
+               "USB Product Name": ("USB Product Name", "kUSBProductString"),
+               "USB Serial Number": ("USB Serial Number", "kUSBSerialNumberString")}
 CALLOUT = re.compile(r'"IOCalloutDevice" = "(/dev/cu\.usbmodem[A-Za-z0-9_.-]{1,64})"')
 LINE_LIMIT = 256
 BYTE_LIMIT = 65536
@@ -96,7 +102,10 @@ def probe_ports(text):
         numbers = {key: re.search(r'"%s" = (\d+)' % key, own) for key in ("idVendor", "idProduct")}
         if any(match is None or int(match.group(1)) != IDENTITY[key] for key, match in numbers.items()):
             continue
-        if not all(f'"{key}" = "{value}"' in own for key, value in IDENTITY.items() if isinstance(value, str)):
+        normalized = lambda text: text.replace("_", "-")
+        if not all(any(normalized(found) == normalized(value)
+                       for name in STRING_KEYS[key] for found in re.findall(r'"%s" = "([^"]*)"' % name, own))
+                   for key, value in IDENTITY.items() if isinstance(value, str)):
             continue
         descendants = []
         for child_depth, _, child_properties in objects[index + 1:]:
