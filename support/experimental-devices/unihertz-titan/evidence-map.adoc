@@ -23,7 +23,16 @@ complete mount coverage for the LK capture, a second copy, any restore
 |Saved host mount table; requirements in
 link:consistent-preservation.adoc[the preservation record]
 |Inventory of 2026-10-14
-|Any copy of the 17 regions; absence of raw writers
+|A consistent copy of the 16 non-userdata regions; any copy of the four
+mounted calibration filesystems; absence of raw writers (userdata is excluded
+by owner decision)
+
+|Normal-mode copies of the twelve unmounted regions
+|Two owner-run acquisitions, before and after the entry trial: transfer,
+saved-readback and independent phone-reread hashes; independent Mac rehashes;
+host tests (21)
+|2026-10-15
+|Consistency; absence of raw writers; what changed `expdb`; restorability
 
 |GPT structure and zero disk GUID
 |Live read-only capture plus host parser; catalog reparse
@@ -71,12 +80,14 @@ kernel reproduced it
 |2026-10-14
 |Source-to-binary reproducibility
 
-|Bootloader entry path and RTC marker
+|Bootloader entry path and return
 |Exact-version systemd source review; pinned kernel source; read-only
-authorization probes
-|Ubuntu systemd `255.4-1ubuntu8.17`; kernel `fc94895e`
-|That the bootloader consumes or clears the marker; a working return;
-see link:entry-return-trial.adoc[the trial proposal]
+authorization probes; one owner-approved entry and return trial
+|Source and probes: Ubuntu systemd `255.4-1ubuntu8.17`, kernel `fc94895e`;
+trial on 2026-10-15
+|Repeatability; an ordinary reboot afterwards; how the bootloader handles the
+marker; the physical fallback; see link:entry-return-trial.adoc[the trial
+record]
 
 |Kernel/userspace compatibility
 |Live read-only API probes; configuration comparison; upstream systemd

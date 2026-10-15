@@ -72,10 +72,12 @@ userdata/calibration preservation or establish a recovery route.
 
 A further fixed read-only acquisition preserved fourteen firmware/boot-asset
 partitions and both separate eMMC boot areas, totaling 225 MiB with exact lengths
-and matching independent hashes. The private copies now cover 21 of 38 GPT
-partitions plus both boot areas. The remaining writable, control and opaque
-regions, active boot selection and an exercised restoration route remain
-unresolved; these additional copies do not close M0 or authorize a boot trial.
+and matching independent hashes. The private copies then covered 21 of 38 GPT
+partitions plus both boot areas. A later normal-mode run added stable, but not
+consistent, copies of the twelve unmounted control and calibration regions.
+Consistent copies of the writable and control regions, active boot selection
+and an exercised restoration route remain unresolved; these additional copies
+do not close M0 or authorize a boot trial.
 
 A host-only private catalog now verifies all 27 retained payloads across six
 completed sets without duplicating images. Its first run passed every recorded
@@ -99,7 +101,10 @@ link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/e
 finds that no supported NixOS release lists Linux 4.14 within its systemd
 baseline, and recommends the native route for sustained work. A
 link:https://github.com/iko-soy/mobile-nixos/blob/titan/feasibility-m1/support/experimental-devices/unihertz-titan/entry-return-trial.adoc[bootloader entry and return trial]
-is proposed but not authorized or run. M0 remains open.
+ran once on 2026-10-15 with the owner's approval: the phone entered bootloader
+fastboot, the Mac recognized it, and `fastboot reboot` returned to Ubuntu Touch.
+Normal-mode copies of the twelve unmounted control regions before and after
+differed only in `expdb`. M0 remains open.
 
 toc::[]
 

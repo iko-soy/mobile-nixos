@@ -1,0 +1,128 @@
+= Control and calibration region preservation (normal mode)
+
+Status on 2026-10-15: two owner-run acquisitions, before and after the
+link:entry-return-trial.adoc[entry and return trial], copied all twelve regions
+over normal-mode USB ADB. Every image matched its transfer hash, a readback of
+the saved Mac file and an independent full phone reread, and later Mac rehashes
+matched both manifests. Across the trial only `expdb` changed. The copies are
+stable reads, not consistent ones, and do not replace the offline preservation
+described in link:consistent-preservation.adoc[the preservation requirements].
+
+== Why before an entry trial
+
+Twelve GPT regions had no private copy and no mount in the saved host table.
+By their conventional MediaTek names, some hold boot control or security state
+(`para`, `boot_para`, `seccfg`), crash records (`expdb`) or device-specific data
+(`nvram`, `proinfo`); the labels are not verified formats. The proposed
+link:entry-return-trial.adoc[entry and return trial] could change bootloader
+state in such regions. Stable copies taken beforehand would make later changes
+detectable and preserve the bytes as they were, even if a writer cannot be
+ruled out.
+
+== Fixed scope
+
+[cols="1,1,1,1,1",options="header"]
+|===
+|Label |Block node |Start sector |Sectors |Bytes
+|`boot_para` |`mmcblk0p1` |64 |2048 |1048576
+|`para` |`mmcblk0p3` |67648 |1024 |524288
+|`expdb` |`mmcblk0p4` |68672 |40960 |20971520
+|`frp` |`mmcblk0p5` |109632 |2048 |1048576
+|`metadata` |`mmcblk0p8` |308288 |65536 |33554432
+|`seccfg` |`mmcblk0p11` |409600 |16384 |8388608
+|`sec1` |`mmcblk0p12` |425984 |4096 |2097152
+|`proinfo` |`mmcblk0p13` |430080 |6144 |3145728
+|`nvram` |`mmcblk0p25` |829440 |131072 |67108864
+|`cache` |`mmcblk0p35` |9142272 |884736 |452984832
+|`otp` |`mmcblk0p37` |244164544 |88064 |45088768
+|`flashinfo` |`mmcblk0p38` |244252608 |32768 |16777216
+|===
+
+The twelve regions total 652738560 bytes (622.5 MiB). The writable calibration
+filesystems `nvcfg`, `nvdata`, `protect1` and `protect2`, userdata, RPMB and the
+eMMC boot areas are excluded. The `otp` label names an ordinary GPT range in the
+eMMC user area; the label establishes neither its format nor any write
+protection.
+
+== Reader
+
+`tools/acquire-control-regions.py` reuses the reviewed vendor/system reader's
+complete 38-entry map check, process mount views (reader, PID 1 and the
+identified Android init), bounded transport and private sparse output, in the
+same way as the firmware reader. For each region it checks the label, sysfs
+parent, node identity and empty holders, requires the region to be unmounted in
+all three views, holds a read-only descriptor and issues only the size and
+sector-size `GET` ioctls. It never sets a block flag, mounts anything, opens
+RPMB or the boot areas, or changes the boot mode. With `--sudo`, the phone's
+journal records each of the 62 privileged commands per run, about 1.4 MB of
+command text, and may keep them on userdata. The manifest's
+`device_changes_performed: false` covers the reader's own actions, not that
+logging.
+
+Every region is read in full and hashed in transit, the saved Mac file is read
+back, and a separate full phone reread must produce the same SHA-256, with the
+complete map and mount views checked before and after each step. A writer that
+changes a region between those reads makes the run fail without publishing.
+Agreement shows stability during the reads only; modem or NVRAM services can
+still run, so the result is not consistent, atomic or authenticated, and the
+manifest says so.
+
+The transport must be a single USB ADB device. The complete unprivileged
+metadata probe runs before any password prompt, and the password goes only to
+`sudo` on that transport. Output is a new private directory (`0700`, files
+`0600`) outside Git, jj and the Nix store; publication follows the commit-point
+rules of the other readers.
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/acquire-control-regions.py \
+  --sudo --output /absolute/private/new-control-region-copies
+----
+
+== Validation
+
+Twenty-one synthetic tests cover the fixed profile against the catalog's
+independent layout and consistently changed geometry, the command allowlist,
+every target in each of the three mount views, identity and ioctl faults,
+fixed-length reads, failed or mismatched transfer, saved-file and repeat hashes,
+repeat-record framing, guard changes, publication before and after its commit
+point, and credential ordering, including refusal without a prompt after an
+invalid preflight. An adversarial review with mutation testing found gaps in
+the first fifteen; the added tests close them, and the helper itself was not
+changed. On 2026-10-15 a live
+run without sudo passed USB selection, the binary/status check and the complete
+unprivileged metadata probe (all twelve targets matched the live map and were
+unmounted in the readable view), then stopped at the expected permission
+boundary without creating output or opening any block device.
+
+The owner then ran the reader with `--sudo` from a local terminal, before the
+entry trial. It published
+all twelve images (652738560 logical bytes) with their manifest. An independent
+Mac pass rehashed every image against the manifest's transfer, readback and
+phone-reread digests, checked the fixed geometry and private permissions, and
+confirmed that the recorded helper source digests match the revision whose
+tests passed on macOS and x86_64 Linux. Sanitized observations from this one
+read: `sec1` and `otp` consist entirely of zeros, and zero-only chunks make up
+most of every other region. Neither observation establishes a format or future
+contents.
+
+A second owner-run copy after the trial also completed and passed the same Mac
+checks with the same helper sources. Compared with the first, eleven regions
+were byte-identical; `expdb` differed in 30 blocks of 4 KiB.
+
+== Comparing later copies
+
+A later copy that differs shows that a region changed between the two reads,
+not why. Normal-mode writers, for example to `nvram`, `expdb`, `metadata` or
+`cache`, and any restart can change these regions. A second normal-mode copy
+before a trial would show which regions change during ordinary operation; a
+difference after a trial may come from the restart itself rather than from
+fastboot entry. Compare hashes privately and publish only which labels changed.
+
+== Handling the copies
+
+These regions can contain device identifiers and security state. Keep the
+images, hashes and manifest private. Never restore them wholesale: writing
+`seccfg`, `frp`, `nvram`, `proinfo` or `para` back without a reviewed reason
+could change lock state, identity or boot behavior. The backup catalog's fixed
+profile does not include this set; adding it needs a reviewed profile update.

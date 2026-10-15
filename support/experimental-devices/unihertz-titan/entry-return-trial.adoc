@@ -1,9 +1,51 @@
-= Proposed bootloader entry and return trial
+= Bootloader entry and return trial
 
-Status on 2026-10-15: *proposal only, not authorized and not run.* It changes
-the phone's boot mode twice, so it needs the owner's explicit approval of this
-exact procedure. It sends no image and issues no flash, erase, `oem`, `flashing`
-or `boot` command. It is not a recovery demonstration and does not boot NixOS.
+Status: *run once on 2026-10-15 with the owner's explicit approval; see
+<<result,the result>>.* The procedure changes the phone's boot mode twice, so
+each repetition needs the owner's approval of this exact procedure. It sends no
+image and issues no flash, erase, `oem`, `flashing` or `boot` command. It is not
+a recovery demonstration and does not boot NixOS.
+
+[[result]]
+== Result (2026-10-15)
+
+The owner started the entry; a watcher had already started the helper's
+observation step with a 600-second wait and ran the return step as soon as
+observation completed. Each of the four questions was answered once:
+
+. *Entry.* `sudo /sbin/reboot bootloader` from an owner-run ADB shell shut the
+  phone down and restarted it into fastboot mode.
+. *Recognition.* With the phone on a direct USB port of the Mac, Platform-Tools
+  `fastboot` listed exactly one device, without any port or cable change.
+. *Variables.* 14 of 15 queries answered. `is-userspace` was `no`, so this is
+  the bootloader's fastboot, not `fastbootd`. `unlocked` was `yes` and `secure`
+  was `no`. `slot-count` was `0` and `current-slot` is unsupported, so the phone
+  has no A/B slots. `boot` and `recovery` reported `0x2000000` bytes and `dtbo`
+  `0x800000`, all `raw data`, matching the GPT. `max-download-size` was
+  `0x8000000` (128 MiB). Product `g61v71c2k_dfl_tee`, bootloader
+  `g61v71c2k_dfl_tee-c94b80d-20210414101510-20230204181955`, baseband
+  `MOLY.LR12A.R3.MP.V158.3.P1`.
+. *Return.* `fastboot reboot` completed, and the phone started Ubuntu Touch
+  normally. ADB reported `device` 191 seconds later, after the owner unlocked
+  the screen; until then the phone's USB function offered only an RNDIS network
+  interface.
+
+The after-return baseline matched the earlier one: the same kernel, a boot
+command line that differed only in three boot-timing values (`bootprof.*`), no
+`/run/systemd/reboot-param`, a new boot ID and 100% battery. Of the three
+failed units recorded before, two are periodic jobs that had not run again yet;
+`console-setup` failed as before.
+
+Owner-run normal-mode copies of the twelve unmounted control and calibration
+regions before and after the trial were byte-identical except `expdb`, which
+differed in 30 blocks of 4 KiB. Without an earlier pair of normal-mode copies,
+this does not show whether fastboot entry, the restart itself or ordinary
+operation changed it; see link:control-region-preservation.adoc[that record].
+
+Not shown: that an ordinary reboot after the trial boots normally, how the
+bootloader handles the persistent marker (the boot after `fastboot reboot` was
+normal), repeatability, the physical fallback, rescue-image acceptance,
+`fastboot boot` support or anything about NixOS.
 
 == Purpose
 
@@ -43,6 +85,8 @@ All of these must hold, or the trial is postponed:
   known-good data cable, not through a hub.
 * Battery at least 60%, and no system-image update in progress.
 * A fresh private catalog pass has succeeded (done on 2026-10-15).
+* A verified normal-mode link:control-region-preservation.adoc[control-region
+  copy] exists (done on 2026-10-15).
 * The owner has decided, before starting, the stop conditions below.
 
 == Procedure
@@ -71,7 +115,9 @@ into the bootloader's fastboot mode.
 . *Return.* Run `fastboot reboot`. Wait up to five minutes for `adb -d get-state`
   to report `device`.
 . *After return, read-only.* Repeat the baseline and compare. Record the
-  observed screens, timings and any difference.
+  observed screens, timings and any difference. Optionally rerun the
+  control-region reader (owner's sudo) and compare per-region hashes privately;
+  its record explains what a difference does and does not show.
 
 The `tools/observe-fastboot.py` helper runs steps 3 and 4 with exactly this
 allowlist, fixed timeouts and private output; it refuses every other command.
@@ -86,8 +132,8 @@ python3 support/experimental-devices/unihertz-titan/tools/observe-fastboot.py re
   --output /absolute/private/new-fastboot-return
 ----
 
-Its nine synthetic tests use a fake executable; it has never run against the
-phone.
+Its nine synthetic tests use a fake executable. On 2026-10-15 it ran both steps
+against the phone; see <<result,the result>>.
 
 == Stop conditions and failure handling
 
@@ -130,15 +176,16 @@ fastboot again. There is no verified emergency restore for macOS.
 
 == Residual risks
 
-* The bootloader's handling of the persistent fast-boot marker is unknown, so
-  later resets could repeatedly enter fastboot.
+* The bootloader's handling of the persistent fast-boot marker is unknown. The
+  boot after `fastboot reboot` was normal, but no ordinary reboot has been
+  observed since, so a later reset could still enter fastboot.
 * The shutdown is the ordinary systemd reboot path with an argument. It does not
   prove clean filesystems or modem quiescence, the same as any reboot.
-* The bootloader may update its own state in regions that have no private copy
-  yet (`para`, `expdb`, `boot_para`, `seccfg` and others). The optional normal-mode
-  read in link:consistent-preservation.adoc[the preservation requirements]
-  would make such changes detectable afterwards; it does not prevent them.
-* Mac USB recognition of this bootloader is untested.
+* The bootloader may update its own state in regions such as `para`, `expdb`,
+  `boot_para` or `seccfg`. Repeat
+  link:control-region-preservation.adoc[normal-mode copies] detect such changes
+  without attributing them; across the 2026-10-15 trial only `expdb` changed.
+* Mac recognition was shown once, on one direct port with one cable.
 
 == What the trial can and cannot show
 

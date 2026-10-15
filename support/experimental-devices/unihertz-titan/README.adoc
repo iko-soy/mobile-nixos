@@ -29,12 +29,17 @@ hardware works under NixOS.
   acquisition tools, bounded GPT capture/validation, and a host-only sparse ext4
   archive verifier, with
   automated tests.
-* A link:entry-return-trial.adoc[proposed bootloader entry and return trial] with
-  a fastboot helper that sends only fixed read-only queries or one return command.
-  It is not authorized and has not been run.
+* A link:entry-return-trial.adoc[bootloader entry and return trial] with a
+  fastboot helper that sends only fixed read-only queries or one return command.
+  The owner approved it, and it ran once on 2026-10-15: the phone entered
+  bootloader fastboot, the Mac recognized it, and `fastboot reboot` returned to
+  Ubuntu Touch.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
+* A fixed link:control-region-preservation.adoc[normal-mode reader] for the
+  twelve unmounted control and calibration regions. One verified private copy
+  exists; it is stable, not consistent.
 * A separate fixed-scope link:bootloader-preservation.adoc[LK partition reader]
   for private passive bootloader inspection. It does not enter fastboot or
   establish that either bootloader copy is a working fallback.
@@ -462,9 +467,13 @@ partition tails, have matching Mac/phone hashes and pass read-only ext4 checks;
 see link:os-partition-preservation.adoc[the preservation results].
 The subsequent link:firmware-preservation.adoc[225 MiB firmware acquisition]
 preserved fourteen further GPT partitions and both separate eMMC boot areas,
-with exact lengths and matching independent hashes. The completed set now covers
-21 of 38 GPT partitions plus both boot areas; consistent writable-state
-preservation and the remaining control/security regions are still outstanding.
+with exact lengths and matching independent hashes. That set covered 21 of 38
+GPT partitions plus both boot areas. A later normal-mode run copied the twelve
+unmounted link:control-region-preservation.adoc[control and calibration regions]
+with matching independent hashes; these are stable reads, not consistent
+copies. The four mounted calibration filesystems and consistent copies of the
+sixteen non-userdata regions are still outstanding; on 2026-10-15 the owner
+decided that userdata is not to be preserved.
 The downloaded recovery candidate automatically mounts userdata writable and
 contains enabled migration machinery; it is unsuitable for passive offline
 preservation. None of these findings establishes a tested restore path.
@@ -476,7 +485,9 @@ phone's boot path; an SSH connection cannot provide access after a failed boot.
 
 M0 remains open until firmware/restore provenance and outstanding hardware
 details are recorded and a restoration procedure is demonstrated on this phone,
-with consistent preservation and a verified entry/return route. M1 hardware validation remains open
+with consistent preservation and a verified entry/return route. The normal-mode
+route into bootloader fastboot and back worked once on 2026-10-15; a rescue
+boot and its return have not been tried. M1 hardware validation remains open
 until a generated image is compared with the preserved known-working boot image and tested using the
 verified recovery procedure. No flash or partition-writing helper is included.
 
@@ -957,3 +968,47 @@ reference boot image with the cached kernel reproduced `88c0ca7d...`. The rescue
 envelope was repackaged privately with the final ramdisk and again matched the
 pinned assembler. These are host, emulator and VM results: no image was sent to
 or booted on the phone, and NixOS boot and recovery remain unproven.
+
+=== Follow-up: control-region copies, entry/return trial and userdata decision
+
+A new fixed reader, `tools/acquire-control-regions.py`, covers the twelve GPT
+regions that no host mount covered: `boot_para`, `para`, `expdb`, `frp`,
+`metadata`, `seccfg`, `sec1`, `proinfo`, `nvram`, `cache`, `otp` and
+`flashinfo`. It reuses the vendor/system reader's map, mount-view and transport
+guards as the firmware reader does, adds per-region identity and unmounted
+checks, and issues only read-only opens, reads and size `GET` ioctls; see
+link:control-region-preservation.adoc[the preservation record]. Two reviewers,
+each followed by an adversarial verifier, examined it. The phone-side program
+had no findings, including when traced against a simulated 4.14 phone. The
+host side had no defects; mutation testing found test gaps, which six added
+tests and extensions of four others now close, and the claim that no phone
+files change was qualified for the phone's own sudo logging. The helper was not
+changed after review, so the committed revision is the one that made the
+copies.
+
+The owner ran the reader with `--sudo` before and after the entry trial. Both
+runs copied all twelve regions (652738560 logical bytes each) with matching
+transfer, saved-readback and independent phone-reread hashes, and a separate
+Mac rehash matched both manifests. Only `expdb` differed between them. The
+copies are stable normal-mode reads, not consistent copies, and are outside the
+backup catalog's fixed profile.
+
+The owner then approved and ran the link:entry-return-trial.adoc[entry and
+return trial]. `sudo /sbin/reboot bootloader` reached bootloader fastboot
+(`is-userspace: no`), the Mac recognized it on a direct port, 14 of 15 fixed
+queries answered, and `fastboot reboot` returned to Ubuntu Touch; ADB was back
+after 191 seconds, once the screen was unlocked. The before and after baselines
+matched apart from boot-specific values. An ordinary reboot after the trial,
+the physical fallback, rescue-image acceptance and `fastboot boot` remain
+untested.
+
+The owner also decided that userdata is not to be preserved. The
+link:consistent-preservation.adoc[preservation requirements] now cover the
+sixteen other regions, and the offline boot needs a fixed producer for them
+instead of the userdata profile. Nothing authorizes writing userdata.
+
+Validation on 2026-10-15: the host suite (307 tests, one comparison skipped
+outside Nix) and the Mac Nix `tests` target (307) passed, as did `tests` on
+x86_64 Linux (307) for a snapshot identical to the committed tree apart from
+documentation. The reader's first snapshot, with 15 tests, had also passed on
+macOS and Linux (301). No image was sent to or booted on the phone.

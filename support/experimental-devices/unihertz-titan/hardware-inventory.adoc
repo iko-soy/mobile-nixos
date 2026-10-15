@@ -754,14 +754,14 @@ by itself proves the bootloader state or a usable restore procedure.
 |Storage variant |eMMC confirmed by supplied MMC type and internal partition/mount mappings; see baseline above.
 |Kernel/configuration |`4.14.141+`; uploaded configuration hash matches the recorded reference build. Exact source and kernel binary match remain unverified.
 |Underlying Android/vendor firmware |Reported Android 10 system/vendor fingerprints recorded above; matching restore source and hashes still needed.
-|Bootloader state |Android properties report `flash.locked=0` and `orange`; independent recovery/bootloader capability check outstanding.
+|Bootloader state |Android properties report `flash.locked=0` and `orange`; bootloader fastboot reported `unlocked: yes` and `secure: no` on 2026-10-15. Recovery capabilities remain unchecked.
 |Partition map/capacity |Both GPT copies preserved privately and checked against all 38 kernel partitions; zero disk GUID explicitly recorded. Boot and recovery each 33554432 bytes.
 |DTB/DTBO layout |Installed boot/recovery have a 112135-byte DT table. The 8 MiB dtbo partition contains a 47545-byte table matching installed recovery's recovery-DTBO section; full partition preserved.
 |Known-working boot image |Private installed boot copy verified; its whole-image hash matches job 16473049944. Installed recovery and dtbo also preserved; no restore or new-image boot tested.
-|Device calibration/radio backup |No backup supplied or verified; this helper does not preserve partition contents.
-|Recovery host/tools |Mac Platform-Tools `37.0.1-15733141`; normal-mode ADB confirmed. Bootloader connectivity and low-level restore remain unverified.
-|Enter recovery/bootloader |Unknown; record exact verified procedure for this phone.
-|Temporary boot support |Unknown; do not assume `fastboot boot` or kexec is available.
+|Device calibration/radio backup |Normal-mode copies of the twelve unmounted control/calibration regions exist privately; the four mounted calibration filesystems have no copy, and no copy is consistent. The owner decided on 2026-10-15 not to preserve userdata. This inventory helper preserves no partition contents.
+|Recovery host/tools |Mac Platform-Tools `37.0.1-15733141`; normal-mode ADB and bootloader fastboot recognition confirmed (2026-10-15). Low-level restore remains unverified.
+|Enter recovery/bootloader |Bootloader fastboot: `sudo /sbin/reboot bootloader` entered it and `fastboot reboot` returned to Ubuntu Touch, once, on 2026-10-15; see link:entry-return-trial.adoc[the trial record]. Recovery entry untested.
+|Temporary boot support |Untested. Bootloader fastboot reports a 128 MiB maximum download size; do not assume `fastboot boot` or kexec works.
 |Restore method and artifacts |Private copies cover 21 GPT partitions plus both separate eMMC boot areas; GPT metadata and root-filesystem backing files are also retained. Consistent writable-state preservation, verified restoration transport/commands and a matching OEM package remain unavailable.
 |Restoration demonstrated |No evidence yet; record date, result and subsequent normal boot.
 |===

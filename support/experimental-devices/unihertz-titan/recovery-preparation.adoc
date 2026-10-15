@@ -328,6 +328,8 @@ target mounts in the three guarded process views. The completed set now covers
 the remaining 17 GPT partitions. Calibration, userdata, control/security state
 and RPMB remain outside this acquisition. Label-based roles and matching hashes
 do not establish immutability, a complete restore set or active boot selection.
+A later normal-mode run copied the twelve unmounted control and calibration
+regions; see link:control-region-preservation.adoc[that record].
 
 ==== Consolidated local integrity check
 
@@ -464,6 +466,11 @@ and userdata still require separate accounting and consistency checks. A valid
 table does not authorize restoring it, and this helper provides no write path.
 
 === Consistent userdata and calibration preservation
+
+On 2026-10-15 the owner decided that userdata is not to be preserved; see
+link:consistent-preservation.adoc[the preservation requirements]. The userdata
+analysis below remains as context for what an offline environment must not
+write.
 
 The current direct mount evidence establishes this layout:
 
@@ -957,13 +964,16 @@ concerns possible battery depletion; it does not describe a forced restart or
 bootloader escape. A focused official-source search did not establish a
 physical exit fallback. Instructions for other Titan models are not substitutes.
 
-The next gate for a proposed entry/return trial is a concrete return/failure
-procedure for this installed bootloader and explicit owner authorization.
-Consistent writable-state preservation remains required before later rollback
-writes, in the staged sequence below. Neither absence of boot-control storage
-writes across the whole shutdown route nor a reliable return has been
-demonstrated. These source and read-only observations do not authorize an entry
-trial, temporary boot or write.
+These source and read-only observations led to the reviewed
+link:entry-return-trial.adoc[entry and return trial], which the owner approved
+and ran on 2026-10-15. The orderly `bootloader` reboot reached bootloader
+fastboot, the Mac recognized it, and `fastboot reboot` returned to Ubuntu Touch;
+the boot after that return was normal, but no ordinary reboot has been observed
+since. Normal-mode copies of the twelve unmounted control regions before and
+after differed only in `expdb`. One run demonstrates neither a reliable return
+nor the absence of boot-control writes. Consistent writable-state preservation
+remains required before later rollback writes, in the staged sequence below,
+and the trial authorizes no temporary boot or write.
 
 ==== Modem and calibration consistency source audit
 
@@ -1037,8 +1047,7 @@ transport have been verified on this exact phone.
   establish reachable commands. A route
   through recovery must account for that image's startup writes. The current
   link:entry-return-trial.adoc[entry and return proposal] states the exact
-  commands, stop conditions and residual risks; it awaits review and explicit
-  authorization.
+  commands, stop conditions and residual risks; the owner approved it.
 . With separate owner authorization, perform only the reviewed entry,
   recognition and return trial. Record Mac recognition, product, relevant
   partition sizes and lock state; distinguish bootloader fastboot from userspace
@@ -1046,6 +1055,7 @@ transport have been verified on this exact phone.
   flash, erase or configuration commands. Verify return to the existing Ubuntu
   Touch installation. This trial is a prerequisite to an offline boot proposal,
   not a claim that consistent data preservation has already been achieved.
+  Done once on 2026-10-15; the trial record lists what it did not show.
 . Separately review an offline preservation environment and its entry/exit
   contract. Audit the actual image's startup behavior; neither the public
   recovery candidate nor the different installed recovery is presumed passive.
@@ -1053,7 +1063,8 @@ transport have been verified on this exact phone.
   transport readiness, failure behavior and a demonstrated return route. The
   unsigned build-only artifact and VM results do not establish these hardware
   properties. Resolve the missing independent backup copy in that review.
-. Before acquiring userdata or calibration, establish the required writer
+. Before acquiring calibration and control regions (userdata is excluded by
+  owner decision), establish the required writer
   quiescence, unmounted targets, identities and filesystem geometry. Account for
   every required calibration/control region and any filesystem tail; the
   link:consistent-preservation.adoc[preservation requirements] list the

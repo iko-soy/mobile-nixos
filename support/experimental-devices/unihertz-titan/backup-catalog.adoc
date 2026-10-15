@@ -94,8 +94,14 @@ The 21 copied GPT partitions leave these 17 without partition copies:
 live filesystem backing-file copies do not cover the rest of userdata or prove
 filesystem-wide consistency.
 
+A later normal-mode set holds verified copies of the twelve unmounted regions
+among these; see link:control-region-preservation.adoc[the control-region
+record]. It is outside this catalog's fixed profile, so catalog passes do not
+recheck it, and it is not a consistent copy.
+
 No pass establishes an atomic snapshot, absence of raw firmware writers,
 calibration completeness, authenticity, a working restoration procedure or
 bootability. The Mac remains the only retained backup destination. Consistent
-userdata/calibration preservation, a separately verified copy and a demonstrated
+calibration preservation (userdata is excluded by the owner's 2026-10-15
+decision), a separately verified copy and a demonstrated
 entry/return and restoration path remain open requirements; M0 stays open.
