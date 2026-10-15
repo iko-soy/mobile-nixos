@@ -338,6 +338,12 @@ boot-area read-only flags remained required. This brings coverage to 21 GPT
 partitions plus both separate boot areas, without establishing an atomic
 snapshot, active-bank selection or recovery capability.
 
+A host-only link:backup-catalog.adoc[consolidated catalog check] on 2026-10-15
+rehashed all 27 retained payloads across the six completed sets and reparsed both
+GPT windows. All exact lengths and saved hashes matched, and all complete maps
+agreed on the 38-entry layout. This refreshes local file integrity only; it does
+not refresh the historical phone guards or resolve the remaining coverage gaps.
+
 === Direct userdata source geometry
 
 A later normal-mode ADB probe revalidated the original eMMC layout without

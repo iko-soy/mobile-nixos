@@ -329,6 +329,25 @@ the remaining 17 GPT partitions. Calibration, userdata, control/security state
 and RPMB remain outside this acquisition. Label-based roles and matching hashes
 do not establish immutability, a complete restore set or active boot selection.
 
+==== Consolidated local integrity check
+
+The host-only link:backup-catalog.adoc[backup catalog verifier] brings the six
+completed acquisition sets into one private integrity and coverage report.
+Its fixed profile covers 27 payloads: 21 GPT partition copies, two eMMC boot
+areas, both GPT windows and the two filesystem backing files. It rehashes the
+existing logical contents without duplicating or expanding sparse images,
+reparses GPT and compares the recorded layouts. It makes no phone connection.
+The first complete run on 2026-10-15 passed all 27 payload hashes and exact byte
+counts, both GPT structures and the complete 38-entry map comparison. The private
+catalog adds 30997 bytes; the original payload files were not copied or expanded.
+
+Local byte agreement does not refresh historical source guards or establish
+cross-capture atomicity. The catalog retains the zero-disk-GUID warning, the
+earlier LK mount-table limitation and the absence of a common persistent device
+identifier across all captures. It also records the 17 uncovered GPT partitions,
+missing consistent userdata/calibration preservation, RPMB exclusion, missing
+independent copy and untested recovery path. Passing this check does not close M0.
+
 ==== Installed bootloader evidence
 
 The separate link:bootloader-preservation.adoc[LK preservation procedure]
@@ -986,7 +1005,9 @@ restore recipe. No flashing commands are supplied until their target and
 transport have been verified on this exact phone.
 
 . Retain all verified private copies and their manifests, partition map, OTA
-  identity and firmware evidence. Make and independently verify a second copy
+  identity and firmware evidence. Run the host-only catalog verifier to check
+  current local integrity and retain its explicit coverage gaps. Make and
+  independently verify a second copy
   on separate storage when a destination is available; the owner currently has
   none. Record outstanding coverage explicitly. Additional firmware copies do
   not replace consistent userdata/calibration preservation.

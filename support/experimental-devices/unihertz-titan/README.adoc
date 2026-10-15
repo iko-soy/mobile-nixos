@@ -36,6 +36,8 @@ hardware works under NixOS.
   guarded process mount views, bounded streaming and sparse private Mac output.
 * A fixed 225 MiB link:firmware-preservation.adoc[firmware/boot-area reader]
   covering fourteen further GPT regions and both separate eMMC boot areas.
+* A host-only link:backup-catalog.adoc[private backup catalog verifier] that
+  rehashes the retained copies, checks layout agreement and records coverage gaps.
 
 The reference image retains Ubuntu Touch's command line and userspace contract.
 It is not a NixOS initramfs or root filesystem. Current Mobile NixOS uses a

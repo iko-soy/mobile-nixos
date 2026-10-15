@@ -76,6 +76,14 @@ partitions plus both boot areas. The remaining writable, control and opaque
 regions, active boot selection and an exercised restoration route remain
 unresolved; these additional copies do not close M0 or authorize a boot trial.
 
+A host-only private catalog now verifies all 27 retained payloads across six
+completed sets without duplicating images. Its first run passed every recorded
+length/hash check, both GPT structures and the complete partition-map comparison.
+It records the remaining 17 GPT gaps and distinguishes current local integrity
+from historical source checks, unique device identity and atomic consistency.
+This does not replace consistent userdata/calibration preservation or a tested
+recovery path.
+
 toc::[]
 
 == Objective and recommended approach

@@ -1,0 +1,95 @@
+= Private backup catalog
+
+`tools/verify-backup-catalog.py` checks the retained Mac files together without
+contacting the phone. It writes a small private catalog; it does not copy images,
+acquire missing partitions, repair metadata or construct restoration commands.
+Use it to check local integrity and identify missing preservation evidence before
+reviewing the next step in link:recovery-preparation.adoc[the recovery procedure].
+
+== Fixed input layout
+
+The backup root contains these six completed acquisition sets. The relative
+paths are part of the fixed profile, not paths selected by manifest contents.
+The incomplete earlier GPT attempt is deliberately excluded.
+
+[cols="2,2,1,1",options="header"]
+|===
+|Directory below the backup root |Payloads |Files |Logical bytes
+|`installed` |boot, recovery, dtbo |3 |75497472
+|`bootloader-preservation/installed` |lk, lk2 |2 |2097152
+|`os-partition-preservation/installed` |vendor, system |2 |4118806528
+|`firmware-preservation/installed` |Fourteen GPT regions and two eMMC boot areas |16 |235929600
+|`gpt-preservation/verified` |Primary and backup GPT windows |2 |65536
+|`rootfs-files` |Ubuntu and Android filesystem backing files |2 |4295376896
+|===
+
+Together these are 27 files and 8727773184 logical bytes. Existing sparse holes
+remain intact. Verification reads logical contents, including zero-filled holes,
+but requires only space for the catalog and does not expand the images.
+
+The backup root, acquisition directories and output directory must be owned by
+the current user with mode `0700`. Input images and manifests must be regular
+files with mode `0600` and one link. Keep the tree outside Git and the Nix store. The output
+parent must already exist, and the output directory must be new.
+
+[source,sh]
+----
+python3 support/experimental-devices/unihertz-titan/tools/verify-backup-catalog.py \
+  --backup-root /absolute/private/titan-backups \
+  --output /absolute/private/new-catalog
+----
+
+The tool accepts only the recognized completed manifest formats and expected
+targets. It bounds metadata parsing, rejects duplicate JSON keys, checks recorded
+digest agreement and rehashes each payload through a read-only descriptor with
+exact length and file-stability checks. It reparses both GPT windows, retaining
+the explicit zero-disk-GUID exception, and compares the saved complete partition
+maps. Process IDs, mount IDs and other capture-local observations are not required
+to match across acquisition sessions.
+
+The catalog records manifest hashes, payload hashes and lengths, allocated
+storage, coverage and limitations. All of this output remains private. A
+successful run publishes `catalog.json`; a leftover `catalog.json.part` is
+incomplete regardless of its contents. On failure the verifier removes the final
+entry when it can still identify it as its output. Treat a failed run as incomplete
+even if concurrent changes prevent cleanup. Preserve the original evidence and
+investigate the mismatch instead of editing a manifest to make it pass.
+
+== Completed host verification
+
+The consolidated check completed on 2026-10-15. All 27 payloads matched their
+recorded lengths and SHA-256 values, totaling 8727773184 logical bytes. Both GPT
+windows reparsed successfully and agreed with all 38 recorded partition entries.
+Private ownership, modes and single-link requirements passed. The resulting
+catalog is 30997 bytes; no image was copied or expanded and no phone connection
+was made. Raw hashes, GUIDs and the catalog remain outside Git.
+
+The Mac Nix target passed 265 tests and the boot-packaging fixture. Eighteen new
+synthetic catalog tests cover bounded hashing, malformed metadata, GPT/report
+mismatches, unsafe paths and permissions, input changes and failed publication
+cleanup. These checks verify the host tool, not a restoration procedure.
+
+== What a passing catalog establishes
+
+A pass establishes that the checked local bytes still agree with the retained
+manifests and that the recorded layouts agree. The maps do not bind every capture
+to a persistent eMMC identifier: the GPT disk GUID is zero, and no common CID was
+recorded. Early boot/recovery/dtbo records also lack partition start offsets.
+
+Phone repeat reads and source guards are historical acquisition evidence, not
+fresh phone measurements. In particular, the earlier LK reader had incomplete
+mount-table coverage; the later corrected metadata probe does not retroactively
+fix that acquisition's provenance. A new Mac hash check cannot resolve it.
+
+The 21 copied GPT partitions leave these 17 without partition copies:
+`boot_para`, `para`, `expdb`, `frp`, `nvcfg`, `nvdata`, `metadata`, `protect1`,
+`protect2`, `seccfg`, `sec1`, `proinfo`, `nvram`, `cache`, `userdata`, `otp` and
+`flashinfo`. The separate boot areas and GPT windows do not cover RPMB. The two
+live filesystem backing-file copies do not cover the rest of userdata or prove
+filesystem-wide consistency.
+
+No pass establishes an atomic snapshot, absence of raw firmware writers,
+calibration completeness, authenticity, a working restoration procedure or
+bootability. The Mac remains the only retained backup destination. Consistent
+userdata/calibration preservation, a separately verified copy and a demonstrated
+entry/return and restoration path remain open requirements; M0 stays open.
