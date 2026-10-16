@@ -114,9 +114,11 @@ hardware works under NixOS.
   `i2c-1`. The pin gate read mode 9 where it required 1, so the scan was
   skipped; MediaTek's own driver reads 9 as function 1, which the gate needs
   to allow. The original recovery was restored.
-* The link:native-i2c-scan-trial.adoc[I2C bus scan trial], proposed, not
-  run: the same with MediaTek's rule in the pin gate and a check that the bus
-  lines are released after the scan.
+* The link:native-i2c-scan-trial.adoc[I2C bus scan trial], run on 2026-10-16
+  with the owner's approval: with MediaTek's rule in the pin gate, one
+  read-only scan of the sensors' bus found devices at `0x2c` and `0x60`, a
+  real result by its timing and interrupt count, with the bus lines released
+  afterwards. The original recovery was restored.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

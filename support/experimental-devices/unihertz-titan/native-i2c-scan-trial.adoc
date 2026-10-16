@@ -1,7 +1,9 @@
 = I2C bus scan trial
 
-Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-16: *run once with the owner's explicit approval; all five
+questions were answered, and two devices answered the scan. See
+<<result,the result>>.* Each repetition needs the owner's explicit approval
+of this exact procedure.
 
 The link:native-i2c-trial.adoc[first I2C bus trial] enabled the sensors' I2C
 controller at `0x11011000` in a kexec'd kernel, which probed as `i2c-1`, but
@@ -12,6 +14,61 @@ driver reads a mode of 8 or more as that value minus 8, so 9 is function 1,
 with that rule in the gate, the debugfs path this kernel uses, and a check
 that the bus lines are released after the scan. Everything else is
 unchanged.
+
+[[result]]
+== Result (2026-10-16)
+
+The owner ran the two step 2 copies, then approved the procedure, and ran the
+entries, the Volume Up start and the unlocks; watchers ran the fastboot steps,
+the push and the USB log, and the session ran over SSH from the Mac.
+
+* *Preconditions and Part 1.* The step 2 copies found boot, recovery and dtbo
+  identical to their preserved copies and no control region changed since
+  the latest copy; the baseline, taken after them, found the battery full and
+  charging, no update pending and empty recovery command directories, with
+  Ubuntu Touch's update service idle after System Settings had been opened.
+  `Writing 'recovery' OKAY`, and step 7 read recovery back as `07070c4d...`.
+* *Question 1, yes.* As in the first run: the tree copy differed from the
+  running tree in the node's `status` line only, `kexec_load` placed the
+  kernel at `0x42400000` and the rest just above, the placement check
+  passed, and the next kernel brought up all eight CPUs with the first
+  boot's reserved memory, a tree that read `okay` for the node and differed
+  from the one handed over only in `/chosen`, and exactly one adapter,
+  `i2c-1`, the controller at `11011000`.
+* *Question 2, yes.* GPIO81 and GPIO84 read mode 9, function 1, with their
+  input level high and pull-ups on; GPIO87 and GPIO88 read function 1 and
+  GPIO163 and GPIO164 function 2.
+* *Question 3: `0x2c` and `0x60`.* `i2cdetect -y -r 1` finished in 0.11
+  seconds with exit status 0, while the controller's interrupt count rose
+  from 0 to 222, about two per address: every address was answered or
+  refused by the bus, and the table is a real result. Two addresses
+  answered, `0x2c` and `0x60`, and none of the vendor overlay's `0x0c`,
+  `0x15`, `0x32`, `0x48` and `0x51`. The kernel logged no I2C error.
+* *Question 4, yes.* After the scan GPIO81 and GPIO84 again read input
+  level high: no device held the bus, and no power-off was needed.
+* *Question 5, yes.* `titan-session end-in 1` at 104 seconds of uptime; the
+  device left 83 seconds later and Ubuntu Touch booted (`bootreason=reboot`).
+  From Ubuntu Touch, `sudo /sbin/reboot bootloader` reached fastboot, the
+  preserved original was written (`Writing 'recovery' OKAY`) and Ubuntu Touch
+  returned. The read-back found recovery `4dd1c1f7...`, with boot and dtbo
+  unchanged throughout; of the control regions only `expdb` changed, as after
+  every boot.
+
+Ubuntu Touch's kernel is a sensor-hub build: its configuration has
+MediaTek's hub drivers for the accelerometer, light and proximity sensor,
+gyroscope and magnetometer and no driver for any sensor chip, since the
+sensor co-processor's firmware drives the chips. The overlay's sensor list is
+a reference board's, not this phone's fitting. Identifying the two devices
+needs reading an identification register from each, which first writes a
+register pointer and so needs its own trial. Unverified, by address alone:
+`0x60` is where Capella's CM36686 family of light and proximity sensors
+answers, and `0x2c` where QST's QMC6308 magnetometer does.
+
+The session data and kernel logs are in the private evidence directory. This
+is the native kernel's first working I2C bus: a controller enabled through a
+kexec'd tree, its pins in their I2C function, and two devices answering a
+read-only scan. It does not show which devices they are, any device driver,
+or the other buses.
 
 == Questions
 
