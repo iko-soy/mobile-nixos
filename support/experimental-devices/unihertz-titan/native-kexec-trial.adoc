@@ -90,9 +90,48 @@ the kernel's placement is not the cause. A kexec therefore leaves the next
 kernel with CPU 0 only, after a five-second wait for each other core, and
 that kernel refuses any further kexec, since it counts the cores as stuck.
 Next: read what the MCDI hotplug callbacks do in MediaTek's kernel source for
-the MT6771; and, for kexec in the meantime, consider letting `titan-kexec`
-start kernels with `nosmp`, so that they skip the cores, boot without the
-wait and can kexec again.
+the MT6771; and, for kexec in the meantime, start kexec'd kernels with
+`nosmp`, so that they skip the cores, boot without the wait and can kexec
+again. `titan-kexec --nosmp` now does that (see
+link:ram-nixos/README.adoc[the image record]).
+
+[[cause]]
+== Why the cores do not restart: source reading (2026-10-16)
+
+From the vendor kernel that Ubuntu Touch runs on the Titan, at the revision
+`kernel-sources.nix` pins, and MediaTek's firmware log on the phone:
+
+* *Verified.* The vendor kernel's `hps/cpuhotplug` callback
+  (`drivers/misc/mediatek/base/power/cpuhotplug/mtk_cpuhp_core.c`, registered
+  at `CPUHP_BP_PREPARE_DYN`) runs on a surviving CPU once the dying CPU is
+  dead, and calls `poweroff_cpu(cpu)` (`mtk_cpuhp_mt6771.c`,
+  `mtk_cpuhp_private.h`): an SMC with MediaTek's `MTK_SIP_POWER_DOWN_CORE`,
+  function ID `0xC2000212` on arm64, and the logical CPU number
+  (`include/mt-plat/mtk_secure_api.h`). For the last CPU of a cluster it adds
+  `MTK_SIP_POWER_DOWN_CLUSTER` (`0xC2000210`) and turns off the cluster's PLL
+  and, for the big cluster, its regulators; on bring-up it only turns those
+  back on for a cluster's first CPU, and otherwise relies on PSCI CPU_ON. The
+  native kernel makes neither call.
+* *Verified.* The vendor kernel's two `mcdi_cb` callbacks
+  (`mcdi/mcdi_v1/mtk_mcdi_main.c`) only pause MediaTek's deep idle and update
+  the online-CPU mask in a mailbox shared with the SSPM co-processor; on the
+  MT6771 they make no firmware call.
+* *Verified.* The firmware is MediaTek's BL31 v1.3, a debug build. Its log,
+  readable on Ubuntu Touch at `/proc/atf_log/atf_log`, records each PSCI
+  CPU_ON with the power controller's result (`spmc: power on core 0.1
+  successfully`). Reading it consumes it, and a blocking read holds the
+  driver's lock until the firmware logs again; reads must be non-blocking.
+* *Inference.* MediaTek's firmware leaves a core powered after PSCI CPU_OFF
+  until the kernel calls `MTK_SIP_POWER_DOWN_CORE`, so a later CPU_ON finds
+  the core already powered, returns success and never resets it. Generic
+  PSCI marks a core off before its final WFI, so `killed (polled 0 ms)` says
+  nothing about its power. Mainline TF-A for the related MT8183 handles core
+  power without the kernel, which this firmware evidently does not.
+
+A native-kernel driver that makes the same call at the same point would test
+this: take cpu1 and then cpu4 offline and back, then a kexec without `nosmp`.
+Whether the vendor kernel's own round trip works on this phone, and what the
+firmware logs for the call, can be seen on Ubuntu Touch first.
 
 == Questions
 

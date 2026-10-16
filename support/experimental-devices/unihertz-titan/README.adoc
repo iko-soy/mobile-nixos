@@ -1308,8 +1308,8 @@ would have made stage 0 refuse before USB came up, among other fixes. The
 owner approved and ran the link:native-ram-trial.adoc[trial] on 2026-10-16
 with the first version (commit `ffca3102`; `nativeRamImage` now builds the
 working-environment version of link:native-ram-env-trial.adoc[its own
-trial] with a 4 MiB kernel log, for the link:native-kexec-trial.adoc[kexec
-CPU trial]):
+trial] with a 4 MiB kernel log, which ran in the
+link:native-kexec-trial.adoc[kexec CPU trial], and `titan-kexec --nosmp`):
 macOS accepted the USB network, the pinned store arrived and verified, NixOS
 26.11 reached `running` with no failed unit six seconds after the handover,
 SSH accepted the dedicated key, a restart from the session booted Ubuntu

@@ -15,11 +15,12 @@ Each case boots the VM build of stage 0 with QEMU's restricted user network
 * hard: with the deadline check stopped over SSH, stage 0's hard deadline
   process, still running in NixOS, restarts the guest at its own deadline;
 * kexec: titan-kexec refuses a kernel or a replacement tree with the wrong
-  hash, loads the pinned kernel and initramfs, and `systemctl kexec` starts
-  them (the tree-replacing path itself needs a device tree, so only the
-  phone exercises it); stage 0 runs again,
-  takes a second push, NixOS boots with the appended marker on its command
-  line, and the session deadline then restarts the guest;
+  hash and an unknown option, loads the pinned kernel and initramfs with
+  --nosmp, and `systemctl kexec` starts them (the tree-replacing path itself
+  needs a device tree, so only the phone exercises it); stage 0 runs again,
+  takes a second push, NixOS boots on one of the guest's two CPUs with
+  `nosmp` and the appended marker on its command line, and the session
+  deadline then restarts the guest;
 * storage: with a blank disk attached, stage 0 reports the refusal on its
   status port, restarts before networking and leaves the disk unchanged;
 * deadline: with nothing pushed, stage 0 restarts at its own deadline.
@@ -339,7 +340,16 @@ def case_kexec(args, directory, result):
                      timeout=120).stdout.decode()
         if "exit=2" not in marker or "loaded=0" not in marker:
             raise RuntimeError(f"titan-kexec accepted an APPEND that is not a titan_ marker: {marker!r}")
-        loaded = ssh(args, guest.ssh_port, f"titan-kexec /run/kexec/kernel {kernel_sha256} /run/kexec/initrd "
+        option = ssh(args, guest.ssh_port, f"titan-kexec --smp /run/kexec/kernel {kernel_sha256} /run/kexec/initrd "
+                     f"{initrd_sha256}; echo \"exit=$? loaded=$(cat /sys/kernel/kexec_loaded)\"",
+                     timeout=120).stdout.decode()
+        if "exit=2" not in option or "loaded=0" not in option:
+            raise RuntimeError(f"titan-kexec accepted an unknown option: {option!r}")
+        cpus = ssh(args, guest.ssh_port, "nproc", timeout=60).stdout.decode().split()
+        result["cpus_before_kexec"] = cpus
+        if cpus != ["2"]:
+            raise RuntimeError(f"The guest did not start with two CPUs: {cpus!r}")
+        loaded = ssh(args, guest.ssh_port, f"titan-kexec --nosmp /run/kexec/kernel {kernel_sha256} /run/kexec/initrd "
                      f"{initrd_sha256} titan_kexec=1 && cat /sys/kernel/kexec_loaded", timeout=300).stdout.decode()
         result["loaded"] = loaded.split()
         if "loaded; systemctl kexec starts it" not in loaded or loaded.split()[-1:] != ["1"]:
@@ -354,12 +364,14 @@ def case_kexec(args, directory, result):
         push(guest.push_port, source=args.system)
         guest.wait_for_count(r"TITAN_RAM starting-nixos", 2, 300)
         wait_ssh(args, guest)
-        after = ssh(args, guest.ssh_port, "cat /proc/cmdline; cut -d. -f1 /proc/uptime; "
+        after = ssh(args, guest.ssh_port, "cat /proc/cmdline; nproc; cut -d. -f1 /proc/uptime; "
                     "grep -lx titan-deadline /proc/[0-9]*/comm | wc -l", timeout=60).stdout.decode().split()
-        result["after_kexec"] = after[-2:]
+        result["after_kexec"] = after[-3:]
         result["gadget_detached_before_kexec"] = any("Detach the USB gadget before kexec" in line for line in guest.lines())
-        if "titan_kexec=1" not in after or "titan_ram_vm=1" not in after or "panic_on_oops=1" not in after:
+        if any(token not in after for token in ("titan_kexec=1", "titan_ram_vm=1", "panic_on_oops=1", "nosmp")):
             raise RuntimeError(f"The kexec'd kernel lacks the expected command line: {after!r}")
+        if after[-3] != "1":
+            raise RuntimeError(f"The kexec'd kernel did not stay on one CPU: {after[-3:]}")
         if not after[-2].isdigit() or int(after[-2]) > 600 or after[-1] != "1":
             raise RuntimeError(f"The kexec'd system did not restart its uptime or hard deadline: {after[-2:]}")
         moved = ssh(args, guest.ssh_port, "titan-session end-in 1", timeout=60).stdout.decode()

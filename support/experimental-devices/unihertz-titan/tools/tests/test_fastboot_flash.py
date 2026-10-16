@@ -126,7 +126,7 @@ class RecoveryFlashTests(unittest.TestCase):
     def test_pinned_profiles_match_the_reviewed_images(self):
         real = load("titan_fastboot_flash_constants", HERE.parent / "flash-recovery.py")
         self.assertEqual(set(real.PROFILES), {"rescue-probe", "repo-kernel-probe", "native-probe", "native-diag",
-                                              "ram-nixos", "ram-nixos-2", "ram-nixos-3",
+                                              "ram-nixos", "ram-nixos-2", "ram-nixos-3", "ram-nixos-4",
                                               "control-acquisition", "original-recovery"})
         self.assertEqual(real.PARTITION_BYTES, 33554432)
         self.assertEqual(real.PARTITION, "recovery")
@@ -175,6 +175,10 @@ class RecoveryFlashTests(unittest.TestCase):
                           "1b586f60e6a0cfdc23e748d77a622614bdba6a0447bcbeb7cdda2b48019f505f"))
         # Only the command line differs from ram-nixos-2, so the layout is the same.
         self.assertEqual(ram3["source_bytes"], ram2["source_bytes"])
+        ram4 = real.PROFILES["ram-nixos-4"]
+        self.assertEqual((ram4["source_bytes"], ram4["source_sha256"], ram4["sha256"]),
+                         (16510976, "584a3bc455a37e66052d50d52c1f4e9069343354e8552ccf95994e19ac5b0b5e",
+                          "38fe2e1a3693189ecb65ec62d7f0308ea3d9fcceb150251f00106921916af59a"))
         control = real.PROFILES["control-acquisition"]
         self.assertEqual((control["source_bytes"], control["source_sha256"], control["sha256"]),
                          (13475840, "41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65",

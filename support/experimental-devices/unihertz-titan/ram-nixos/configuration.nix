@@ -67,15 +67,24 @@ let
   # kexec_load takes the given tree, which must match its SHA-256 and pass
   # titan-dtb-check against the running tree. APPEND adds only titan_*
   # markers, so it cannot override the command line's safety settings.
+  # --nosmp adds nosmp, so that the next kernel leaves the secondary CPUs
+  # off: on the Titan a CPU turned off does not start again, and a kernel
+  # that tries counts it as stuck and refuses any further kexec
+  # (native-kexec-trial.adoc). Later kexecs reuse the command line, so the
+  # setting carries on.
   titanKexec = pkgs.writeShellApplication {
     name = "titan-kexec";
     runtimeInputs = [ pkgs.coreutils pkgs.kexec-tools titanDtbCheck ];
     text = ''
       usage() {
-        echo "titan-kexec [--dtb DTB DTB_SHA256] KERNEL KERNEL_SHA256 INITRD INITRD_SHA256 [titan_MARKER[=VALUE]]" >&2
+        echo "titan-kexec [--nosmp] [--dtb DTB DTB_SHA256] KERNEL KERNEL_SHA256 INITRD INITRD_SHA256 [titan_MARKER[=VALUE]]" >&2
         exit 2
       }
-      dtb="" dtb_sha256=""
+      nosmp="" dtb="" dtb_sha256=""
+      if [ "''${1:-}" = "--nosmp" ]; then
+        nosmp=1
+        shift
+      fi
       if [ "''${1:-}" = "--dtb" ]; then
         if [ "$#" -lt 3 ] || [ -z "$2" ]; then usage; fi
         dtb=$2 dtb_sha256=$3
@@ -83,6 +92,7 @@ let
       fi
       if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then usage; fi
       kernel=$1 kernel_sha256=$2 initrd=$3 initrd_sha256=$4 append=''${5:-}
+      case "$kernel" in -*) usage ;; esac
       hashes=("$kernel_sha256" "$initrd_sha256")
       if [ -n "$dtb" ]; then hashes+=("$dtb_sha256"); fi
       for hash in "''${hashes[@]}"; do
@@ -93,7 +103,9 @@ let
       echo "$kernel_sha256  $kernel" | sha256sum --check --quiet
       echo "$initrd_sha256  $initrd" | sha256sum --check --quiet
       arguments=(--initrd="$initrd" --reuse-cmdline)
-      if [ -n "$append" ]; then arguments+=(--append="$append"); fi
+      extra=$append
+      if [ -n "$nosmp" ]; then extra="nosmp''${append:+ $append}"; fi
+      if [ -n "$extra" ]; then arguments+=(--append="$extra"); fi
       if [ -z "$dtb" ]; then
         kexec --kexec-file-syscall --load "$kernel" "''${arguments[@]}"
       else

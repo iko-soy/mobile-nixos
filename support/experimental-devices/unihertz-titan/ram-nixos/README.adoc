@@ -18,8 +18,10 @@ into the same kernel and stage 0 worked but brought up only one CPU (see
 link:../native-ram-env-trial.adoc[the trial record]). `nativeRamImage` now
 builds it with a 4 MiB kernel log, with which the
 link:../native-kexec-trial.adoc[kexec CPU trial] found the reason: the native
-kernel cannot restart a core it has turned off, with or without kexec.
-Building it does not authorize starting it.
+kernel cannot restart a core it has turned off, with or without kexec. It
+now also has `titan-kexec --nosmp` (flash profile `ram-nixos-4`; image
+`584a3bc4...`, store squashfs `a0afd89c...`), which has not run on the
+phone. Building it does not authorize starting it.
 
 [source,sh]
 ----
@@ -96,8 +98,8 @@ Any failed step restarts the phone, which then boots Ubuntu Touch.
   `titan-session status` shows the deadline, whether its check is active and
   whether the hard-deadline helper runs, and `titan-session end` ends the
   session;
-* kexec: `titan-kexec [--dtb DTB DTB_SHA256] KERNEL KERNEL_SHA256 INITRD
-  INITRD_SHA256 [APPEND]` loads a kernel and initramfs only when both match
+* kexec: `titan-kexec [--nosmp] [--dtb DTB DTB_SHA256] KERNEL KERNEL_SHA256
+  INITRD INITRD_SHA256 [APPEND]` loads a kernel and initramfs only when both match
   their SHA-256, with the running command line plus APPEND, and `systemctl
   kexec` then starts them after a clean shutdown. Without `--dtb` it uses
   `kexec_file_load` (`CONFIG_KEXEC_FILE`), which reuses the device tree the
@@ -109,7 +111,12 @@ Any failed step restarts the phone, which then boots Ubuntu Touch.
   present with identical properties, the same cell sizes, and no extra
   memory. APPEND takes only `titan_` markers, so it cannot override the
   command line's safety settings, and a unit detaches the USB gadget before
-  each kexec, since the USB controller has no shutdown hook.
+  each kexec, since the USB controller has no shutdown hook. `--nosmp` adds
+  `nosmp`, so that the next kernel leaves the secondary CPUs off: on the
+  Titan a CPU turned off does not start again
+  (link:../native-kexec-trial.adoc[the kexec CPU trial]), and a kernel that
+  tries waits five seconds for each, counts them as stuck and refuses any
+  further kexec. Later kexecs reuse the command line, so `nosmp` carries on.
   `ramNixos.kexecPayload` holds the uncompressed kernel and stage 0's
   initramfs for a kexec into the same image;
 * inspection tools: `dtc`, `file`, `less`, `strace`, `htop`, `tmux`,
@@ -144,9 +151,10 @@ QEMU's restricted user network in place of the USB data path:
   restarts by itself at that new deadline;
 * with the deadline check stopped over SSH, the hard deadline helper, still
   running in NixOS, restarts the guest at its own deadline;
-* `titan-kexec` refuses a kernel with the wrong hash, then loads the pinned
-  kernel and initramfs, and `systemctl kexec` starts them: stage 0 runs
-  again, takes a second push, NixOS boots with the appended marker on its
+* `titan-kexec` refuses a kernel with the wrong hash and an unknown option,
+  then loads the pinned kernel and initramfs with `--nosmp`, and `systemctl
+  kexec` starts them: stage 0 runs again, takes a second push, NixOS boots on
+  one of the guest's two CPUs with `nosmp` and the appended marker on its
   command line, and the session deadline restarts the guest;
 * with a blank disk attached, stage 0 reports the refusal on its status port
   and restarts before networking, leaving the disk unchanged;
