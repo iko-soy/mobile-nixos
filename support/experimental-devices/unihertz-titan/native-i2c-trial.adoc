@@ -60,7 +60,9 @@ the USB log, and the session ran over SSH from the Mac.
   preserved original was written (`Writing 'recovery' OKAY`) and Ubuntu Touch
   returned. The read-back found recovery `4dd1c1f7...`, with boot and dtbo
   unchanged throughout; of the control regions only `expdb` changed, as after
-  every boot.
+  every boot. The Part 4 sensor check was not done: this Ubuntu Touch offers
+  no automatic brightness, and with no transfer having run there was nothing
+  for it to catch.
 
 Afterwards, read-only: Ubuntu Touch's own GPIO table
 (`/sys/devices/platform/1000b000.pinctrl/mt_gpio`) reports mode 1 for GPIO81,
