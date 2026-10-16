@@ -244,7 +244,7 @@ let
   '';
   # titan-dtb-check against synthetic trees: what it must accept and refuse.
   dtbCheckTests = pkgs.runCommand "titan-ram-dtb-check-tests" {
-    nativeBuildInputs = [ pkgs.dtc ];
+    nativeBuildInputs = [ pkgs.dtc pkgs.python3 ];
   } ''
     check=${pkgs.writeShellApplication {
       name = "titan-dtb-check";
@@ -279,9 +279,40 @@ let
     variant memory 's/reg = <0 0x40000000 1 0x80000000>;/reg = <0 0x40000000 1 0x40000000>;/'
     variant memory2 's|chosen {|memory@200000000 { device_type = "memory"; reg = <2 0 0 0x1000>; }; chosen {|'
     variant cells 's/#size-cells = <2>;/#size-cells = <1>;/'
+    # A kernel replaces a consumed /chosen/rng-seed with NOP tags.
+    variant seeded 's/bootargs = "console=ttyS0";/bootargs = "console=ttyS0"; rng-seed = [00 11 22 33 44 55 66 77];/'
+    python3 - seeded.dtb nop.dtb <<'PY'
+    import struct, sys
+    blob = bytearray(open(sys.argv[1], "rb").read())
+    struct_off, strings_off = struct.unpack_from(">II", blob, 8)
+    pos, nops = struct_off, 0
+    while True:
+        tag, = struct.unpack_from(">I", blob, pos)
+        if tag == 1:
+            pos = (blob.index(0, pos + 4) + 4) & ~3
+        elif tag == 3:
+            length, nameoff = struct.unpack_from(">II", blob, pos + 4)
+            end = pos + 12 + ((length + 3) & ~3)
+            name = blob[strings_off + nameoff:blob.index(0, strings_off + nameoff)]
+            if name == b"rng-seed":
+                for word in range(pos, end, 4):
+                    struct.pack_into(">I", blob, word, 4)
+                nops = (end - pos) // 4
+            pos = end
+        elif tag in (2, 4):
+            pos += 4
+        else:
+            break
+    assert nops > 0, "no rng-seed to replace"
+    open(sys.argv[2], "wb").write(blob)
+    PY
     for accepted in base chosen extra; do
       "$check" base.dtb "$accepted.dtb" || { echo "refused $accepted" >&2; exit 1; }
     done
+    for pair in "nop.dtb base.dtb" "base.dtb nop.dtb" "nop.dtb nop.dtb"; do
+      "$check" $pair || { echo "refused the trees $pair" >&2; exit 1; }
+    done
+    if "$check" nop.dtb memory.dtb 2> nopmemory.err; then echo "accepted nopmemory" >&2; exit 1; fi
     for refused in nomap disabled size noempty memory memory2 cells; do
       if "$check" base.dtb "$refused.dtb" 2> "$refused.err"; then echo "accepted $refused" >&2; exit 1; fi
     done

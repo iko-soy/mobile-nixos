@@ -14,6 +14,15 @@ live=$1 new=$2
 fail() { echo "titan-dtb-check: $*; nothing was loaded." >&2; exit 1; }
 [ -r "$live" ] || fail "cannot read the running tree $live"
 [ -r "$new" ] || fail "cannot read the new tree $new"
+# A kernel replaces what it consumes from its tree, such as a kexec'd
+# kernel's /chosen/rng-seed, with NOP tags, at which fdtget's node listing
+# fails (native-cpu-power-trial.adoc). Read both trees as dtc rewrites them,
+# without NOPs; properties keep their bytes.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+dtc -q -I dtb -O dtb -o "$work/live.dtb" "$live" || fail "cannot read the running tree $live"
+dtc -q -I dtb -O dtb -o "$work/new.dtb" "$new" || fail "cannot read the new tree $new"
+live=$work/live.dtb new=$work/new.dtb
 
 # A node's properties as sorted "name=hex bytes" lines, or "absent".
 signature() {

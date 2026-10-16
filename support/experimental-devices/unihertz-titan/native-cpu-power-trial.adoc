@@ -78,8 +78,10 @@ the push and the USB log, and the session ran over SSH from the Mac.
   the tree. The kexec'd kernel's tree evidently carries NOP tags, which the
   bootloader's tree does not and which `fdtget`'s subnode listing does not
   skip; the kernel replaces a consumed `/chosen/rng-seed`, which
-  `kexec_file_load` adds, with NOP tags. The check needs to read trees
-  rewritten by `dtc`; as the procedure requires, no kexec was run by hand.
+  `kexec_file_load` adds, with NOP tags. As the procedure requires, no kexec
+  was run by hand. The check now reads both trees as `dtc` rewrites them; its
+  tests include a tree whose `rng-seed` is replaced by NOP tags, which the
+  old check refused with the same message.
 * *Question 7, yes.* `titan-session end-in 1` at 172 seconds of uptime; the
   device left 75 seconds later, the preloader passed through, and Ubuntu
   Touch booted (`bootreason=reboot`). From Ubuntu Touch, `sudo /sbin/reboot

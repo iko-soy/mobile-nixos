@@ -24,8 +24,10 @@ firmware to power down each core turned off, as MediaTek's kernel does
 (patch 0005; flash profile `ram-nixos-5`; image `40097d4e...`, store
 squashfs `a0afd89c...`). It ran in the link:../native-cpu-power-trial.adoc[CPU
 power-down trial]: cores came back after hotplug, and a kexec through
-`kexec_file_load` kept all eight CPUs; `--nosmp` has not run on the phone,
-and `titan-dtb-check` fails on a kexec'd kernel's tree. Building it does not
+`kexec_file_load` kept all eight CPUs. `titan-dtb-check` refused a
+kexec'd kernel's tree there and now reads trees as `dtc` rewrites them (flash
+profile `ram-nixos-6`; image `5a4ad5f0...`, store squashfs `9367b299...`);
+neither that nor `--nosmp` has run on the phone. Building it does not
 authorize starting it.
 
 [source,sh]
@@ -114,7 +116,8 @@ Any failed step restarts the phone, which then boots Ubuntu Touch.
   the given tree, which must match its SHA-256 and pass `titan-dtb-check`
   (`dtb-check.sh`): every reserved region and memory node of the running tree
   present with identical properties, the same cell sizes, and no extra
-  memory. APPEND takes only `titan_` markers, so it cannot override the
+  memory. It reads both trees as `dtc` rewrites them, since a kernel leaves
+  NOP tags in the tree it was given, which `fdtget` cannot list. APPEND takes only `titan_` markers, so it cannot override the
   command line's safety settings, and a unit detaches the USB gadget before
   each kexec, since the USB controller has no shutdown hook. `--nosmp` adds
   `nosmp`, so that the next kernel leaves the secondary CPUs off: on the
