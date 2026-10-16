@@ -139,9 +139,9 @@ From the vendor kernel that Ubuntu Touch runs on the Titan, at the revision
 The working environment's kernel now makes the same call at the same point
 (`cpuPowerDown` in `native/kernel.nix`, patch 0005): once the SPM reports the
 dead core in WFI, it calls `MTK_SIP_POWER_DOWN_CORE` and logs the core's SPM
-power state before and after. The link:native-cpu-power-trial.adoc[CPU
-power-down trial] proposes its test on the phone: cpu1, cpu4 and the whole big
-cluster offline and back under a guard, then kexec without `nosmp`.
+power state before and after. In the link:native-cpu-power-trial.adoc[CPU
+power-down trial] cpu1, cpu4 and six cores at once came back with it, and a
+kexec'd kernel brought up all eight CPUs.
 
 == Questions
 

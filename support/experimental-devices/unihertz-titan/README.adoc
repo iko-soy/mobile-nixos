@@ -95,10 +95,12 @@ hardware works under NixOS.
   cause; both kexecs were skipped, and the original recovery was restored.
   MediaTek's kernel powers such a core down with a firmware call, which
   Ubuntu Touch on the phone confirmed.
-* The link:native-cpu-power-trial.adoc[CPU power-down trial], proposed, not
-  run: the native kernel with a driver that makes the same call, testing CPU
-  restarts and a whole cluster under a guard, then kexecs with all eight
-  CPUs and the first tree-replacing kexec.
+* The link:native-cpu-power-trial.adoc[CPU power-down trial], run on
+  2026-10-16 with the owner's approval: with a driver that makes the same
+  call, cpu1, cpu4 and six cores at once came back under a guard, and a kexec
+  through `kexec_file_load` brought up all eight CPUs. The tree-replacing
+  kexec was refused by its own tree check, which fails on the kexec'd
+  kernel's tree; the original recovery was restored.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

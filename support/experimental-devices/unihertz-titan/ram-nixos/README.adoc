@@ -22,8 +22,10 @@ kernel cannot restart a core it has turned off, with or without kexec. It
 now also has `titan-kexec --nosmp`, and its kernel the driver that asks the
 firmware to power down each core turned off, as MediaTek's kernel does
 (patch 0005; flash profile `ram-nixos-5`; image `40097d4e...`, store
-squashfs `a0afd89c...`), for the link:../native-cpu-power-trial.adoc[CPU
-power-down trial]; neither has run on the phone. Building it does not
+squashfs `a0afd89c...`). It ran in the link:../native-cpu-power-trial.adoc[CPU
+power-down trial]: cores came back after hotplug, and a kexec through
+`kexec_file_load` kept all eight CPUs; `--nosmp` has not run on the phone,
+and `titan-dtb-check` fails on a kexec'd kernel's tree. Building it does not
 authorize starting it.
 
 [source,sh]

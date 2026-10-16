@@ -180,6 +180,8 @@ and device trees without flashing. On 2026-10-16 its trial kexec'd into the
 same kernel and stage 0 on the phone, but the kexec'd kernel brought up only
 CPU 0. The link:native-kexec-trial.adoc[kexec CPU trial] then found that
 taking a core offline and back fails the same way without any kexec: the
-native kernel cannot restart a core it has turned off, so kexec'd kernels run
-on CPU 0 until that is solved. MediaTek's kernel registers hotplug callbacks
-for its multi-core deep idle controller, which are the first lead.
+native kernel could not restart a core it had turned off. MediaTek's
+firmware powers a core down only when the kernel asks it to, as MediaTek's
+kernel does; the working environment's kernel now does the same, and in the
+link:native-cpu-power-trial.adoc[CPU power-down trial] cores came back after
+hotplug and a kexec'd kernel brought up all eight CPUs.

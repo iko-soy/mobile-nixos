@@ -1,7 +1,10 @@
 = CPU power-down trial
 
-Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-16: *run once with the owner's explicit approval. Every CPU
+came back, and the kexec'd kernel brought up all eight CPUs; the
+tree-replacing kexec was refused by its own tree check, before anything was
+loaded. See <<result,the result>>.* Each repetition needs the owner's
+explicit approval of this exact procedure.
 
 The link:native-kexec-trial.adoc[kexec CPU trial] found that a core the native
 kernel turns off does not start again, and its
@@ -18,6 +21,78 @@ it kexecs through `kexec_file_load` without `nosmp`, expecting all eight CPUs
 in the next kernel, and from there through `kexec_load` with a copy of the
 running tree. The original recovery is then restored. Ubuntu Touch's boot and
 `dtbo` partitions are never written, and Linux never sees the phone's storage.
+
+[[result]]
+== Result (2026-10-16)
+
+The owner approved the procedure and ran Part 0, the partition reads, the
+entries, the Volume Up start and the unlocks; watchers ran the fastboot steps,
+the push and the USB log, and the session ran over SSH from the Mac.
+
+* *Question 1, yes.* On Ubuntu Touch, cpu4 went offline and came back two
+  seconds later. The firmware log showed the vendor kernel's call for CPU 4
+  powering down the big cluster's first core (`mt_core_ops: cpu=4, mode=0`,
+  `spmc: power off core 1.0 successfully`) and CPU_ON powering it on again
+  (`spmc: power on core 1.0 successfully`, `psci: core 1:0 ON`).
+* *Preconditions and Part 1.* As before: battery full and charging, no update,
+  empty recovery command directories, boot, recovery and dtbo identical to
+  their preserved copies and no control region changed since the latest copy;
+  `Writing 'recovery' OKAY`, and step 7 read recovery back as `13236a69...`.
+* *Question 2, yes.* The image's USB device appeared 21 seconds after the boot
+  ROM, SSH answered by 47 seconds of uptime, and `titan-session end-in 40`
+  moved the end to 2447 seconds. The driver registered at 0.35 seconds
+  (`mt6771-cpu-power: powering down cores after CPU hotplug`), all eight CPUs
+  came up, the log was complete, and NixOS was `running` with no failed unit,
+  at 35 °C.
+* *Guards.* `kernel.panic_on_rcu_stall` was set (stall timeout 21 seconds,
+  `panic=5`). The guard's dry run logged `sysrq: HELP` five seconds after it
+  started, and its process group ended; the kernel log streamed to the Mac
+  throughout.
+* *Question 3, yes.* cpu1, then cpu4, each came back within 0.15 seconds. For
+  each, PSCI reported the core off at once (`killed (polled 0 ms)`), the
+  driver's `before` line showed the core in WFI and its SPM power-status bit
+  set, the call returned `0x0` 22 ms later, and the `after` line showed that
+  bit clear and the core's power control without its power-on and reset bits
+  (`0x...1b7` to `0x...1b2`): the core was still powered after PSCI CPU_OFF,
+  and only the call cut it. The power-status bits seen were 10 and 11 for
+  cpu1 and cpu2, as MediaTek's kernel names them, and 16 to 19 for cpu4 to
+  cpu7.
+* *Question 4, yes.* cpu1, cpu2 and cpu4 to cpu7 went offline together and
+  came back, all within 1.1 seconds, with the same driver lines for each and
+  every call returning `0x0`; with all four big cores off, their power bits
+  read clear together. A USB carrier loss of 0.2 seconds at 163 seconds of
+  uptime, like the earlier macOS blips, made the first attempt fail to copy
+  its script; nothing ran, and the second attempt ran as planned. Each run's
+  guard ended normally, and the CPU temperature stayed at 35 to 37 °C.
+* *Question 5, yes.* `kexec_file_load` returned 0. After `systemctl kexec`
+  the image's device left within two seconds and was back four seconds
+  later; stage 0 took the push in seven seconds and NixOS ran again. The
+  kexec'd kernel brought up all eight CPUs in 17 ms (`smp: Brought up 1 node,
+  8 CPUs`), with no failure line, its reserved-memory lines and nodes
+  identical to the first boot's, the driver registered, KASLR on with the
+  seed `kexec_file_load` provides, and its code at `0x42800000`.
+* *Question 6, not answered.* `titan-kexec --dtb` refused before loading:
+  `titan-dtb-check: cannot list the root of /sys/firmware/fdt; nothing was
+  loaded`. On the kexec'd kernel's tree, `fdtget -l ... /` prints all 18 root
+  nodes but exits 1 without a message; it succeeds once `dtc` has rewritten
+  the tree. The kexec'd kernel's tree evidently carries NOP tags, which the
+  bootloader's tree does not and which `fdtget`'s subnode listing does not
+  skip; the kernel replaces a consumed `/chosen/rng-seed`, which
+  `kexec_file_load` adds, with NOP tags. The check needs to read trees
+  rewritten by `dtc`; as the procedure requires, no kexec was run by hand.
+* *Question 7, yes.* `titan-session end-in 1` at 172 seconds of uptime; the
+  device left 75 seconds later, the preloader passed through, and Ubuntu
+  Touch booted (`bootreason=reboot`). From Ubuntu Touch, `sudo /sbin/reboot
+  bootloader` reached fastboot, the preserved original was written (`Writing
+  'recovery' OKAY`) and Ubuntu Touch returned. The read-back found recovery
+  `4dd1c1f7...`, with boot and dtbo unchanged throughout; of the control
+  regions only `expdb` changed, as after every boot.
+
+The session data, kernel logs, the streamed log and the firmware log are in
+the private evidence directory. This gives the native kernel working CPU
+hotplug and kexec'd kernels with all eight CPUs, so kexec no longer costs the
+secondary CPUs. Not shown: the tree-replacing kexec, which waits for the tree
+check's fix, suspend, or MediaTek's cluster power-down.
 
 == Questions
 
