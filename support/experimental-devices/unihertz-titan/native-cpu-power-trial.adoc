@@ -81,9 +81,9 @@ the push and the USB log, and the session ran over SSH from the Mac.
   `kexec_file_load` adds, with NOP tags. As the procedure requires, no kexec
   was run by hand. The check now reads both trees as `dtc` rewrites them; its
   tests include a tree whose `rng-seed` is replaced by NOP tags, which the
-  old check refused with the same message; the
-  link:native-dtb-kexec-trial.adoc[tree-replacing kexec trial] proposes the
-  path again.
+  old check refused with the same message; in the
+  link:native-dtb-kexec-trial.adoc[tree-replacing kexec trial] it accepted
+  such a tree and the path worked.
 * *Question 7, yes.* `titan-session end-in 1` at 172 seconds of uptime; the
   device left 75 seconds later, the preloader passed through, and Ubuntu
   Touch booted (`bootreason=reboot`). From Ubuntu Touch, `sudo /sbin/reboot

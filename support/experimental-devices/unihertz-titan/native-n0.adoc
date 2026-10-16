@@ -184,4 +184,7 @@ native kernel could not restart a core it had turned off. MediaTek's
 firmware powers a core down only when the kernel asks it to, as MediaTek's
 kernel does; the working environment's kernel now does the same, and in the
 link:native-cpu-power-trial.adoc[CPU power-down trial] cores came back after
-hotplug and a kexec'd kernel brought up all eight CPUs.
+hotplug and a kexec'd kernel brought up all eight CPUs. The
+link:native-dtb-kexec-trial.adoc[tree-replacing kexec trial] then handed a
+kexec'd kernel a modified device tree, so tree changes such as the display's
+or I2C's can be tried in a session without flashing.

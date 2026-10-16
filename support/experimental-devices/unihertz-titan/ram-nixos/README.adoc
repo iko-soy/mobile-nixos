@@ -26,9 +26,10 @@ squashfs `a0afd89c...`). It ran in the link:../native-cpu-power-trial.adoc[CPU
 power-down trial]: cores came back after hotplug, and a kexec through
 `kexec_file_load` kept all eight CPUs. `titan-dtb-check` refused a
 kexec'd kernel's tree there and now reads trees as `dtc` rewrites them (flash
-profile `ram-nixos-6`; image `5a4ad5f0...`, store squashfs `9367b299...`);
-neither that nor `--nosmp` has run on the phone. Building it does not
-authorize starting it.
+profile `ram-nixos-6`; image `5a4ad5f0...`, store squashfs `9367b299...`).
+With it, the link:../native-dtb-kexec-trial.adoc[tree-replacing kexec trial]
+handed a kexec'd kernel a modified tree through `kexec_load`; `--nosmp` has
+not run on the phone. Building it does not authorize starting it.
 
 [source,sh]
 ----

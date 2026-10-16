@@ -1,7 +1,8 @@
 = Tree-replacing kexec trial
 
-Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-16: *run once with the owner's explicit approval; all four
+questions were answered yes. See <<result,the result>>.* Each repetition needs
+the owner's explicit approval of this exact procedure.
 
 The link:native-cpu-power-trial.adoc[CPU power-down trial] gave the working
 environment's kernel CPU hotplug and kexec'd kernels with all eight CPUs, but
@@ -17,6 +18,63 @@ every reserved region. Being able to hand a kexec'd kernel a modified tree
 is what makes kexec usable for trying device-tree changes without flashing.
 The original recovery is then restored. Ubuntu Touch's boot and `dtbo`
 partitions are never written, and Linux never sees the phone's storage.
+
+[[result]]
+== Result (2026-10-16)
+
+The owner approved the procedure and ran the partition reads, the entries, the
+Volume Up start and the unlocks; watchers ran the fastboot steps, the push and
+the USB log, and the session ran over SSH from the Mac.
+
+* *Preconditions and Part 1.* As before: battery full and charging, no update,
+  empty recovery command directories, boot, recovery and dtbo identical to
+  their preserved copies and no control region changed since the latest copy;
+  `Writing 'recovery' OKAY`, and step 7 read recovery back as `73bd254c...`.
+* *Question 1, yes.* SSH answered by 45 seconds of uptime, and `titan-session
+  end-in 40` moved the end to 2445 seconds. All eight CPUs came up, the
+  driver registered, the log was complete, and NixOS was `running` at 35 °C.
+  The bootloader's tree listed cleanly (`fdtget -l` exited 0) and had no
+  `/memreserve/` entry.
+* *Question 2, yes.* `kexec_file_load` returned 0; the image's device left
+  two seconds after `systemctl kexec` and was back four seconds later. The
+  next kernel brought up all eight CPUs, with the first boot's
+  reserved-memory lines and nodes, KASLR on and its code at `0x42800000`.
+  Its tree was of the kind that had been refused: `fdtget -l` exited 1. It
+  carried one `/memreserve/` entry, `0xfe200000` for `0xd31f1` bytes, for its
+  initrd. About 20 seconds into that boot the device dropped off USB for two
+  seconds and returned, like the earlier blips; the session carried on.
+* *Question 3, yes.* The copy of that tree matched its record, `fdtput` added
+  `titan,dtb-trial = "b"` at the root, and the two trees' `dtc` sources
+  differed by that line only. The fixed `titan-dtb-check` accepted the tree,
+  and `kexec_load` returned 0 with four segments: the kernel at `0x40000000`
+  (41156608 bytes), the initrd at `0x42740000`, the tree at `0x42814000` and
+  the purgatory at `0x42828000`, entered at `0x42828750`. kexec-tools noted
+  that it could not open `/proc/kcore`, which only crash dumps need. The
+  placement check passed: every segment lay in System RAM, clear of every
+  reserved range, reserved-memory node and the `/memreserve/` entry. After
+  `systemctl kexec` the device left within three seconds and was back 18
+  seconds later, so the purgatory's uncached checks took about 14 seconds
+  more than `kexec_file_load`'s path. The next kernel brought up all eight
+  CPUs, with the first boot's reserved-memory lines and nodes, KASLR on, its
+  code at `0x40000000` and both markers on its command line, and
+  `/proc/device-tree/titan,dtb-trial` read `b`. Its tree differed from the
+  one handed over only in `/chosen`: the new initrd's addresses and the
+  command line, which kexec-tools writes with two empty strings after it.
+* *Question 4, yes.* `titan-session end-in 1` at 81 seconds of uptime; the
+  device left 74 seconds later, the preloader passed through, and Ubuntu
+  Touch booted (`bootreason=reboot`). From Ubuntu Touch, `sudo /sbin/reboot
+  bootloader` reached fastboot, the preserved original was written (`Writing
+  'recovery' OKAY`) and Ubuntu Touch returned. The read-back found recovery
+  `4dd1c1f7...`, with boot and dtbo unchanged throughout; of the control
+  regions only `expdb` changed, as after every boot.
+
+The session data, kernel logs and trees are in the private evidence
+directory. This is the first tree-replacing kexec on the Titan: a kexec'd
+kernel can be given a tree of our choosing, keeping the bootloader's reserved
+memory, with all eight CPUs, so device-tree changes can now be tried without
+flashing, each still with its own trial. Not shown: `kexec_load` with the
+bootloader's own tree, a tree with real changes, `--nosmp` on the phone, or
+suspend.
 
 == Questions
 
