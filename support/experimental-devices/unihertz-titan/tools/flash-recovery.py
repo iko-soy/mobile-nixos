@@ -2,14 +2,14 @@
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
 This host helper writes only the `recovery` partition, and only one of
-thirteen pinned full-partition images: the USB probe envelope, the same probe
+fourteen pinned full-partition images: the USB probe envelope, the same probe
 with the repository-built kernel, the native route's first modern-kernel image,
 its diagnostic image, its first RAM NixOS image, the RAM NixOS working
 environment, the same with a larger kernel log, with `titan-kexec --nosmp`,
-with the core power-down driver, with the fixed tree check or with the tree
-check comparing reserve maps, or the offline control-region acquisition
-envelope, each padded with zeros to the partition size, or the preserved
-original recovery image that restores it. It
+with the core power-down driver, with the fixed tree check, with the tree
+check comparing reserve maps or with the read-only I2C tools, or the offline
+control-region acquisition envelope, each padded with zeros to the partition
+size, or the preserved original recovery image that restores it. It
 first sends fixed read-only identity queries, including the recovery
 partition's size and type, from a verified read-only private copy that it
 measures again afterwards. It never writes another partition and never issues
@@ -118,12 +118,19 @@ PROFILES = {
         "source_sha256": "5a4ad5f0aa2d2789d565d7d0a5dfe87452082cbed3e67a94094b75f475decc69",
         "sha256": "73bd254c8a62d5708191d93d2491a32750b1ef6e8c0ab00e84478bcdde4fb9af",
     },
-    # The same with titan-dtb-check also comparing the trees' reserve maps
-    # (current nativeRamImage); stage 0 pins the new store.
+    # The same with titan-dtb-check also comparing the trees' reserve maps;
+    # stage 0 pins the new store.
     "ram-nixos-7": {
         "source_bytes": 16513024,
         "source_sha256": "46fb6680f7a8561bf73d0d4074a42c5d821c57dc2859b44aedb8e589727dc5de",
         "sha256": "8cd3908218e9b99946ff2b8acb2021bfbea1226f346bcd22f2cd551c5dc30192",
+    },
+    # The same with a static i2cdetect and no I2C writer in the store (current
+    # nativeRamImage); stage 0 pins the new store.
+    "ram-nixos-8": {
+        "source_bytes": 16513024,
+        "source_sha256": "16dd05a5a0cfc0c0436f121a7d13967fb87f24799334225c4ad9e5a4ec31f3d7",
+        "sha256": "07070c4d5bf2bd2bb7867ecdfd8313b20c67c57f2126eb107608fcb2fe54ec1d",
     },
     # The offline control-region acquisition envelope (control/README.adoc),
     # which restarts into the bootloader after the transfer or at its deadline,

@@ -53,6 +53,23 @@ let
       esac
     '';
   };
+  # Read-only I2C inspection: i2cdetect alone, statically linked, so that
+  # neither i2c-tools' writers nor i2cget, which sets a register pointer, are
+  # anywhere in the store.
+  i2cDetect = pkgs.pkgsStatic.stdenv.mkDerivation {
+    pname = "titan-i2cdetect";
+    inherit (pkgs.i2c-tools) version src;
+    buildPhase = ''
+      runHook preBuild
+      make BUILD_DYNAMIC_LIB=0 USE_STATIC_LIB=1 tools/i2cdetect
+      runHook postBuild
+    '';
+    installPhase = ''
+      runHook preInstall
+      install -D -m 0555 tools/i2cdetect "$out/bin/i2cdetect"
+      runHook postInstall
+    '';
+  };
   # Refuses a replacement device tree unless it keeps the running tree's
   # reserved regions, memory nodes and cell sizes unchanged (dtb-check.sh).
   titanDtbCheck = pkgs.writeShellApplication {
@@ -191,7 +208,7 @@ in
   services.fstrim.enable = false;
   # Read-only inspection tools for bring-up work over SSH; nothing here
   # drives GPIOs or writes device registers.
-  environment.systemPackages = [ titanSession titanKexec titanDtbCheck ] ++ (with pkgs; [
+  environment.systemPackages = [ titanSession titanKexec titanDtbCheck i2cDetect ] ++ (with pkgs; [
     dtc file less strace htop tmux ethtool iperf3 lsof pv kexec-tools
   ]);
   # The USB controller has no shutdown hook; detach the gadget before a kexec

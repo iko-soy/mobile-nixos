@@ -217,7 +217,8 @@ echo "timer=$(systemctl is-active titan-deadline.timer)"
 echo "isolate=$(systemctl show -p IgnoreOnIsolate --value titan-deadline.timer)"
 echo "session=$(titan-session status)"
 echo "fstrim=$(systemctl list-timers --all --no-legend | grep -c fstrim)"
-echo "tools=$(for t in dtc file less strace htop tmux ethtool iperf3 lsof pv; do command -v $t >/dev/null && echo $t; done | wc -l)"
+echo "tools=$(for t in dtc file less strace htop tmux ethtool iperf3 lsof pv i2cdetect; do command -v $t >/dev/null && echo $t; done | wc -l)"
+echo "writers=$(ls /nix/store/*/bin/i2cset /nix/store/*/bin/i2cget /nix/store/*/bin/i2ctransfer /nix/store/*/bin/i2cdump 2>/dev/null | wc -l)"
 echo "failed=$(systemctl --failed --no-legend --plain | awk '{print $1}' | tr '\n' ' ')"
 echo "cmdline=$(cat /proc/cmdline)"
 echo "storage_rule=$(grep -c 'SUBSYSTEM=="block".*systemctl --no-block reboot' /etc/udev/rules.d/99-local.rules)"
@@ -268,7 +269,7 @@ def case_valid(args, directory, result):
         expected = {"running": "running", "failed": "", "root": "tmpfs", "store": "overlay",
                     "address": "172.16.42.1/24", "sshd": "active", "networkd": "active", "timer": "active",
                     "isolate": "yes", "storage_rule": "1", "hard_deadline": "1", "watchdog_open": "0",
-                    "fstrim": "0", "tools": "10",
+                    "fstrim": "0", "tools": "11", "writers": "0",
                     "manager": "CrashAction=reboot RebootWatchdogSec=off RuntimeWatchdogSec=off "}
         wrong = {k: values.get(k) for k, v in expected.items() if values.get(k) != v}
         if any(not name.startswith(("loop", "zram")) for name in values.get("block", "").split()):

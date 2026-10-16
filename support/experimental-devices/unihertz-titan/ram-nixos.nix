@@ -368,6 +368,13 @@ let
       echo "The phone busybox accepted a changed squashfs" >&2; exit 1
     fi
     rm flipped.img
+    # The phone system has i2cdetect and no I2C writer anywhere (configuration.nix).
+    test -x ${phoneSystem}/sw/bin/i2cdetect
+    while read -r path; do
+      for tool in i2cset i2cget i2ctransfer i2cdump; do
+        if [ -e "$path/bin/$tool" ]; then echo "The phone system contains $path/bin/$tool" >&2; exit 1; fi
+      done
+    done < ${pkgs.closureInfo { rootPaths = [ phoneSystem ]; }}/store-paths
     printf '%s %s\n' "$(stat -c %s ${phoneSquashfs})" "$(sha256sum ${phoneSquashfs} | cut -d' ' -f1)" > "$out/system"
   '';
 in {

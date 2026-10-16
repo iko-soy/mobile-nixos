@@ -1,0 +1,308 @@
+= First I2C bus trial
+
+Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-diag-trial.adoc[diagnostic trial] found no I2C controller
+enabled in the native kernel's tree, and the
+link:native-dtb-kexec-trial.adoc[tree-replacing kexec trial] showed that a
+kexec'd kernel can be given a modified tree. This trial makes the first real
+change that way: from the first boot it kexecs into the same kernel with the
+bootloader's tree plus one property, the status of the I2C controller at
+`0x11011000`, which carries only passive sensors. In the next kernel it checks
+that the controller probes and that the bus's pins are in I2C mode, then scans
+that bus once with reads only, to see which of the sensors answer. No device
+node is added, so no device driver binds and nothing is written to any
+device. The original recovery is then
+restored. Ubuntu Touch's boot and `dtbo` partitions are never written, and
+Linux never sees the phone's storage.
+
+== The buses
+
+The native tree defines twelve I2C controllers, all disabled and with no
+devices under them. Ubuntu Touch's `dtbo` overlay places the board's devices
+on them; the vendor's bus numbers differ from the native tree's aliases, so
+this record names buses by address.
+
+[cols="1,1,3,2",options="header"]
+|===
+|Controller |Vendor bus |Devices in the vendor overlay |Note
+|`0x11007000` |0 |touch panel at `0x5d` |
+|`0x11011000` |1 |magnetometer `0x0c`, light and proximity `0x51`, barometer
+`0x48`, gas sensor `0x32`, heart-rate sensor `0x15` |this trial
+|`0x11009000` |2 |cameras, keyboard touchpad `0x30` |
+|`0x1100f000` |3 |flash LED driver `0x63`, NFC `0x08` |
+|`0x11008000` |4 |keyboard controller `0x58`, cameras |
+|`0x11017000` |5 |MT6370 sub-PMIC `0x34` (charger, backlight), USB-C `0x4e`
+|charging; the native tree calls it `i2c11`
+|`0x11005000` |6 |RT9465 charger `0x4b`, fuel gauge `0x2f`, wireless charging
+`0x61`, speaker amplifier `0x34` |charging
+|`0x1101a000` |7 |camera control unit |
+|others |8 to 11 |none |
+|===
+
+== Questions
+
+. Does the image start as before, with all eight CPUs and no I2C adapter?
+. Does a kexec through `kexec_load` with the bootloader's tree plus
+  `status = "okay"` for `/soc/i2c@11011000` pass the tree and placement
+  checks and boot with all eight CPUs and the same reserved memory, and does
+  exactly one I2C adapter appear, for that controller?
+. Are the bus's pins in I2C mode, and which addresses answer a read-only
+  scan of that bus, compared with the vendor overlay's `0x0c`, `0x15`,
+  `0x32`, `0x48` and `0x51`?
+. Does `titan-session end-in 1` restart the phone into Ubuntu Touch, and does
+  the restore work as before?
+
+== Basis
+
+* *Kernel.* The kernel of the earlier trials, unchanged: `Image.gz`
+  `69f24259affbdd7fbee6a897d8d6b85fd4a1beaa2c6e09ff2bf5b655b3e2c548`; the
+  uncompressed kernel for kexec
+  `ce4510e02bcd75dbc798504a4460406484eb47b239c6271b29b0ba628c09ca5c`. Its
+  configuration has the controller's driver (`CONFIG_I2C_MT65XX`) and the
+  character device for userspace (`CONFIG_I2C_CHARDEV`) built in. The
+  controller's node has its clocks, interrupt and DMA channel and no
+  `clock-frequency`, so the driver runs the bus at 100 kHz.
+* *Pins.* The tree sets no pin function for the bus, and the controller's
+  driver touches no pin mux. Bus 1's signals are `SDA1` on GPIO81 and `SCL1`
+  on GPIO84 in mode 1, with alternatives on GPIO87 and GPIO88 and on GPIO163
+  and GPIO164 in mode 3. Ubuntu Touch's kernel is a sensor-hub build, in
+  which MediaTek's sensor co-processor (SCP) drives these sensors through its
+  own I2C controllers, so its working sensors are no evidence that the main
+  CPU's controller reaches them. The session therefore reads the pins' modes
+  before the scan.
+* *Expected answers.* If the pins are in I2C mode and the sensors powered,
+  most likely the magnetometer at `0x0c` and the light and proximity sensor
+  at `0x51`: their supply is always on, while the overlay may name parts
+  that are not fitted, and an accelerometer that no bus lists may answer.
+* *Stage 0 and store.* The previous configuration with `i2cdetect` alone,
+  statically linked from i2c-tools, so that no I2C writer (`i2cset`,
+  `i2cget`, `i2ctransfer`, `i2cdump`) is anywhere in the store:
+  stage 0's ramdisk
+  `f1a8a87f0de4362540425177dab42a9deff3c95d5d5daec02e6b00d3e6f4c222`, which
+  pins the store squashfs, 112357376 bytes,
+  `10e067e20d4ecd3f37b9640e23a65ba99cf03495c7d4ecf700c3aeff0c44ed22`; the
+  kexec payload pairs the kernel above with this ramdisk.
+* *Image.* 16513024 bytes, SHA-256
+  `16dd05a5a0cfc0c0436f121a7d13967fb87f24799334225c4ad9e5a4ec31f3d7`; padded
+  to 33554432 bytes,
+  `07070c4d5bf2bd2bb7867ecdfd8313b20c67c57f2126eb107608fcb2fe54ec1d`
+  (`tools/flash-recovery.py --profile ram-nixos-8`).
+* *Checks.* All five VM cases pass, including that `i2cdetect` is present
+  and no I2C writer is in the store, and the phone checks find none in the
+  phone system's closure. `titan-dtb-check` now also compares the trees'
+  reserve maps. An independent review of this procedure confirmed the bus
+  mapping, the DMA channel, the interrupt and the clocks against the vendor's
+  bus 1, and that the scan only reads; its findings are fixed.
+
+== Preconditions
+
+As in the link:native-dtb-kexec-trial.adoc[tree-replacing kexec trial]: the
+owner present, a direct cable, battery at least 80%, no update pending, no
+recovery command file, both private copies of the original recovery
+(`4dd1c1f7...`) verified, and a normal-mode control-region copy right before
+the trial with `para` matching the latest copies. From step 5 until the Part 3
+read-back passes: no system update, factory reset, `reboot recovery` or Volume
+Up start other than step 9 and the rows below.
+
+== Procedure
+
+*Part 1: write the image.* Steps 1 to 7 of the
+link:repo-kernel-trial.adoc[repository-kernel trial], with `--profile
+ram-nixos-8` and the image
+`native-ram-image-v10/UNTESTED-UNSIGNED-native-ram.img`; step 7 must read
+recovery back as `07070c4d...`, with boot and dtbo unchanged.
+
+*Part 2: run the session.*
+
+[start=8]
+. *Listen:* start `tools/ram-nixos.py --wait 900` as its own job, with the
+  private copy of the store squashfs, its pinned size and SHA-256, a new
+  private output directory and the dedicated key; and a watcher that records
+  every USB device change and whether Ubuntu Touch or fastboot appears after
+  the image.
+. *Start, owner-run:* keep the cable connected, power the phone off from
+  Ubuntu Touch, hold Volume Up and press Power, and release both once the
+  unlocked-state warning appears; allow the accessory if macOS asks. No
+  confirmation is needed: the session starts when SSH answers.
+. *Session:* at once and only once `titan-session end-in 40`; then the
+  records of the tree-replacing kexec trial: the kernel log, CPUs, memory
+  map, reserved memory, command line, the tree with its SHA-256 and reserve
+  map, and the temperature; and that no I2C adapter exists. Read-only
+  throughout: nothing written in sysfs, debugfs or configfs, no debugfs
+  register dumps other than the pin modes of step 12, and no I2C command.
+. *Kexec with the bus enabled:* with at least ten minutes left and the CPU
+  below 55 °C.
+** Copy the payload's `Image` and `initramfs.cpio.gz` into `/run/kexec`, and
+   the running tree with `cp /sys/firmware/fdt /run/kexec/fdt-i2c.dtb`,
+   which must match the saved record; set the status with `fdtput -t s
+   /run/kexec/fdt-i2c.dtb /soc/i2c@11011000 status okay`, check with
+   `fdtget` that it reads `okay`, and check that the trees' `dtc` sources
+   differ only in that node's `status` line.
+** Run `strace -f -e trace=kexec_load,kexec_file_load titan-kexec --dtb
+   /run/kexec/fdt-i2c.dtb <its SHA-256> /run/kexec/Image <its SHA-256>
+   /run/kexec/initramfs.cpio.gz <its SHA-256> titan_kexec=i2c`, which must
+   show `kexec_load` and its segments, with `/sys/kernel/kexec_loaded`
+   reading `1`.
+** The placement check of the tree-replacing kexec trial: each segment
+   within one `System RAM` range of `/proc/iomem` read after the load,
+   overlapping none of its `reserved` ranges, the reserved-memory nodes'
+   `reg` ranges or the tree's `/memreserve/` entries. If any check fails, go
+   to the end step without starting the kernel.
+** Then `systemctl kexec`, `tools/ram-nixos.py --wait 900` as its own job
+   once the device has left, and the records, which must show eight CPUs,
+   the first boot's reserved-memory lines and nodes,
+   `/proc/device-tree/soc/i2c@11011000/status` reading `okay`, and a tree
+   that differs from `fdt-i2c.dtb` only in `/chosen`.
+. *Bus check, read-only:*
+** `ls /sys/bus/i2c/devices` must show only `i2c-1`, and `readlink -f
+   /sys/bus/i2c/devices/i2c-1` must end in `/11011000.i2c/i2c-1`; every
+   adapter of this driver has the same name, so the name proves nothing.
+** *Pin modes, reading debugfs:* save the lines for GPIO81, GPIO84, GPIO87,
+   GPIO88, GPIO163 and GPIO164 from `/sys/kernel/debug/pinctrl/
+   10005000.pinctrl/pins`, which only reads the pin controller's registers;
+   the mode is the first digit after each pin's number. GPIO81 and GPIO84
+   must read mode 1, and the other four must not read mode 3; otherwise skip
+   the scan and go to the end step.
+** *Scan:* save the `11011000.i2c` line of `/proc/interrupts`, run `time
+   timeout 300 i2cdetect -y -r 1` once, which reads one byte from each
+   address from `0x08` to `0x77` and writes nothing, then save the
+   interrupt line and the kernel log again. No other I2C command. The
+   driver logs a missing answer only at debug level, so the timing and the
+   interrupt count tell the outcomes apart: a scan in seconds with
+   interrupts counted is a real result; about 224 seconds with no
+   interrupts means a clock line held low, pins not reached or no
+   interrupt; more than eight answering addresses means a data line held
+   low, and the table is no result.
+. *End:* `titan-session end-in 1`; the session deadline must restart the
+  phone into Ubuntu Touch within about two minutes. Only if it has not after
+  three minutes, `titan-session end`.
+
+*Part 3: restore.* From Ubuntu Touch, `sudo /sbin/reboot bootloader`
+(owner-run); then, as in the earlier trials, write the preserved original
+with the `original-recovery` profile, return, and read recovery back as
+`4dd1c1f7...`, with boot and dtbo unchanged.
+
+*Part 4: compare.* A normal-mode control-region copy after Part 3, compared
+with the one from step 2 (`expdb` changes on every boot). Then, owner-run in
+Ubuntu Touch, a check that the light and proximity sensor and the compass
+still work: a read that timed out ends without a stop condition, and a
+sensor left holding the bus would keep it on its always-on supply through a
+restart. If they do not, a full power-off restores them; record either way.
+
+== Stop conditions
+
+The repository-kernel trial's general stop conditions apply. This table
+replaces the tree-replacing kexec trial's:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The session ends with the restart at the moved deadline, and Ubuntu Touch
+starts
+|The expected outcome. Go to Part 3.
+|The restart at the moved deadline does not come within three minutes
+|Record it, end with `titan-session end`, wait for Ubuntu Touch, then Part 3.
+|The CPU temperature passes 60 °C
+|End with `titan-session end-in 1` at once, wait for Ubuntu Touch, then
+Part 3.
+|The core power-down driver is not registered in the first boot, or an I2C
+adapter already exists there
+|Go to the end step without a kexec.
+|The tree differs by more than the status line, `titan-kexec` refuses or
+the load fails, or a segment fails the placement check
+|Record the output and go to the end step. Never run `kexec` by hand.
+|The kexec'd kernel brings up fewer than eight CPUs, or its reserved memory
+differs from the first boot's
+|Record it and go to the end step without the scan.
+|The kexec'd kernel's tree does not read `okay` for the node, or differs
+from the tree handed over outside `/chosen`
+|Record it and go to the end step without the scan.
+|No I2C adapter appears, more than one appears, or it is not the controller
+at `11011000`
+|Record the kernel log and go to the end step without the scan.
+|GPIO81 or GPIO84 is not in mode 1, or an alternative pin is in mode 3
+|Record the pin lines and go to the end step without the scan.
+|The scan has not finished after five minutes
+|End with `titan-session end-in 1` if SSH answers; otherwise the session
+deadlines restart the phone. Then Part 3.
+|More than eight addresses answer
+|A data line is held low: record the table, run no further I2C command, and
+go to the end step.
+|The USB device appears, but the network or the push never completes
+|Stage 0 restarts at its 600-second deadline, or at once after a refusal it
+reports on the status port. Keep the helper's output; wait for Ubuntu Touch,
+then Part 3 without retrying.
+|The push completes, then the phone restarts before SSH answers
+|NixOS crashed or refused a disk. Keep the helper's output; wait for Ubuntu
+Touch, then Part 3 without retrying.
+|SSH never answers, or stops answering during a session
+|The session deadline restarts the phone 20 minutes after each boot, or 40
+minutes after the extension (plus up to half a minute), and stage 0's helper
+75 minutes after each boot regardless; wait for Ubuntu Touch, then Part 3.
+|After `systemctl kexec`, the image's USB device has not left within one
+minute
+|Userspace has not finished its shutdown: the gadget is detached before the
+kernel's own shutdown. The hard-deadline helper may still run; wait for
+Ubuntu Touch until the 90-minute row, then Part 3.
+|After `systemctl kexec`, the image's USB device returns but the push or SSH
+fails
+|The kexec'd stage 0 restarts at its 600-second deadline, and its NixOS at
+the 20-minute default; wait for Ubuntu Touch, then Part 3 without retrying.
+|After `systemctl kexec`, neither the image's USB device, Ubuntu Touch nor
+fastboot appears within 20 minutes
+|The kernel stopped between the shutdown, which ends the hard-deadline
+helper, and the next stage 0, where no deadline runs. Hold Power about ten
+seconds, but expect nothing; then unplug, let the battery run down, charge,
+start Ubuntu Touch normally and go to Part 3.
+|Ubuntu Touch starts without the USB device appearing
+|Read the boot reason from `/proc/cmdline`. Only `PowerKey` allows one retry
+of step 9. Any other reason may mean the bootloader refused the image or the
+kernel crashed: record it, then Part 3 without retrying.
+|A MediaTek boot ROM or preloader USB device (`0e8d:0003` or `0e8d:2000`)
+stays present
+|The phone is in the SoC's download mode. Do not interact with it or run any
+flashing tool. Hold Power about ten seconds; if it persists, stop and report.
+|The phone powers off
+|A critical temperature trip powers it off, since nothing throttles the CPUs.
+Let it cool, start Ubuntu Touch normally with Power, then Part 3.
+|The screen shows a bootloader error or a crash-dump screen
+|Photograph or note it, then apply the next row.
+|Neither Ubuntu Touch nor fastboot appears within 80 minutes of step 9, or 90
+minutes of the `systemctl kexec`
+|Hold Power about ten seconds, but expect nothing: this kernel does not arm
+the PMIC long-press reset, so it works only if the bootloader left it armed,
+which is unverified. Then unplug, let the battery run down, charge, start
+Ubuntu Touch normally and go to Part 3.
+|===
+
+== Residual risks
+
+* The scan sends one read to every address on a bus with five sensors and
+  writes nothing. Reads leave these parts' configuration unchanged, but a
+  device could react to a read in an unexpected state; none of these types
+  is known to.
+* The bus's pins are set by the preloader, not by this tree. If they are not
+  in I2C mode, the controller's transfers do not reach them: nothing
+  answers, and nothing else is driven.
+* The controller and its DMA channel run under the native kernel for the
+  first time. The driver resets the controller when it probes and after
+  every address that does not answer, and each transfer ends by switching
+  off clocks that the bootloader left on, including the I2C source clock
+  shared with the other controllers and the PWM block; nothing in Linux uses
+  those, and the sensor co-processor is assumed to stay in reset, since only
+  the vendor kernel releases it.
+* The kexec runs `kexec_load` with the bootloader's own tree for the first
+  time; its mechanics are those of the tree-replacing kexec trial's, which
+  passed. Its old kernel's shutdown makes the core power-down driver's calls
+  without a guard, as in the earlier kexecs.
+* Charging buses stay disabled: the tree changes one controller's status,
+  and the check refuses any change to reserved memory.
+
+== What this can and cannot show
+
+Success shows the native kernel driving an I2C controller in a tree handed
+over by kexec, and which of the vendor's sensors answer, the start for adding
+their drivers. It does not show any device driver, the other buses, the
+touch panel, the keyboard or the display.

@@ -108,6 +108,9 @@ hardware works under NixOS.
   it, the segments passed the placement check, and the next kernel booted
   with the property, all eight CPUs and the same reserved memory. The
   original recovery was restored.
+* The link:native-i2c-trial.adoc[first I2C bus trial], proposed, not run: a
+  kexec with the I2C controller that carries only passive sensors enabled,
+  then one read-only scan of that bus.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
