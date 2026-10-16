@@ -108,9 +108,12 @@ hardware works under NixOS.
   it, the segments passed the placement check, and the next kernel booted
   with the property, all eight CPUs and the same reserved memory. The
   original recovery was restored.
-* The link:native-i2c-trial.adoc[first I2C bus trial], proposed, not run: a
-  kexec with the I2C controller that carries only passive sensors enabled,
-  then one read-only scan of that bus.
+* The link:native-i2c-trial.adoc[first I2C bus trial], run on 2026-10-16 with
+  the owner's approval: a kexec through `kexec_load` with the bootloader's
+  tree and the sensors' I2C controller enabled brought the controller up as
+  `i2c-1`. The pin gate read mode 9 where it required 1, so the scan was
+  skipped; MediaTek's own driver reads 9 as function 1, which the gate needs
+  to allow. The original recovery was restored.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

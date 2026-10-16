@@ -1,7 +1,11 @@
 = First I2C bus trial
 
-Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-16: *run once with the owner's explicit approval. The
+controller probed in the kexec'd kernel, but the pin gate read the bus pins'
+mode as 9 rather than 1, so the scan was skipped as the procedure requires;
+mode 9 turned out to be function 1 as MediaTek reads it. See
+<<result,the result>>.* Each repetition needs the owner's explicit approval
+of this exact procedure.
 
 The link:native-diag-trial.adoc[diagnostic trial] found no I2C controller
 enabled in the native kernel's tree, and the
@@ -16,6 +20,65 @@ node is added, so no device driver binds and nothing is written to any
 device. The original recovery is then
 restored. Ubuntu Touch's boot and `dtbo` partitions are never written, and
 Linux never sees the phone's storage.
+
+[[result]]
+== Result (2026-10-16)
+
+The owner approved the procedure and ran the partition reads, the entries, the
+Volume Up start and the unlocks; watchers ran the fastboot steps, the push and
+the USB log, and the session ran over SSH from the Mac.
+
+* *Preconditions and Part 1.* As before: battery full and charging, no update,
+  empty recovery command directories, boot, recovery and dtbo identical to
+  their preserved copies and no control region changed since the latest copy;
+  `Writing 'recovery' OKAY`, and step 7 read recovery back as `07070c4d...`.
+* *Question 1, yes.* SSH answered by 59 seconds of uptime and `titan-session
+  end-in 40` moved the end to 2459 seconds. All eight CPUs came up, the core
+  power-down driver registered, NixOS ran at 34 °C, no I2C adapter existed and
+  `/soc/i2c@11011000` read `disabled`.
+* *Question 2, yes.* The copy of the bootloader's tree matched its record;
+  after `fdtput` the two trees' sources differed in that node's `status` line
+  only. `kexec_load` from the bootloader's own tree, its first run, returned
+  0 with the kernel at `0x42400000`, over the running kernel's data, which is
+  normal for `kexec_load`, and the initrd, tree and purgatory just above; the
+  placement check passed. After `systemctl kexec` the device was back 20
+  seconds after leaving. The next kernel brought up all eight CPUs with the
+  first boot's reserved memory, its tree read `okay` for the node and
+  differed from the one handed over only in `/chosen`, and exactly one
+  adapter existed: `i2c-1`, the controller at `11011000`, with `/dev/i2c-1`.
+  The driver probed without error (`no pinctrl handle`, at debug level).
+* *Question 3, not answered.* The pin modes were read from
+  `/sys/kernel/debug/pinctrl/10005000.pinctrl-pinctrl_paris/pins`, the path
+  this kernel uses rather than the procedure's `10005000.pinctrl`. GPIO81 and
+  GPIO84 read mode 9, not 1; GPIO87 and GPIO88 read 9, and GPIO163 and
+  GPIO164 read 10. The bus lines read high with their pull-ups on. As the
+  procedure requires, the scan was skipped: no I2C transfer ran, and the
+  controller's interrupt count stayed 0.
+* *Question 4, yes.* `titan-session end-in 1` at 188 seconds of uptime; the
+  device left 89 seconds later and Ubuntu Touch booted (`bootreason=reboot`).
+  From Ubuntu Touch, `sudo /sbin/reboot bootloader` reached fastboot, the
+  preserved original was written (`Writing 'recovery' OKAY`) and Ubuntu Touch
+  returned. The read-back found recovery `4dd1c1f7...`, with boot and dtbo
+  unchanged throughout; of the control regions only `expdb` changed, as after
+  every boot.
+
+Afterwards, read-only: Ubuntu Touch's own GPIO table
+(`/sys/devices/platform/1000b000.pinctrl/mt_gpio`) reports mode 1 for GPIO81,
+GPIO84, GPIO87 and GPIO88, mode 2 for GPIO163 and GPIO164, and mode 1 for
+GPIO48 and GPIO49, the pins of the charger bus its kernel uses. Both kernels
+read the same 4-bit mode field, but MediaTek's MT6771 pin driver sets
+`nfuncs = 8` and prints a mode of 8 or more as that value minus 8
+(`pinctrl-mt6771.c`, `pinctrl-paris.c`), while mainline's MT8183 data sets no
+`nfuncs` and prints the raw value. The register holds 9, set by the
+bootloader, in both systems, and MediaTek reads it as function 1: the bus
+pins were in their `SDA1` and `SCL1` function, as under Ubuntu Touch, and the
+gate was too literal. A repeat needs the gate to compare the mode modulo 8
+and the corrected debugfs path.
+
+The session data and kernel logs are in the private evidence directory. This
+shows the native kernel driving an I2C controller from a tree handed over by
+kexec, and the first `kexec_load` with the bootloader's own tree. It does not
+show which sensors answer.
 
 == The buses
 
