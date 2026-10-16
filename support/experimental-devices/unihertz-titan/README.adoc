@@ -101,6 +101,10 @@ hardware works under NixOS.
   through `kexec_file_load` brought up all eight CPUs. The tree-replacing
   kexec was refused by its own tree check, which fails on the kexec'd
   kernel's tree; the original recovery was restored.
+* The link:native-dtb-kexec-trial.adoc[tree-replacing kexec trial], proposed,
+  not run: a kexec through `kexec_file_load`, then, with the fixed check and a
+  check of where kexec-tools places the segments, `kexec_load` with that
+  kernel's tree plus one inert property, which must reach the next kernel.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
