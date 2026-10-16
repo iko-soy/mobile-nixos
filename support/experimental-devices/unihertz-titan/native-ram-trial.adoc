@@ -1,7 +1,8 @@
 = RAM NixOS trial
 
-Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-16: *run once with the owner's explicit approval; all four
+questions were answered yes. See <<result,the result>>.* Each repetition needs
+the owner's explicit approval of this exact procedure.
 
 The link:native-diag-trial.adoc[diagnostic trial] showed the modern kernel's
 view of the Titan: all eight CPUs, USB device mode in both directions, the
@@ -12,6 +13,64 @@ board tree, receives the NixOS store over the USB network into RAM, and
 accepts SSH from the Mac with one dedicated key. The original recovery is then
 restored. Ubuntu Touch's boot and `dtbo` partitions are never written, and
 Linux never sees the phone's storage during the run.
+
+[[result]]
+== Result (2026-10-16)
+
+The owner approved the procedure and ran the partition reads, the entries, the
+Volume Up start and the unlocks; watchers ran the fastboot steps and the push,
+and the session ran over SSH from the Mac.
+
+* *Preconditions.* The baseline found the battery full and charging, no update
+  pending or running and empty recovery command directories. Step 2 found
+  boot, recovery and dtbo identical to their preserved copies, and no control
+  region changed since the latest copy.
+* *Part 1.* `fastboot flash recovery` reported `Writing 'recovery' OKAY`, and
+  step 7 read recovery back as `b05b933d...`, with boot and dtbo unchanged.
+* *Question 1, yes.* After the Volume Up start the boot ROM and preloader
+  passed through twice, and then the image's USB device appeared. Stage 0
+  bound the gadget on `11201000.usb`, found no block device, and brought up
+  `usb0`; macOS accepted the CDC NCM link and took the lease 172.16.42.2. The
+  store arrived over TCP and was verified against its pinned size and SHA-256
+  13 seconds after stage 0 began listening, and NixOS started at 33.5 seconds
+  of uptime.
+* *Question 2, yes.* NixOS 26.11 reached the multi-user target six seconds
+  after the handover, in the state `running` with no failed unit, and SSH
+  accepted the dedicated key. Root was a tmpfs and the store the squashfs on
+  `loop0` under an overlay; the only block devices were the loop devices and
+  `zram0`. `usb0` had 172.16.42.1 on the gadget network driver, and only sshd
+  and the DHCP server listened. All eight CPUs and 5.9 GB of RAM were
+  available, the CPU temperature was 35 °C, the deadline timer was armed and
+  kept on isolation, the hard-deadline helper was running, nothing had the
+  hardware watchdog open, and the crash action was `reboot`.
+* *Question 3, yes.* `systemctl reboot` over SSH removed the image's device
+  within three seconds, the preloader passed through, and Ubuntu Touch booted
+  (`bootreason=reboot`), about two minutes after NixOS had started.
+* *Question 4, yes.* From Ubuntu Touch, `sudo /sbin/reboot bootloader`
+  reached fastboot, the preserved original was written (`Writing 'recovery'
+  OKAY`) and Ubuntu Touch returned. Step 13 read recovery back as
+  `4dd1c1f7...`, with boot and dtbo unchanged throughout; of the control
+  regions only `expdb` changed, as after every boot.
+
+The session's summary, journal, kernel log and interrupts are in the private
+evidence directory. Found along the way:
+
+* The donor configuration sets `CONFIG_USB_MTU3_DEBUG`, so the USB driver logs
+  every transfer: the journal holds 2769 such lines, they overwrite the
+  kernel's 128 KiB log during any transfer, and they probably limited the
+  push to about 8.5 MB/s. The next kernel build should turn it off.
+* Stage 0's status line that lists the block devices came out empty because
+  `ls` and `tr` are not among its busybox applets; the check itself uses shell
+  globbing and is unaffected.
+* NixOS enables its weekly `fstrim` timer by default; it never ran here and
+  has nothing to trim without storage, but a configuration meant for longer
+  sessions should turn it off.
+* With no RTC driver the clock starts at systemd's build date.
+
+This is the first NixOS userspace on the Titan, reachable over SSH from the
+Mac, with the phone's storage invisible to Linux throughout. Not shown: NixOS
+on storage, the display, input, charging, audio, radios or a boot without the
+Mac.
 
 == Questions
 

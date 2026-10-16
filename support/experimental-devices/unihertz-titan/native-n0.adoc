@@ -167,7 +167,9 @@ at the missing DSI0 output, and no I2C controller is enabled. Next: DSI0 with
 the NT35595 command-mode panel, the I2C controllers for the keyboard,
 touchscreen and MT6370, and a 2 MiB aligned kernel load address.
 
-The link:ram-nixos/README.adoc[RAM NixOS image] (`nativeRamImage`, built
-2026-10-16) runs NixOS from RAM on this kernel, its store pushed from the Mac
-over USB networking, so that such work can proceed over SSH; its
-link:native-ram-trial.adoc[trial proposal] awaits approval.
+The link:ram-nixos/README.adoc[RAM NixOS image] (`nativeRamImage`) runs
+NixOS from RAM on this kernel, its store pushed from the Mac over USB
+networking; on 2026-10-16 the link:native-ram-trial.adoc[RAM NixOS trial]
+booted NixOS 26.11 on the Titan and reached it over SSH, so such work can
+proceed in SSH sessions. The kernel build should also turn off
+`CONFIG_USB_MTU3_DEBUG`, which logs every USB transfer.

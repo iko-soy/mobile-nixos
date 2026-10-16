@@ -4,8 +4,9 @@ A NixOS system that runs on the Titan entirely from RAM, reachable from the
 Mac over USB networking and SSH, started from the recovery partition on the
 native route's modern kernel (link:../native-n0.adoc[N0 record]). It is the
 first NixOS userspace for the phone and turns later experiments into SSH
-sessions instead of flash-and-restore cycles. Building it does not authorize
-starting it; see link:../native-ram-trial.adoc[the trial proposal].
+sessions instead of flash-and-restore cycles. It ran once on the Titan on
+2026-10-16 with the owner's approval; see link:../native-ram-trial.adoc[the
+trial record]. Building it does not authorize starting it again.
 
 [source,sh]
 ----

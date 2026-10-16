@@ -73,10 +73,13 @@ hardware works under NixOS.
   nothing from storage. The bootloader applied the image's own overlay; all
   eight CPUs, the eMMC, USB, the PMIC regulators and the GPU came up. The
   original recovery was restored.
-* A link:ram-nixos/README.adoc[RAM NixOS image], built and checked in a VM,
-  and its link:native-ram-trial.adoc[trial proposal], not run: the first NixOS
-  userspace for the phone, its store pushed from the Mac over USB networking
-  into RAM, reachable over SSH, with Linux never seeing the phone's storage.
+* The link:native-ram-trial.adoc[RAM NixOS trial], run on 2026-10-16 with
+  the owner's approval: the first NixOS userspace on the Titan. The
+  link:ram-nixos/README.adoc[RAM NixOS image] received its store from the Mac
+  over USB networking, NixOS 26.11 booted to `running` with no failed unit
+  and accepted SSH, with Linux never seeing the phone's storage; a restart
+  from the session booted Ubuntu Touch, and the original recovery was
+  restored.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1289,4 +1292,9 @@ restart the phone into Ubuntu Touch. The aarch64 system is assembled from the
 binary cache's packages; a VM runs the same stage 0 and configuration on
 x86_64. An independent review found that the kernel's built-in NBD devices
 would have made stage 0 refuse before USB came up, among other fixes. The
-link:native-ram-trial.adoc[trial proposal] awaits the owner's approval.
+owner approved and ran the link:native-ram-trial.adoc[trial] on 2026-10-16:
+macOS accepted the USB network, the pinned store arrived and verified, NixOS
+26.11 reached `running` with no failed unit six seconds after the handover,
+SSH accepted the dedicated key, a restart from the session booted Ubuntu
+Touch, and the original recovery was restored byte for byte. This is the first
+NixOS userspace on the Titan.
