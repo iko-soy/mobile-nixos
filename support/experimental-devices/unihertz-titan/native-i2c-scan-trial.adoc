@@ -1,0 +1,101 @@
+= I2C bus scan trial
+
+Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-i2c-trial.adoc[first I2C bus trial] enabled the sensors' I2C
+controller at `0x11011000` in a kexec'd kernel, which probed as `i2c-1`, but
+its pin gate read the bus pins' mode as 9 where it required 1, and the scan
+was skipped. The register holds 9 in both kernels: MediaTek's MT6771 pin
+driver reads a mode of 8 or more as that value minus 8, so 9 is function 1,
+`SDA1` and `SCL1`, as under Ubuntu Touch. This trial repeats the first one
+with that rule in the gate, the debugfs path this kernel uses, and a check
+that the bus lines are released after the scan. Everything else is
+unchanged.
+
+== Questions
+
+. Does the kexec with the controller enabled again pass its checks, boot
+  with all eight CPUs and the same reserved memory, and bring up exactly the
+  adapter `i2c-1` for the controller at `11011000`?
+. Are GPIO81 and GPIO84 in function 1, by MediaTek's rule?
+. Which addresses answer one read-only scan of the bus, compared with the
+  vendor overlay's `0x0c`, `0x15`, `0x32`, `0x48` and `0x51`, and do the
+  timing and interrupt count make it a real result?
+. Are both bus lines released after the scan?
+. Does `titan-session end-in 1` restart the phone into Ubuntu Touch, and does
+  the restore work as before?
+
+== Basis
+
+As in the link:native-i2c-trial.adoc[first I2C bus trial]: the same image,
+flash profile `ram-nixos-8`, padded `07070c4d...`, with the same kernel,
+stage 0, store and kexec payload, and the same bus map. The first run showed
+the kexec, the adapter and the pins as this trial expects them: GPIO81 and
+GPIO84 at mode 9, GPIO87 and GPIO88 at 9 and GPIO163 and GPIO164 at 10, that
+is functions 1, 1 and 2, with both bus lines high and their pull-ups on.
+
+* *MediaTek's rule.* Both kernels read the same 4-bit mode field. MediaTek's
+  MT6771 driver (`pinctrl-mt6771.c`, `nfuncs = 8`) prints a mode of 8 or
+  more as that value minus 8 (`pinctrl-paris.c`), and Ubuntu Touch's GPIO
+  table shows these pins at mode 1; mainline's MT8183 data sets no
+  `nfuncs` and prints the raw value.
+* *The pin readout.* Each line of
+  `/sys/kernel/debug/pinctrl/10005000.pinctrl-pinctrl_paris/pins` gives, after
+  the pin's zero-padded number, the mode, then the direction, the output
+  level and the input level, each one digit (`pinctrl-paris.c`).
+
+== Preconditions
+
+As in the first I2C bus trial, with the latest control-region copy now the
+one from its Part 4.
+
+== Procedure
+
+As in the link:native-i2c-trial.adoc[first I2C bus trial], steps 1 to 13
+and Parts 1, 3 and 4, with these changes to step 12 and Part 4:
+
+* *Pin modes, reading debugfs:* save the lines for GPIO81, GPIO84, GPIO87,
+  GPIO88, GPIO163 and GPIO164 from `/sys/kernel/debug/pinctrl/
+  10005000.pinctrl-pinctrl_paris/pins`. A pin's function is its mode, or its
+  mode minus 8 when the mode is 8 or more. GPIO81 and GPIO84 must be in
+  function 1, and the other four must not be in function 3; otherwise skip
+  the scan and go to the end step.
+* *After the scan:* read the same six lines again. GPIO81 and GPIO84 must
+  show input level 1: a 0 means a device holds a bus line low.
+* *Part 4:* the Ubuntu Touch sensor check is replaced by the line check
+  above, since this Ubuntu Touch offers no automatic brightness. If a line
+  read 0, power the phone fully off once after Part 3, which removes a
+  device's always-on supply, before relying on its sensors.
+
+== Stop conditions
+
+The first I2C bus trial's table applies, with its pin row replaced and one
+row added:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|GPIO81 or GPIO84 is not in function 1, or an alternative pin is in function
+3, by MediaTek's rule
+|Record the pin lines and go to the end step without the scan.
+|After the scan, GPIO81 or GPIO84 shows input level 0
+|A device holds the bus. Record the lines, run no further I2C command, go to
+the end step, and after Part 3 power the phone fully off once.
+|===
+
+== Residual risks
+
+As in the first I2C bus trial, and this time the scan runs: it sends one read
+to each address from `0x08` to `0x77` on a bus with five sensors and writes
+nothing, since this controller cannot send a write without data. A read that
+times out ends without a stop condition, and the driver has no bus recovery;
+the line check after the scan shows whether that left a device holding the
+bus.
+
+== What this can and cannot show
+
+Success shows which of the vendor's sensors answer on the native kernel's
+first working I2C bus, the start for adding their drivers. It does not show
+any device driver, the other buses, the touch panel, the keyboard or the
+display.

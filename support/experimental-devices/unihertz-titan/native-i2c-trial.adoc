@@ -74,8 +74,8 @@ read the same 4-bit mode field, but MediaTek's MT6771 pin driver sets
 `nfuncs` and prints the raw value. The register holds 9, set by the
 bootloader, in both systems, and MediaTek reads it as function 1: the bus
 pins were in their `SDA1` and `SCL1` function, as under Ubuntu Touch, and the
-gate was too literal. A repeat needs the gate to compare the mode modulo 8
-and the corrected debugfs path.
+gate was too literal. The link:native-i2c-scan-trial.adoc[I2C bus scan
+trial] proposes the repeat with that rule and the corrected debugfs path.
 
 The session data and kernel logs are in the private evidence directory. This
 shows the native kernel driving an I2C controller from a tree handed over by
