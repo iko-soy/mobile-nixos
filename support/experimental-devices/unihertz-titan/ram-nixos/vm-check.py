@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Run the RAM NixOS stage 0 and an x86_64 build of its NixOS system in TCG.
+"""Run the RAM NixOS stage 0 and an x86_64 build of its NixOS system in QEMU.
 
 Each case boots the VM build of stage 0 with QEMU's restricted user network
-(172.16.42.0/24, host forwarding only) in place of the USB gadget network:
+(172.16.42.0/24, host forwarding only) in place of the USB gadget network. The
+cases run at the same time, each in its own guest, under KVM when /dev/kvm is
+usable and TCG otherwise; most of their time is spent waiting for deadlines:
 
 * valid: a short push and a same-size push with one changed byte are
   rejected, the pinned squashfs is accepted, NixOS boots to "running" with no
@@ -27,6 +29,7 @@ Each case boots the VM build of stage 0 with QEMU's restricted user network
 """
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -37,6 +40,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 LOG_LIMIT = 16 * 1024 * 1024
@@ -51,10 +55,20 @@ CMDLINE = ("console=ttyS0,115200 rdinit=/init panic=5 loglevel=4 nbd.nbds_max=0 
            "panic_on_oops=1 titan_ram_vm=1")
 
 
+PORTS_LOCK = threading.Lock()
+PORTS_GIVEN = set()
+
+
 def free_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    # Cases start guests concurrently; never hand out the same port twice.
+    with PORTS_LOCK:
+        while True:
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            if port not in PORTS_GIVEN:
+                PORTS_GIVEN.add(port)
+                return port
 
 
 def private_write(path, data):
@@ -75,7 +89,7 @@ class Guest:
         network = (f"user,id=net0,net=172.16.42.0/24,host=172.16.42.2,dhcpstart=172.16.42.20,restrict=on,"
                    f"hostfwd=tcp:127.0.0.1:{self.push_port}-172.16.42.1:7000,"
                    f"hostfwd=tcp:127.0.0.1:{self.ssh_port}-172.16.42.1:22")
-        command = [args.qemu, "-machine", "q35,accel=tcg", "-cpu", "max", "-m", "1536", "-smp", "2",
+        command = [args.qemu, "-machine", f"q35,accel={args.accel}", "-cpu", "max", "-m", "1536", "-smp", "2",
                    "-nodefaults", "-no-user-config", "-display", "none", "-monitor", "none",
                    "-serial", "stdio", "-no-reboot", "-kernel", args.kernel, "-initrd", args.initrd,
                    "-append", CMDLINE,
@@ -435,9 +449,10 @@ def main(argv=None):
         output.mkdir(mode=0o700)
         args.key_file = str(output / "test-key")
         private_write(args.key_file, Path(args.key).read_bytes())
-        cases = []
-        for name, function in (("storage", case_storage), ("deadline", case_deadline), ("valid", case_valid),
-                               ("hard", case_hard), ("kexec", case_kexec)):
+        args.accel = "kvm" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "tcg"
+        print(f"accelerator: {args.accel}", flush=True)
+
+        def run(name, function):
             directory = output / name
             directory.mkdir(mode=0o700)
             result = {"case": name, "passed": False}
@@ -450,11 +465,16 @@ def main(argv=None):
                 print(f"{name}: {error}\n" + "\n".join(lines[-80:]), file=sys.stderr, flush=True)
             print(f"{name}: {'passed' if result['passed'] else 'FAILED'}", flush=True)
             private_write(directory / "result.json", (json.dumps(result, indent=2) + "\n").encode())
-            cases.append(result)
+            return result
+
+        functions = (("storage", case_storage), ("deadline", case_deadline), ("valid", case_valid),
+                     ("hard", case_hard), ("kexec", case_kexec))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(functions)) as pool:
+            cases = list(pool.map(lambda case: run(*case), functions))
         passed = all(case["passed"] for case in cases)
         private_write(output / "summary.json", (json.dumps(
-            {"passed": passed, "cases": cases,
-             "scope": "Synthetic x86_64 TCG guest with QEMU user networking; no Titan hardware or USB gadget data path."},
+            {"passed": passed, "cases": cases, "accelerator": args.accel,
+             "scope": "Synthetic x86_64 guest with QEMU user networking; no Titan hardware or USB gadget data path."},
             indent=2) + "\n").encode())
         return 0 if passed else 1
     finally:

@@ -2,8 +2,9 @@
 # layout (titan-kexec --dtb; README.adoc in this directory). Every reserved
 # region and memory node of the running tree, normally /sys/firmware/fdt as
 # the bootloader passed it, must be present in the new tree with identical
-# properties, the root's cell sizes must match, and the new tree may describe
-# no memory node the running tree lacks. Extra reserved regions are allowed.
+# properties, the root's cell sizes must match, the new tree may describe
+# no memory node the running tree lacks, and every /memreserve/ entry of the
+# running tree must remain. Extra reserved regions and entries are allowed.
 # Prints nothing and exits 0 when this holds; otherwise names the first
 # difference and exits 1. Any unreadable tree or node refuses.
 if [ "$#" -ne 2 ]; then
@@ -79,3 +80,11 @@ new_memory=$(memory_nodes "$new")
 while IFS= read -r node; do
   same "/$node"
 done <<< "$live_memory"
+
+# The reserve map, which a kexec'd kernel's tree uses for its initrd
+# (native-dtb-kexec-trial.adoc).
+dtc -q -I dtb -O dts -o "$work/live.dts" "$live" || fail "cannot read the running tree's reserve map"
+dtc -q -I dtb -O dts -o "$work/new.dts" "$new" || fail "cannot read the new tree's reserve map"
+while IFS= read -r entry; do
+  grep -qxF "$entry" "$work/new.dts" || fail "the new tree lacks the running tree's ${entry%;}"
+done < <(grep '^/memreserve/' "$work/live.dts" || true)

@@ -206,6 +206,9 @@ let
   '';
   vmTests = pkgs.runCommand "titan-ram-nixos-vm-tests" {
     nativeBuildInputs = [ pkgs.python3 ];
+    # Nix exposes /dev/kvm only to builds that require it; vm-check.py falls
+    # back to TCG without it.
+    requiredSystemFeatures = [ "kvm" ];
     meta = { platforms = [ "x86_64-linux" ]; hydraPlatforms = [ ]; };
   } ''
     export PYTHONDONTWRITEBYTECODE=1 HOME="$TMPDIR"
@@ -279,6 +282,9 @@ let
     variant memory 's/reg = <0 0x40000000 1 0x80000000>;/reg = <0 0x40000000 1 0x40000000>;/'
     variant memory2 's|chosen {|memory@200000000 { device_type = "memory"; reg = <2 0 0 0x1000>; }; chosen {|'
     variant cells 's/#size-cells = <2>;/#size-cells = <1>;/'
+    # A kexec'd kernel's tree reserves its initrd in the reserve map.
+    variant rsv 's|^/dts-v1/;|/dts-v1/;\n/memreserve/ 0xfe200000 0xd31f1;|'
+    variant rsv2 's|^/dts-v1/;|/dts-v1/;\n/memreserve/ 0xfe200000 0xd31f1;\n/memreserve/ 0x50000000 0x1000;|'
     # A kernel replaces a consumed /chosen/rng-seed with NOP tags.
     variant seeded 's/bootargs = "console=ttyS0";/bootargs = "console=ttyS0"; rng-seed = [00 11 22 33 44 55 66 77];/'
     python3 - seeded.dtb nop.dtb <<'PY'
@@ -313,6 +319,13 @@ let
       "$check" $pair || { echo "refused the trees $pair" >&2; exit 1; }
     done
     if "$check" nop.dtb memory.dtb 2> nopmemory.err; then echo "accepted nopmemory" >&2; exit 1; fi
+    for pair in "rsv.dtb rsv.dtb" "base.dtb rsv.dtb" "rsv.dtb rsv2.dtb"; do
+      "$check" $pair || { echo "refused the trees $pair" >&2; exit 1; }
+    done
+    for pair in "rsv.dtb base.dtb" "rsv2.dtb rsv.dtb"; do
+      if "$check" $pair 2>> rsvmissing.err; then echo "accepted the trees $pair" >&2; exit 1; fi
+    done
+    grep -q 'lacks the running tree.s /memreserve/' rsvmissing.err
     for refused in nomap disabled size noempty memory memory2 cells; do
       if "$check" base.dtb "$refused.dtb" 2> "$refused.err"; then echo "accepted $refused" >&2; exit 1; fi
     done

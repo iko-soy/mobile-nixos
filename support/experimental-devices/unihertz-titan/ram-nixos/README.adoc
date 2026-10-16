@@ -28,8 +28,11 @@ power-down trial]: cores came back after hotplug, and a kexec through
 kexec'd kernel's tree there and now reads trees as `dtc` rewrites them (flash
 profile `ram-nixos-6`; image `5a4ad5f0...`, store squashfs `9367b299...`).
 With it, the link:../native-dtb-kexec-trial.adoc[tree-replacing kexec trial]
-handed a kexec'd kernel a modified tree through `kexec_load`; `--nosmp` has
-not run on the phone. Building it does not authorize starting it.
+handed a kexec'd kernel a modified tree through `kexec_load`. The check now
+also compares the trees' reserve maps (flash profile `ram-nixos-7`; image
+`46fb6680...`, store squashfs `1ce89af2...`, 112336896 bytes), which has not
+run on the phone, nor has `--nosmp`. Building it does not authorize starting
+it.
 
 [source,sh]
 ----
@@ -116,9 +119,10 @@ Any failed step restarts the phone, which then boots Ubuntu Touch.
   would otherwise try `kexec_file_load` first, which ignores the tree) with
   the given tree, which must match its SHA-256 and pass `titan-dtb-check`
   (`dtb-check.sh`): every reserved region and memory node of the running tree
-  present with identical properties, the same cell sizes, and no extra
-  memory. It reads both trees as `dtc` rewrites them, since a kernel leaves
-  NOP tags in the tree it was given, which `fdtget` cannot list. APPEND takes only `titan_` markers, so it cannot override the
+  present with identical properties, the same cell sizes, no extra memory,
+  and every `/memreserve/` entry of the running tree still in the new tree.
+  It reads both trees as `dtc` rewrites them, since a kernel leaves NOP tags
+  in the tree it was given, which `fdtget` cannot list. APPEND takes only `titan_` markers, so it cannot override the
   command line's safety settings, and a unit detaches the USB gadget before
   each kexec, since the USB controller has no shutdown hook. `--nosmp` adds
   `nosmp`, so that the next kernel leaves the secondary CPUs off: on the
@@ -147,8 +151,9 @@ the gadget, which stays in its settings after the run.
 
 == Checks
 
-The VM build runs the same stage 0 and configuration on x86_64 under TCG, with
-QEMU's restricted user network in place of the USB data path:
+The VM build runs the same stage 0 and configuration on x86_64, all cases at
+once, under KVM where the builder offers it and TCG otherwise, with QEMU's
+restricted user network in place of the USB data path:
 
 * a short push and a same-size push with one changed byte are rejected and
   the pinned squashfs accepted; NixOS boots to `running` with no failed unit,

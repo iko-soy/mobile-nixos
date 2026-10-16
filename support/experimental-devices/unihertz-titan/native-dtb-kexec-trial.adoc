@@ -286,7 +286,8 @@ Ubuntu Touch normally and go to Part 3.
 * `titan-dtb-check` does not compare the trees' `/memreserve/` entries. The
   bootloader's tree has none; the tree from kexec A has one, for its own
   initrd, which `fdtput` keeps, so kexec B's kernel reserves that stale
-  region too. Trees with real changes need the check to compare them.
+  region too. Trees with real changes need the check to compare them; since
+  the trial it requires every entry of the running tree to remain.
 * Each kexec makes the driver's firmware calls for cpu1 to cpu7 in the old
   kernel's shutdown, without any guard, as in the CPU power-down trial's
   kexec, which they passed with this kernel.
