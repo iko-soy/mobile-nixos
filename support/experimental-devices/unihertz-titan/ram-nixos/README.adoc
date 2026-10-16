@@ -12,7 +12,11 @@ trial]: the same kernel without the USB driver's per-transfer debug log,
 sessions that `titan-session` can move within a hard limit (75 minutes until
 hardware has shown a checker-driven restart and the thermal behaviour of a
 longer run), tools for inspection, and kexec, so that a session can start
-another kernel without flashing. Building it does not authorize starting it.
+another kernel without flashing. It ran on 2026-10-16 with the owner's
+approval: the session deadline restarted the phone by itself, and a kexec
+into the same kernel and stage 0 worked but brought up only one CPU (see
+link:../native-ram-env-trial.adoc[the trial record]). Building it does not
+authorize starting it again.
 
 [source,sh]
 ----

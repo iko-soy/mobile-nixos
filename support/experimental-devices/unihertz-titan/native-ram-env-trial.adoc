@@ -1,7 +1,10 @@
 = RAM NixOS working environment trial
 
-Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-16: *run once with the owner's explicit approval, with a
+second start the owner approved after the first; see <<result,the result>>.*
+Kexec worked on the phone but brought up only one CPU, so the tree-replacing
+step was skipped as the procedure requires. Each repetition needs the owner's
+explicit approval of this exact procedure.
 
 The link:native-ram-trial.adoc[RAM NixOS trial] booted the first NixOS on the
 Titan and reached it over SSH. This trial runs the working-environment version
@@ -13,6 +16,84 @@ the end the session kexecs into the identical kernel and stage 0, the first
 step towards trying new kernels without flashing. The original recovery is
 then restored. Ubuntu Touch's boot and `dtbo` partitions
 are never written, and Linux never sees the phone's storage during the run.
+
+[[result]]
+== Result (2026-10-16)
+
+The owner approved the procedure and ran the partition reads, the entries, the
+Volume Up starts and the unlocks; watchers ran the fastboot steps and the
+pushes, and the sessions ran over SSH from the Mac.
+
+* *Preconditions and Part 1.* The baseline found the battery full and
+  charging, no update pending and empty recovery command directories; step 2
+  found boot, recovery and dtbo identical to their preserved copies and no
+  control region changed since the latest copy. `fastboot flash recovery`
+  reported `Writing 'recovery' OKAY`, and step 7 read recovery back as
+  `4cb637df...`, with boot and dtbo unchanged.
+* *First start.* The image started, stage 0 took the store, which verified 9
+  seconds after it began listening (13 seconds for a slightly smaller store
+  in the RAM NixOS trial), NixOS started and SSH answered. The session itself
+  did not run: the operator was still waiting for the owner's confirmation of
+  step 9. The session deadline then restarted the phone into Ubuntu Touch 20
+  minutes after boot, by itself: its first restart on hardware. The procedure
+  sends an early restart to Part 3; instead the owner approved one more start
+  with the image already verified in recovery, and the push helper ran on its
+  own so that the session began as soon as SSH answered.
+* *Questions 1 and 2, yes.* On the second start NixOS was `running` with no
+  failed unit after 20.3 seconds to userspace (stage 0 and the push included)
+  and 13.6 seconds of userspace, all eight CPUs online, 5.5 GB free and the
+  CPU at 33.5 °C. The USB driver wrote 20 kernel log lines instead of 2769,
+  and a stream from the Mac reached 34.5 MiB/s through SSH, about four times
+  the first trial's push rate. All the tools were present.
+* *Question 3, in part.* `titan-session end-in 45` set the end to 2756
+  seconds of uptime, with its check active and the hard-deadline helper
+  running, and the read-only inspection was saved. The session then moved on
+  to the kexec steps after about three minutes, as planned, so the 45 minutes
+  were not used; the CPU stayed at 33.5 to 34.0 °C throughout.
+* *Question 4, kexec reusing the tree: yes, with one CPU.* `titan-kexec`
+  verified the payload and loaded it; `strace` recorded `kexec_file_load`
+  returning 0, and the kernel reported the image loaded. `systemctl kexec`
+  removed the image's USB device within two seconds, and 43 seconds later it
+  returned with no boot ROM or preloader in between: a kexec, not a reset.
+  Stage 0 took a second push, NixOS was `running` with no failed unit, the
+  uptime had restarted, the command line carried `titan_kexec=1` and
+  `panic_on_oops=1`, the device tree's 14 reserved-memory regions were
+  identical to the first boot's, and the session deadline and the helper were
+  armed again. But only CPU 0 was online (`offline=1-7`, `possible=0-7`). The
+  kernel log had wrapped before the bring-up messages (journald reported 3458
+  missed kernel messages), so the cause is not recorded; the 43 seconds are
+  about 35 more than expected, which would fit seven secondary CPUs each
+  timing out after five seconds. The gate failed, so the tree-replacing kexec
+  was skipped.
+* *Question 5, yes.* `titan-session end-in 1` at 173 seconds of uptime set the
+  end to 233 seconds; the image's device left about 30 seconds after that,
+  within one check and a shutdown, the preloader passed, and Ubuntu Touch
+  booted (`bootreason=reboot`). From Ubuntu Touch, `sudo /sbin/reboot
+  bootloader` reached fastboot, the preserved original was written
+  (`Writing 'recovery' OKAY`) and Ubuntu Touch returned. Step 13 read recovery
+  back as `4dd1c1f7...`, with boot and dtbo unchanged throughout; of the
+  control regions only `expdb` changed, as after every boot.
+
+The session data, kernel logs, journals, the live device tree and the
+bindings are in the private evidence directory. Found:
+
+* After a kexec through `kexec_file_load`, the secondary CPUs do not come
+  back. The first kernel took them offline through the firmware without an
+  oops; bringing them up again failed or timed out in the second. Finding the
+  cause needs the complete kernel log of the kexec'd boot, which needs a
+  larger log buffer, and possibly a test of taking one CPU offline and back
+  during a session.
+* The kernel log wraps during boot even without the USB debug log: the
+  donor configuration's driver-core debug messages fill the 128 KiB buffer.
+  The image's command line should set `log_buf_len`, as the diagnostic image
+  did; it also reaches each kexec'd kernel.
+* The push helper must run as its own job, so that the session starts the
+  moment SSH answers; the first start lost its session waiting.
+
+This shows that a kexec works on the Titan with the bootloader's own tree,
+apart from the secondary CPUs, and that the session deadline restarts the
+phone by itself. It does not show a kexec with a replaced tree, a kexec'd
+kernel with all CPUs, or longer sessions.
 
 == Questions
 

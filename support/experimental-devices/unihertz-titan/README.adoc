@@ -80,10 +80,13 @@ hardware works under NixOS.
   and accepted SSH, with Linux never seeing the phone's storage; a restart
   from the session booted Ubuntu Touch, and the original recovery was
   restored.
-* The link:native-ram-env-trial.adoc[RAM NixOS working environment], built
-  and checked in a VM, its trial proposed, not run: the same kernel without
-  the USB driver's per-transfer debug log, sessions that `titan-session` can
-  move within a hard limit, and inspection tools.
+* The link:native-ram-env-trial.adoc[RAM NixOS working environment trial],
+  run on 2026-10-16 with the owner's approval: USB networking four times
+  faster without the USB driver's debug log, the session deadline restarting
+  the phone by itself, and the first kexec on the Titan, which booted the
+  same kernel and stage 0 without the bootloader but brought up only one of
+  the eight CPUs; the tree-replacing kexec was therefore skipped. The
+  original recovery was restored.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

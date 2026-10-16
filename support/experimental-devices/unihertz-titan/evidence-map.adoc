@@ -119,18 +119,22 @@ the phone (not reached), behavior beyond one run; see
 link:native-ram-trial.adoc[the trial record]
 
 |RAM NixOS working environment
-|Linux 6.18.38 VM cases (5): the session deadline at its default, moved by
+|One owner-approved trial with a second start: the session deadline
+restarted the phone by itself, at its default and moved; USB at 34.5 MiB/s
+through SSH; a kexec through `kexec_file_load` into the same kernel and stage
+0 with the same reserved memory and a second push, but only CPU 0 online
+afterwards; byte-exact restore. Before it: Linux 6.18.38 VM cases (5): the
+session deadline at its default, moved by
 `titan-session` and held to its cap, bad times refused, a restart at the
 moved deadline and at the hard deadline, and a kexec into the same kernel and
 stage 0 after a wrong kernel or tree hash was refused; `titan-dtb-check`
 against synthetic trees and the tree the phone passed in the diagnostic
 trial; phone build checks; the kernel's configuration differing only in
 `CONFIG_USB_MTU3_DEBUG` and `CONFIG_KEXEC`
-|Builder runs on 2026-10-16
-|Any run on the Titan, including this kernel, kexec and replacing the tree,
-a restart by
-the session deadline and a longer session's temperatures; see
-link:native-ram-env-trial.adoc[the proposal]
+|2026-10-16
+|A kexec'd kernel with all CPUs, a kexec with a replaced tree, longer
+sessions, the cause of the missing CPUs; see
+link:native-ram-env-trial.adoc[the trial record]
 
 |Second copy of the rollback set
 |The owner's remote copy of the six cataloged sets and the offline region
