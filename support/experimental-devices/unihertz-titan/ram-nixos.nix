@@ -49,8 +49,10 @@ let
   # NixOS accept only loop, RAM and zram devices, so none may be created.
   # systemd reads its crash action here before any configuration. An oops,
   # such as a CPU that fails to go offline for kexec, panics and so restarts
-  # after the panic timeout instead of hanging; kexec reuses this line.
-  imageCmdline = "nbd.nbds_max=0 systemd.crash_action=reboot panic_on_oops=1";
+  # after the panic timeout instead of hanging. The driver core's debug
+  # messages fill the default 128 KiB log during boot, so the log keeps 4 MiB
+  # (native-ram-env-trial.adoc). kexec reuses this line.
+  imageCmdline = "nbd.nbds_max=0 systemd.crash_action=reboot panic_on_oops=1 log_buf_len=4M";
   mkDeadline = staticPkgs: name: staticPkgs.stdenv.mkDerivation {
     pname = name;
     version = "1";

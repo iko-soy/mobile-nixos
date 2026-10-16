@@ -1,0 +1,237 @@
+= Kexec CPU trial
+
+Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-ram-env-trial.adoc[working-environment trial] ran the first
+kexec on the Titan: through `kexec_file_load`, reusing the bootloader's tree,
+it booted the same kernel and stage 0 without the bootloader, but only CPU 0
+came back, and the kernel log had wrapped before the secondary CPUs' messages.
+The saved logs show that each of the seven secondary CPUs timed out after
+five seconds rather than being refused by the firmware. This trial runs the
+same system with a 4 MiB kernel log. It first takes one A53 and one A73 core
+offline and back in the healthy first boot: the same firmware calls a kexec
+makes (PSCI CPU_OFF and CPU_ON), from the bootloader's kernel address, with
+the log readable. If a core does not come back, the firmware cannot restart a
+core it has turned off, which explains the kexec result without another
+kexec. If both come back, it kexecs through `kexec_load` with a copy of the
+running tree and then, if that system's reserved memory is unchanged,
+through `kexec_file_load`. Every boot's complete kernel log, memory map and
+CPU state are saved. Neither kexec path can place the kernel where the
+bootloader does (`0x40080000`, not 2 MiB aligned), so a kexec failure alone
+cannot tell a wrong address from a firmware that does not restart cores. The original
+recovery is then restored. Ubuntu Touch's boot and `dtbo` partitions are never
+written, and Linux never sees the phone's storage.
+
+== Questions
+
+. Does the image start as before, with the larger log, and NixOS run with all
+  eight CPUs?
+. Does a core taken offline through the firmware come back online, for one
+  A53 and one A73 core, and what does the kernel log say?
+. Kexec A: does a kexec through `kexec_load` with a copy of the running tree
+  boot, and does it bring up all eight CPUs? Where does kexec-tools place the
+  kernel?
+. Kexec B: from there, does a kexec through `kexec_file_load` again lose the
+  secondary CPUs, and what does the complete kernel log say about them?
+. Does `titan-session end-in 1` restart the phone into Ubuntu Touch by
+  itself, and does the restore work as before?
+
+== Basis
+
+* *Kernel, trees, stage 0, store and kexec payload.* Identical to the
+  working-environment trial: `Image.gz`
+  `dcbd8458e2683beccc0b85ebae10c654149b006267d083607471791bd7342727`, DTB
+  table `b41fe0d0...` with the eMMC host disabled, recovery-DTBO table
+  `ce413006...`, stage 0's ramdisk
+  `bed09e1231ccc558fdb863517c3762c0394904613b1bdc0a3b00e447fa660170`, the
+  store squashfs
+  `e1ecc06da2b3ee6162a6f6002eb2bd1901326af47817cc4e9c43efa598cc6794`, and the
+  uncompressed kernel for kexec
+  `2c9b192d0fa107bb58a2fa31f33bc84d8b81aac833e9a1611d183944307a616c`.
+* *Image.* The same with `log_buf_len=4M` added to the command line, which
+  each kexec carries over: 16510976 bytes, SHA-256
+  `c818ff886df7ce9558ed559edf5c82dc4b98f30e0a476e1ca27293084c4bead6`; padded
+  to 33554432 bytes,
+  `1b586f60e6a0cfdc23e748d77a622614bdba6a0447bcbeb7cdda2b48019f505f`
+  (`tools/flash-recovery.py --profile ram-nixos-3`).
+* *Checks.* As for the working environment, whose VM cases and checks are
+  unchanged by the command line. The diagnostic image already ran this kernel
+  build's predecessor with a 2 MiB log buffer; 4 MiB costs about 18 MiB of
+  early memory. An independent review's findings are fixed.
+
+== Preconditions
+
+As in the link:native-ram-env-trial.adoc[working-environment trial]: the owner
+present, a direct cable, battery at least 80%, no update pending, no recovery
+command file, both private copies of the original recovery (`4dd1c1f7...`)
+verified, and a normal-mode control-region copy right before the trial with
+`para` matching the latest copies. From step 5 until the Part 3 read-back
+passes: no system update, factory reset, `reboot recovery` or Volume Up start
+other than step 9 and the rows below.
+
+== Procedure
+
+*Part 1: write the image.* Steps 1 to 7 of the
+link:repo-kernel-trial.adoc[repository-kernel trial], with `--profile
+ram-nixos-3` and the image
+`native-ram-image-v4/UNTESTED-UNSIGNED-native-ram.img`; step 7 must read
+recovery back as `1b586f60...`, with boot and dtbo unchanged.
+
+*Part 2: run the session.*
+
+[start=8]
+. *Listen:* start `tools/ram-nixos.py` as its own job, which reports as soon
+  as SSH answers, with the private copy of the store squashfs, its pinned size
+  and SHA-256, a new private output directory and the dedicated key; and a
+  watcher that records every USB device change and whether Ubuntu Touch or
+  fastboot appears after the image.
+. *Start, owner-run:* keep the cable connected, power the phone off from
+  Ubuntu Touch, hold Volume Up and press Power, and release both once the
+  unlocked-state warning appears; allow the accessory if macOS asks. No
+  confirmation is needed: the session starts when SSH answers.
+. *Session:* at once and only once `titan-session end-in 40`; then the
+  records below. Read-only as in the working-environment trial: nothing
+  written in sysfs, debugfs or configfs, and no debugfs register dumps, with
+  the one exception of the next step.
++
+*Records of each boot*, saved privately: `titan-session status`; the CPUs'
+`online`, `offline`, `possible` and `present` lists; the complete kernel log,
+which must start at `[    0.000000]` and report its buffer as `log buffer
+data + meta data: 4194304 + ...`, with its `psci:`, `CPU`, `smp:`, KASLR and
+`OF: reserved mem` lines; `/proc/iomem`, with its `Kernel code` lines; the
+reserved-memory nodes of `/proc/device-tree`; the command line, which must
+carry `nbd.nbds_max=0`, `panic_on_oops=1`, `log_buf_len=4M` and, after each
+kexec, its marker; and the CPU temperature.
+. *CPU restart test, writing sysfs:* for cpu1 (A53) and then cpu4 (A73),
+  write `0` to `/sys/devices/system/cpu/cpuN/online`, check that it reads
+  `0`, write `1` and check that it reads `1`, saving the kernel log after
+  each core. If a core does not come back online, record it and go to the
+  end step without a kexec.
+. *Kexec A, `kexec_load` with the running tree:* copy the payload's `Image`
+  and `initramfs.cpio.gz` into `/run/kexec` over SSH and the running tree with
+  `cp /sys/firmware/fdt /run/kexec/fdt.dtb`; run `strace -f -e
+  trace=kexec_load,kexec_file_load titan-kexec --dtb /run/kexec/fdt.dtb <its
+  SHA-256> /run/kexec/Image <its SHA-256> /run/kexec/initramfs.cpio.gz <its
+  SHA-256> titan_kexec=a`, which must show `kexec_load` and its segments'
+  addresses; then `systemctl kexec`. Once the image's USB device has left,
+  start `tools/ram-nixos.py` again as its own job with a new output
+  directory. The kexec-tools purgatory checks the segments' SHA-256 with the
+  caches off, which may take minutes; the watcher records when the device
+  leaves and returns. Expected: the device returns, stage 0 takes the push
+  and SSH answers; then the records.
+. *Kexec B, `kexec_file_load`:* only if the system from kexec A runs,
+  answers SSH, and shows the same `OF: reserved mem` lines and reserved-memory
+  nodes as the first boot. Copy the payload into `/run/kexec` again; run
+  `titan-kexec /run/kexec/Image <its SHA-256> /run/kexec/initramfs.cpio.gz
+  <its SHA-256> titan_kexec=b` under the same `strace`, which must show
+  `kexec_file_load`. If kexec A brought up fewer than eight CPUs, the kernel
+  is expected to refuse this load with "Can't kexec: CPUs are stuck in the
+  kernel."; record the output and go to the end. Otherwise `systemctl kexec`,
+  the push helper as its own job once the device has left, and the records.
+. *End:* `titan-session end-in 1`; the session deadline must restart the
+  phone into Ubuntu Touch within about two minutes. Only if it has not after
+  three minutes, `titan-session end`.
+
+*Part 3: restore.* From Ubuntu Touch, `sudo /sbin/reboot bootloader`
+(owner-run); then, as in the earlier trials, write the preserved original
+with the `original-recovery` profile, return, and read recovery back as
+`4dd1c1f7...`, with boot and dtbo unchanged.
+
+*Part 4: compare.* A normal-mode control-region copy after Part 3, compared
+with the one from step 2 (`expdb` changes on every boot).
+
+== Stop conditions
+
+The repository-kernel trial's general stop conditions apply. This table
+replaces the working-environment trial's:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The session ends with the restart at the moved deadline, and Ubuntu Touch
+starts
+|The expected outcome. Go to Part 3.
+|The restart at the moved deadline does not come within three minutes
+|Record it, end with `titan-session end`, wait for Ubuntu Touch, then Part 3.
+|The CPU temperature passes 60 °C
+|End with `titan-session end-in 1` at once, wait for Ubuntu Touch, then
+Part 3.
+|A core does not come back online in the CPU restart test
+|Record the kernel log and go to the end step without a kexec.
+|`titan-kexec` refuses or the load fails
+|Record the output and go to the end step. Never run `kexec` by hand.
+|The USB device appears, but the network or the push never completes
+|Stage 0 restarts at its 600-second deadline, or at once after a refusal it
+reports on the status port. Keep the helper's output; wait for Ubuntu Touch,
+then Part 3 without retrying.
+|The push completes, then the phone restarts before SSH answers
+|NixOS crashed or refused a disk. Keep the helper's output; wait for Ubuntu
+Touch, then Part 3 without retrying.
+|SSH never answers, or stops answering during a session
+|The session deadline restarts the phone 20 minutes after each boot, or 40
+minutes after the extension (plus up to half a minute), and stage 0's helper
+75 minutes after each boot regardless; wait for Ubuntu Touch, then Part 3.
+|After either `systemctl kexec`, the image's USB device has not left within
+one minute
+|The old kernel stopped during its shutdown; a stopped kernel may stay
+enumerated. Apply the row for a kernel that stopped before stage 0.
+|After either `systemctl kexec`, the image's USB device returns but the push
+or SSH fails
+|The kexec'd stage 0 restarts at its 600-second deadline, and its NixOS at
+the 20-minute default; wait for Ubuntu Touch, then Part 3 without retrying.
+|After kexec A, neither the image's USB device, Ubuntu Touch nor fastboot
+appears within 15 minutes, or after kexec B within five minutes
+|The kernel stopped between the shutdown, which ends the hard-deadline
+helper, and the next stage 0, where no deadline runs. Hold Power about ten
+seconds, but expect nothing; then unplug, let the battery run down, charge,
+start Ubuntu Touch normally and go to Part 3.
+|Ubuntu Touch starts without the USB device appearing
+|Read the boot reason from `/proc/cmdline`. Only `PowerKey` allows one retry
+of step 9. Any other reason may mean the bootloader refused the image or the
+kernel crashed: record it, then Part 3 without retrying.
+|A MediaTek boot ROM or preloader USB device (`0e8d:0003` or `0e8d:2000`)
+stays present
+|The phone is in the SoC's download mode. Do not interact with it or run any
+flashing tool. Hold Power about ten seconds; if it persists, stop and report.
+|The phone powers off
+|A critical temperature trip powers it off, since nothing throttles the CPUs.
+Let it cool, start Ubuntu Touch normally with Power, then Part 3.
+|The screen shows a bootloader error or a crash-dump screen
+|Photograph or note it, then apply the next row.
+|Neither Ubuntu Touch nor fastboot appears within 80 minutes of step 9, or
+of the last `systemctl kexec`
+|Hold Power about ten seconds, but expect nothing: this kernel does not arm
+the PMIC long-press reset, so it works only if the bootloader left it armed,
+which is unverified. Then unplug, let the battery run down, charge, start
+Ubuntu Touch normally and go to Part 3.
+|===
+
+== Residual risks
+
+* The CPU restart test writes two sysfs files, an exception to the read-only
+  sessions: it turns one A53 and one A73 core off and on through the
+  firmware, as a kexec does. A core that does not come back stays off or is
+  counted as stuck, which only blocks later kexecs; an oops panics and
+  restarts the phone.
+* Kexec has run once on this phone, through `kexec_file_load`, and lost the
+  secondary CPUs. The tree-replacing `kexec_load` path has not run anywhere:
+  the VM's kexec uses `kexec_file_load`, and checks only that `--dtb` refuses
+  a tree with the wrong hash. Its purgatory checks the segments' SHA-256 with
+  the caches off, which is slow.
+* Kexec B may start from a kernel whose secondary CPUs did not come up. If
+  one is stuck in the kernel, arm64 refuses to load a kexec image, so
+  `titan-kexec` fails and the session goes to the end; if they are merely off,
+  the next kernel asks the firmware to start them again.
+* As in the working-environment trial: devices left in states the next kernel
+  does not expect (the USB gadget is detached before each kexec), a hang from
+  a shutdown until the next stage 0 without any deadline, sessions with no
+  frequency scaling, throttling or charger driver, and the first boot's
+  residual risks.
+
+== What this can and cannot show
+
+Success tells whether either kexec path brings the secondary CPUs back on the
+Titan, with the kernel's own account and the physical placement of each
+kernel, which decides how to make kexec usable for trying new kernels and
+trees. It does not show a kexec with a modified tree.

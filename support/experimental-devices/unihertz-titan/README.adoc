@@ -87,6 +87,10 @@ hardware works under NixOS.
   same kernel and stage 0 without the bootloader but brought up only one of
   the eight CPUs; the tree-replacing kexec was therefore skipped. The
   original recovery was restored.
+* The link:native-kexec-trial.adoc[kexec CPU trial], proposed, not run: the
+  same system with a 4 MiB kernel log, kexecing first through `kexec_load`
+  with a copy of the running tree and then through `kexec_file_load`, to find
+  out why the secondary CPUs did not come back.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1301,8 +1305,9 @@ x86_64. An independent review found that the kernel's built-in NBD devices
 would have made stage 0 refuse before USB came up, among other fixes. The
 owner approved and ran the link:native-ram-trial.adoc[trial] on 2026-10-16
 with the first version (commit `ffca3102`; `nativeRamImage` now builds the
-working-environment version, proposed in
-link:native-ram-env-trial.adoc[its own trial]):
+working-environment version of link:native-ram-env-trial.adoc[its own
+trial] with a 4 MiB kernel log, for the link:native-kexec-trial.adoc[kexec
+CPU trial]):
 macOS accepted the USB network, the pinned store arrived and verified, NixOS
 26.11 reached `running` with no failed unit six seconds after the handover,
 SSH accepted the dedicated key, a restart from the session booted Ubuntu

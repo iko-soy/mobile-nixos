@@ -126,8 +126,8 @@ class RecoveryFlashTests(unittest.TestCase):
     def test_pinned_profiles_match_the_reviewed_images(self):
         real = load("titan_fastboot_flash_constants", HERE.parent / "flash-recovery.py")
         self.assertEqual(set(real.PROFILES), {"rescue-probe", "repo-kernel-probe", "native-probe", "native-diag",
-                                              "ram-nixos", "ram-nixos-2", "control-acquisition",
-                                              "original-recovery"})
+                                              "ram-nixos", "ram-nixos-2", "ram-nixos-3",
+                                              "control-acquisition", "original-recovery"})
         self.assertEqual(real.PARTITION_BYTES, 33554432)
         self.assertEqual(real.PARTITION, "recovery")
         # The probe is the second version, not the first-version envelope that
@@ -169,6 +169,12 @@ class RecoveryFlashTests(unittest.TestCase):
         # The working-environment kernel (15587110), its stage 0 (864753) and
         # the same overlay and DTB tables.
         self.assertEqual(ram2["source_bytes"], 2048 + pages(15587110) + pages(864753) + pages(5765) + pages(47341))
+        ram3 = real.PROFILES["ram-nixos-3"]
+        self.assertEqual((ram3["source_bytes"], ram3["source_sha256"], ram3["sha256"]),
+                         (16510976, "c818ff886df7ce9558ed559edf5c82dc4b98f30e0a476e1ca27293084c4bead6",
+                          "1b586f60e6a0cfdc23e748d77a622614bdba6a0447bcbeb7cdda2b48019f505f"))
+        # Only the command line differs from ram-nixos-2, so the layout is the same.
+        self.assertEqual(ram3["source_bytes"], ram2["source_bytes"])
         control = real.PROFILES["control-acquisition"]
         self.assertEqual((control["source_bytes"], control["source_sha256"], control["sha256"]),
                          (13475840, "41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65",

@@ -15,8 +15,10 @@ longer run), tools for inspection, and kexec, so that a session can start
 another kernel without flashing. It ran on 2026-10-16 with the owner's
 approval: the session deadline restarted the phone by itself, and a kexec
 into the same kernel and stage 0 worked but brought up only one CPU (see
-link:../native-ram-env-trial.adoc[the trial record]). Building it does not
-authorize starting it again.
+link:../native-ram-env-trial.adoc[the trial record]). `nativeRamImage` now
+builds it with a 4 MiB kernel log, for the link:../native-kexec-trial.adoc[kexec
+CPU trial], which looks for the reason. Building it does not authorize
+starting it.
 
 [source,sh]
 ----
@@ -29,7 +31,9 @@ The aarch64 system needs a builder that can run aarch64-linux, natively or
 under emulation (`boot.binfmt.emulatedSystems`); its packages come from the
 binary cache, and only the small assembly steps run there. The image uses
 `nativeKernelEnv`, the native kernel with `CONFIG_USB_MTU3_DEBUG` off and
-`CONFIG_KEXEC` on; `nativeKernel` and the earlier images are unchanged.
+`CONFIG_KEXEC` on; `nativeKernel` and the earlier images are unchanged. Its
+command line adds `log_buf_len=4M`, since the driver core's debug messages
+fill the default 128 KiB log during boot.
 
 == Why two stages
 

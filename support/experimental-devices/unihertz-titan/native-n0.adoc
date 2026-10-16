@@ -179,4 +179,5 @@ hard limit, and adds `titan-kexec`, so that sessions can start other kernels
 and device trees without flashing. On 2026-10-16 its trial kexec'd into the
 same kernel and stage 0 on the phone, but the kexec'd kernel brought up only
 CPU 0; finding why, with the full kernel log of a kexec'd boot, comes before
-trying replaced trees.
+trying replaced trees, and is the link:native-kexec-trial.adoc[kexec CPU
+trial]'s purpose.
