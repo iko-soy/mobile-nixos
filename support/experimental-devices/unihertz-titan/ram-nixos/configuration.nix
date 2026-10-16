@@ -70,6 +70,26 @@ let
       runHook postInstall
     '';
   };
+  # Two fixed identification reads on the I2C bus at 0x11011000 (i2c-id.c):
+  # each writes only the register's address and then reads, the tool refuses
+  # unless i2c-1 is that controller, and it stops at any error but a missing
+  # answer.
+  i2cId = pkgs.pkgsStatic.stdenv.mkDerivation {
+    name = "titan-i2c-id";
+    src = ./i2c-id.c;
+    dontUnpack = true;
+    buildInputs = [ pkgs.pkgsStatic.linuxHeaders ];
+    buildPhase = ''
+      runHook preBuild
+      $CC -O2 -Wall -Wextra -Werror -o titan-i2c-id "$src"
+      runHook postBuild
+    '';
+    installPhase = ''
+      runHook preInstall
+      install -D -m 0555 titan-i2c-id "$out/bin/titan-i2c-id"
+      runHook postInstall
+    '';
+  };
   # Refuses a replacement device tree unless it keeps the running tree's
   # reserved regions, memory nodes and cell sizes unchanged (dtb-check.sh).
   titanDtbCheck = pkgs.writeShellApplication {
@@ -208,7 +228,7 @@ in
   services.fstrim.enable = false;
   # Read-only inspection tools for bring-up work over SSH; nothing here
   # drives GPIOs or writes device registers.
-  environment.systemPackages = [ titanSession titanKexec titanDtbCheck i2cDetect ] ++ (with pkgs; [
+  environment.systemPackages = [ titanSession titanKexec titanDtbCheck i2cDetect i2cId ] ++ (with pkgs; [
     dtc file less strace htop tmux ethtool iperf3 lsof pv kexec-tools
   ]);
   # The USB controller has no shutdown hook; detach the gadget before a kexec

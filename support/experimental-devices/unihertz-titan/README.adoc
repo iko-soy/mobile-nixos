@@ -119,6 +119,10 @@ hardware works under NixOS.
   read-only scan of the sensors' bus found devices at `0x2c` and `0x60`, a
   real result by its timing and interrupt count, with the bus lines released
   afterwards. The original recovery was restored.
+* The link:native-i2c-id-trial.adoc[I2C device identification trial],
+  proposed, not run: the same, then one identification read from each of the
+  two devices with `titan-i2c-id`, a tool that can make only those two
+  reads.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

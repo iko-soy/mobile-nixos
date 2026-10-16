@@ -368,8 +368,14 @@ let
       echo "The phone busybox accepted a changed squashfs" >&2; exit 1
     fi
     rm flipped.img
-    # The phone system has i2cdetect and no I2C writer anywhere (configuration.nix).
+    # The phone system has i2cdetect, titan-i2c-id, which refuses without the
+    # controller at 11011000, and no general I2C writer (configuration.nix).
     test -x ${phoneSystem}/sw/bin/i2cdetect
+    set +e
+    ${pkgs.qemu-user}/bin/qemu-aarch64 ${phoneSystem}/sw/bin/titan-i2c-id 2> i2c-id.err
+    status=$?
+    set -e
+    test "$status" = 2 || { echo "titan-i2c-id exited $status without the adapter" >&2; exit 1; }
     while read -r path; do
       for tool in i2cset i2cget i2ctransfer i2cdump; do
         if [ -e "$path/bin/$tool" ]; then echo "The phone system contains $path/bin/$tool" >&2; exit 1; fi

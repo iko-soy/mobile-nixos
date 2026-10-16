@@ -30,9 +30,11 @@ profile `ram-nixos-6`; image `5a4ad5f0...`, store squashfs `9367b299...`).
 With it, the link:../native-dtb-kexec-trial.adoc[tree-replacing kexec trial]
 handed a kexec'd kernel a modified tree through `kexec_load`. The check now
 also compares the trees' reserve maps, and the system has a static
-`i2cdetect` with no I2C writer in the store (flash profile `ram-nixos-8`;
-image `16dd05a5...`, store squashfs `10e067e2...`, 112357376 bytes); neither
-has run on the phone, nor has `--nosmp`. Building it does not authorize starting it.
+`i2cdetect` with no I2C writer in the store (flash profile `ram-nixos-8`),
+which ran in the link:../native-i2c-scan-trial.adoc[I2C bus scan trial]. It
+now also has `titan-i2c-id` (flash profile `ram-nixos-9`; image
+`a4b76fcf...`, store squashfs `bb9f518d...`, 112373760 bytes), which has not
+run on the phone, nor has `--nosmp`. Building it does not authorize starting it.
 
 [source,sh]
 ----
@@ -134,8 +136,10 @@ Any failed step restarts the phone, which then boots Ubuntu Touch.
   initramfs for a kexec into the same image;
 * inspection tools: `dtc`, `file`, `less`, `strace`, `htop`, `tmux`,
   `ethtool`, `iperf3`, `lsof`, `pv`, and `i2cdetect` alone, statically
-  linked from i2c-tools, so that no I2C writer is anywhere in the store, and
-  nothing that drives GPIOs or writes device registers. debugfs is mounted, as on any NixOS; sessions
+  linked from i2c-tools, so that no general I2C writer is anywhere in the
+  store, and `titan-i2c-id` (`i2c-id.c`), which makes two fixed
+  identification reads on the bus at `0x11011000`, each writing only the
+  register's address; nothing drives GPIOs or writes device registers. debugfs is mounted, as on any NixOS; sessions
   neither write it nor read its register dumps (a PMIC read can clear
   interrupt status), and write nothing in sysfs or configfs.
 

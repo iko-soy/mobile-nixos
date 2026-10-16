@@ -60,7 +60,8 @@ gyroscope and magnetometer and no driver for any sensor chip, since the
 sensor co-processor's firmware drives the chips. The overlay's sensor list is
 a reference board's, not this phone's fitting. Identifying the two devices
 needs reading an identification register from each, which first writes a
-register pointer and so needs its own trial. Unverified, by address alone:
+register pointer and so needs its own trial: the
+link:native-i2c-id-trial.adoc[I2C device identification trial]. Unverified, by address alone:
 `0x60` is where Capella's CM36686 family of light and proximity sensors
 answers, and `0x2c` where QST's QMC6308 magnetometer does.
 

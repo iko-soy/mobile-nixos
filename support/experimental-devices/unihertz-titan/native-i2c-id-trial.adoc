@@ -1,0 +1,120 @@
+= I2C device identification trial
+
+Status on 2026-10-17: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-i2c-scan-trial.adoc[I2C bus scan trial] found two devices
+answering on the sensors' I2C bus at `0x11011000`, at `0x2c` and `0x60`, and
+none at the addresses of the vendor overlay, whose list is a reference
+board's. This trial repeats that trial and then reads one identification
+register from each device with `titan-i2c-id`, a tool that can make exactly
+two reads: register `0x00` of `0x2c`, one byte, and
+register `0x0c` of `0x60`, two bytes. Each read is one combined transfer that
+writes the register's address and then reads. Everything else is unchanged.
+
+== Questions
+
+. As in the scan trial: does the kexec with the controller enabled pass its
+  checks and bring up exactly `i2c-1` for the controller at `11011000`, are
+  the bus pins in function 1, and do `0x2c` and `0x60` answer the scan
+  again?
+. What do the two identification reads return, and do they name the driver
+  families the addresses suggest: mainline's `qmc6308` driver, whose
+  magnetometers read `0x80` from register `0x00` and answer at `0x2c`, and
+  its `vcnl4000` driver, whose CM36686, VCNL4040 and CM36672P read an ID
+  word with low byte `0x86` from register `0x0c` at `0x60`? The reads name
+  a family, not the exact part.
+. Are both bus lines released afterwards?
+. Does `titan-session end-in 1` restart the phone into Ubuntu Touch, and does
+  the restore work as before?
+
+== Basis
+
+* *The tool.* `ram-nixos/i2c-id.c`, built statically. It refuses unless
+  `/sys/bus/i2c/devices/i2c-1` resolves to the controller at `11011000` and
+  the adapter supports plain I2C transfers; then, for each entry of its
+  fixed table, it sends one `I2C_RDWR` transfer of two messages: a write of
+  the one-byte register address and a read of one or two bytes. It checks
+  that `/dev/i2c-1` is the I2C device 89:1, stops at any error but a missing
+  answer, and exits 0 when both reads succeed, 1 when one failed and 2 when
+  it refused. It takes no arguments and has no other code path that writes.
+  The VM case and the phone checks, which run the phone's own binary,
+  confirm that it refuses where no such adapter exists.
+* *On the bus.* i2c-mt65xx sends each transfer as one combined write-read:
+  start, the address with write, the register byte, a repeated start, the
+  address with read, the data, stop; there is no stop between, so no SMBus
+  command made of a single byte completes. Both transfers are byte for byte
+  the first identification reads of mainline's `qmc6308` and `vcnl4000`
+  drivers, and neither register clears anything when read on those parts.
+  This is the first combined write-read, and the first transmit through the
+  controller's DMA channel, on this controller; the scan only read.
+* *Image.* As in the scan trial, with `titan-i2c-id` added: stage 0's
+  ramdisk `97be934c2eb5a1fbe33863712fe065cd2e1b2f77899ed083e853b33fab57e3b7`,
+  which pins the store squashfs, 112373760 bytes,
+  `bb9f518dfbf0e721b6a733d4a8eb5390db89fa3de6766d38327a76c72e6e5162`; the
+  kexec payload pairs the unchanged kernel with this ramdisk. The image is
+  16513024 bytes, SHA-256
+  `a4b76fcfb55e6b25eb14ceba5da39c8d00f74002440bb1f9645a1a6fb04ec8d5`; padded
+  to 33554432 bytes,
+  `7bca74ec3a4348744487060fea451062648e5d3fe815a3864dc9da96d8481dab`
+  (`tools/flash-recovery.py --profile ram-nixos-9`).
+* *Everything else.* The kernel, the tree change, the checks and the bus map
+  of the link:native-i2c-scan-trial.adoc[I2C bus scan trial].
+
+== Preconditions
+
+As in the scan trial, with the latest control-region copy now the one from its
+Part 4.
+
+== Procedure
+
+As in the link:native-i2c-scan-trial.adoc[I2C bus scan trial], with flash
+profile `ram-nixos-9` and the image
+`native-ram-image-v12/UNTESTED-UNSIGNED-native-ram.img`, whose step 7
+read-back must show `7bca74ec...`, and with this added to step 12 after the
+scan and before the line check:
+
+* *Identification reads*, after the scan and its line check, which must pass
+  first: only if the scan's table shows exactly `0x2c` and `0x60`, it
+  finished in seconds, the controller's interrupt count rose by about 222
+  and no I2C error was logged. Save the `11011000.i2c` line of
+  `/proc/interrupts`, run `timeout 30 titan-i2c-id` once and record its
+  output and exit status, then save the interrupt line, which should have
+  risen by about 2, and the kernel log, and read the six pin lines again:
+  GPIO81 and GPIO84 must again show input level 1. Step 12's "no other I2C
+  command" otherwise stands.
+
+== Stop conditions
+
+The scan trial's table applies, with one row added:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The scan does not show exactly `0x2c` and `0x60`, or was slow, counted
+the wrong interrupts or logged an I2C error
+|Record the table and go to the end step without the identification reads.
+|`titan-i2c-id` exits 2
+|It refused: record its message and go to the end step without a retry.
+|`titan-i2c-id` reports a timeout, or a bus line reads 0 after it
+|Run no further I2C command, go to the end step, and after Part 3 power the
+phone fully off once.
+|===
+
+== Residual risks
+
+As in the scan trial, and this time two devices also receive a one-byte
+write, the address of the register to be read, followed by a repeated start
+rather than a stop. For register-based parts such as the expected ones, that
+only sets the read pointer. Among other parts that answer at `0x2c` or `0x60`
+none is known to have a reset, one-time-programmable or power command at
+register `0x00` or `0x0c`; a part of another kind could still treat the byte
+differently, which the identification is meant to settle before any driver
+is tried. A full power-off after Part 3 resets every device on the bus and
+costs one start.
+
+== What this can and cannot show
+
+Success names the two devices on the native kernel's first working I2C bus,
+which decides the drivers to try next. It does not show a driver, the other
+buses, the touch panel, the keyboard or the display.
