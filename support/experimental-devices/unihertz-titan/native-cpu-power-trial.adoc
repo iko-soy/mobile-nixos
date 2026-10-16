@@ -1,0 +1,311 @@
+= CPU power-down trial
+
+Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-kexec-trial.adoc[kexec CPU trial] found that a core the native
+kernel turns off does not start again, and its
+link:native-kexec-trial.adoc#cause[follow-up] found why: MediaTek's firmware
+powers a core down only when the kernel calls `MTK_SIP_POWER_DOWN_CORE` after
+the core is dead, as Ubuntu Touch's kernel was seen to do on this phone. This
+trial runs the working environment with the native kernel's driver that makes
+the same call (patch 0005). First, on Ubuntu Touch, a cpu4 round trip shows
+in the firmware log how the firmware reads a big core's number. Then, in the
+native kernel's healthy first boot, it takes cpu1, then cpu4, then cpu1,
+cpu2 and the whole big cluster together offline and back, each under a guard
+that restarts the phone if a call hangs. Only if every core returns cleanly,
+it kexecs through `kexec_file_load` without `nosmp`, expecting all eight CPUs
+in the next kernel, and from there through `kexec_load` with a copy of the
+running tree. The original recovery is then restored. Ubuntu Touch's boot and
+`dtbo` partitions are never written, and Linux never sees the phone's storage.
+
+== Questions
+
+. On Ubuntu Touch, does the firmware read MediaTek's CPU number 4 as the big
+  cluster's first core?
+. Does the image start, with the driver registered, and NixOS run with all
+  eight CPUs?
+. CPU restart: do cpu1 (Cortex-A53) and then cpu4 (Cortex-A73) come back
+  after going offline, and what do the driver's lines say: the core off for
+  PSCI and in WFI, the call's return value, the SPM power state before and
+  after?
+. Wide test: do cpu1, cpu2 and cpu4 to cpu7 come back after all six go
+  offline together?
+. Kexec A, `kexec_file_load`: does the kexec'd kernel bring up all eight
+  CPUs, without the five-second waits?
+. Kexec B, `kexec_load` with a copy of the running tree: does it boot, again
+  with all eight CPUs?
+. Does `titan-session end-in 1` restart the phone into Ubuntu Touch, and does
+  the restore work as before?
+
+== Basis
+
+* *Kernel.* `nativeKernelEnv` as before plus patch 0005, the only
+  configuration change being `CONFIG_MTK_MT6771_CPU_POWER`: `Image.gz`
+  `69f24259affbdd7fbee6a897d8d6b85fd4a1beaa2c6e09ff2bf5b655b3e2c548`; the
+  uncompressed kernel for kexec, 40613896 bytes,
+  `ce4510e02bcd75dbc798504a4460406484eb47b239c6271b29b0ba628c09ca5c`. The
+  driver acts only on the Titan. When CPU hotplug or kexec has turned a core
+  off, it checks that PSCI `AFFINITY_INFO` reports the core off and the SPM
+  reports it in WFI, waits 20 ms, then makes the call with the core as
+  `cluster * 4 + core`, as MediaTek's kernel does; it logs the core's SPM
+  registers before and after. It never powers down a cluster, its PLL or its
+  regulators.
+* *Trees, stage 0 and store.* Unchanged from flash profile `ram-nixos-4`:
+  DTB table `b41fe0d0...` with the eMMC host disabled, recovery-DTBO table
+  `ce413006...`, stage 0's ramdisk
+  `a35e7f7e290998455bbeeeab2c48f82f4102610acde3efa0d737726b854218c0`, the
+  store squashfs, 112340992 bytes,
+  `a0afd89c3f447dd52d8af754849870f3347e8d7a3d1f31a331051efbe8239302`, with
+  `titan-kexec --nosmp`.
+* *Image.* 16513024 bytes, SHA-256
+  `40097d4eb20eb38956b83d58a60c717a5678161a8e133e87a791efcb0b177476`; padded
+  to 33554432 bytes,
+  `13236a69e548cf4c84199e9d8d02bb236172c9d40239c6ad2c81c4172031bfe9`
+  (`tools/flash-recovery.py --profile ram-nixos-5`).
+* *Checks.* The kernel build fails without the driver's configuration, and
+  the RAM image's kernel check finds the driver's message in the kernel. The
+  VM cases cover the same stage 0 and store, including `--nosmp`, but cannot
+  exercise the driver. The call and its argument were seen working on this
+  firmware for cpu1, from Ubuntu Touch, and MediaTek's own device tree for
+  the Titan lists the big cores, `cpu@100` to `cpu@103`, as CPUs 4 to 7, the
+  numbers MediaTek's kernel passes. Independent reviews of the driver and of
+  this procedure found one blocker, in the guard, now fixed with the other
+  findings.
+
+== Preconditions
+
+As in the link:native-kexec-trial.adoc[kexec CPU trial]: the owner present, a
+direct cable, battery at least 80%, no update pending, no recovery command
+file, both private copies of the original recovery (`4dd1c1f7...`) verified,
+and a normal-mode control-region copy right before the trial with `para`
+matching the latest copies. From step 5 until the Part 3 read-back passes: no
+system update, factory reset, `reboot recovery` or Volume Up start other than
+step 9 and the rows below.
+
+== Procedure
+
+*Part 0: the big-core number, on Ubuntu Touch.* Owner-run in `adb -d
+shell`: `sudo sh -c 'echo 0 > /sys/devices/system/cpu/cpu4/online; sleep 2;
+echo 1 > /sys/devices/system/cpu/cpu4/online; cat
+/sys/devices/system/cpu/online'`, which must print `0-7`. Then, read-only,
+the kernel log and the firmware log, read without blocking (`dd
+iflag=nonblock`). The firmware log must show the call for CPU 4 powering
+down `core 1.0` (`mt_core_ops: cpu=4` and `spmc: power off core 1.0
+successfully`); otherwise the trial ends here, before anything is written.
+
+*Part 1: write the image.* Steps 1 to 7 of the
+link:repo-kernel-trial.adoc[repository-kernel trial], with `--profile
+ram-nixos-5` and the image
+`native-ram-image-v6/UNTESTED-UNSIGNED-native-ram.img`; step 7 must read
+recovery back as `13236a69...`, with boot and dtbo unchanged.
+
+*Part 2: run the session.*
+
+[start=8]
+. *Listen:* start `tools/ram-nixos.py` as its own job, which reports as soon
+  as SSH answers, with the private copy of the store squashfs, its pinned size
+  and SHA-256, a new private output directory and the dedicated key; and a
+  watcher that records every USB device change and whether Ubuntu Touch or
+  fastboot appears after the image.
+. *Start, owner-run:* keep the cable connected, power the phone off from
+  Ubuntu Touch, hold Volume Up and press Power, and release both once the
+  unlocked-state warning appears; allow the accessory if macOS asks. No
+  confirmation is needed: the session starts when SSH answers.
+. *Session:* at once and only once `titan-session end-in 40`; then the
+  records of the link:native-kexec-trial.adoc[kexec CPU trial], which must
+  include the driver's `powering down cores after CPU hotplug`. Read-only:
+  nothing written in sysfs, debugfs or configfs, and no debugfs register
+  dumps, with the exceptions of the next two steps.
+. *CPU restart tests, writing sysfs, guarded:* an ordinary restart would
+  block behind a write stuck in the firmware, since the write holds the CPU
+  hotplug lock; two guards restart the phone through the kernel's emergency
+  restart instead.
+** Set `sysctl kernel.panic_on_rcu_stall=1`: a core stuck in the firmware
+   stalls RCU, so the kernel panics after about 30 to 40 seconds and restarts
+   five seconds later (`panic=5`).
+** Copy the test script to `/run/cputest.sh`. Run with CPU numbers, it starts
+   the guard in its own session and process group, pinned to cpu3: `taskset
+   -c 3 setsid sh -c 'sleep 60 && echo b > /proc/sysrq-trigger' </dev/null
+   >/dev/null 2>&1 &`, and checks that the group lives. It then writes `0`
+   to each listed CPU's `online`, pinned to cpu0, prints `offline`, writes
+   `1` to each and prints `online`, logging each write's status and uptime.
+   Finally it ends the guard's whole process group and prints `guard ended`.
+   cpu0 and cpu3 are never taken offline, so a hang in the writer's CPU
+   cannot hold the guard's timer. The script runs detached (`setsid bash
+   /run/cputest.sh ... </dev/null >/run/cputest.out 2>&1 &`), and its output
+   file is polled over SSH.
+** Check the guard first: the same command with `sleep 5` and `h` must log
+   `sysrq: HELP` within ten seconds, and the dry run's group must have ended.
+** Stream the kernel log to the Mac (`dmesg --follow` over SSH, as its own
+   job) for the rest of the step and step 12, since an emergency restart
+   erases it.
+** Before each run: the CPU temperature below 55 °C and at least ten minutes
+   left to the session deadline. Run `cputest.sh 1`, then `cputest.sh 4`.
+   Each run must print `online` as `0-7` and `guard ended`, and for each
+   core taken offline the kernel log must show the driver's `before` line,
+   `returned 0x0` and its `after` line, with none of `not off for PSCI`, `not
+   in WFI`, `unexpected MPIDR` or `not supported`. If a run fails any of
+   this, even with the core back, save the kernel log and go to the end step
+   without a kexec. While a run is in progress, nothing else reads a CPU's
+   own `online` file, which takes the lock a stuck write would hold.
+. *Wide test, writing sysfs, guarded:* `cputest.sh 1 2 4 5 6 7` under the
+  same conditions and checks: all but cpu0 and cpu3, so the whole big
+  cluster at once and most of what a kexec turns off, while a guard can
+  still act. Afterwards the guards stay as they are; save the kernel log and
+  stop the stream.
+. *Kexec A, `kexec_file_load`:* copy the payload's `Image` and
+  `initramfs.cpio.gz` into `/run/kexec`, run `strace -f -e
+  trace=kexec_load,kexec_file_load titan-kexec /run/kexec/Image <its SHA-256>
+  /run/kexec/initramfs.cpio.gz <its SHA-256> titan_kexec=a`, which must show
+  `kexec_file_load`, then `systemctl kexec`; the driver's lines for cpu1 to
+  cpu7 are lost with the old kernel's log. Once the image's USB device has
+  left, start `tools/ram-nixos.py` again as its own job with a new output
+  directory. Expected: the device returns within about a minute, stage 0
+  takes the push and SSH answers; then the records, which should show eight
+  CPUs and no `failed to come online`.
+. *Kexec B, `kexec_load`:* only if the system from kexec A runs, answers
+  SSH, has all eight CPUs, and shows the same `OF: reserved mem` lines and
+  reserved-memory nodes as the first boot. As in the kexec CPU trial's kexec
+  A: copy the payload into `/run/kexec` and the running tree with `cp
+  /sys/firmware/fdt /run/kexec/fdt.dtb`, run `titan-kexec --dtb
+  /run/kexec/fdt.dtb <its SHA-256> /run/kexec/Image <its SHA-256>
+  /run/kexec/initramfs.cpio.gz <its SHA-256> titan_kexec=b` under the same
+  `strace`, which must show `kexec_load` and its segments' addresses, then
+  `systemctl kexec`, the push helper as its own job once the device has
+  left, and the records. The kexec-tools purgatory checks the segments'
+  SHA-256 with the caches off, which may take minutes.
+. *End:* `titan-session end-in 1`; the session deadline must restart the
+  phone into Ubuntu Touch within about two minutes. Only if it has not after
+  three minutes, `titan-session end`.
+
+*Part 3: restore.* From Ubuntu Touch, `sudo /sbin/reboot bootloader`
+(owner-run); then, as in the earlier trials, write the preserved original
+with the `original-recovery` profile, return, and read recovery back as
+`4dd1c1f7...`, with boot and dtbo unchanged.
+
+*Part 4: compare.* A normal-mode control-region copy after Part 3, compared
+with the one from step 2 (`expdb` changes on every boot).
+
+== Stop conditions
+
+The repository-kernel trial's general stop conditions apply. This table
+replaces the kexec CPU trial's:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The session ends with the restart at the moved deadline, and Ubuntu Touch
+starts
+|The expected outcome. Go to Part 3.
+|The restart at the moved deadline does not come within three minutes
+|Record it, end with `titan-session end`, wait for Ubuntu Touch, then Part 3.
+|The CPU temperature passes 60 °C
+|End with `titan-session end-in 1` at once, wait for Ubuntu Touch, then
+Part 3.
+|In Part 0, cpu4 does not come back, or the firmware log does not show
+`core 1.0` for CPU 4
+|Stop: the trial ends before Part 1, with nothing written. A reboot of
+Ubuntu Touch brings back a missing core.
+|The driver is not registered in the first boot, or the guard's dry run does
+not log `sysrq: HELP`
+|Go to the end step without writing sysfs or a kexec.
+|A core does not come back online, or a run's output or the driver's lines
+fail the checks of step 11
+|Record the kernel log and go to the end step without a kexec.
+|A guarded run does not finish, and the phone restarts within about 75
+seconds
+|The guard's emergency restart, or the RCU-stall panic. Keep the streamed
+kernel log; wait for Ubuntu Touch, read its boot reason, then Part 3 without
+retrying.
+|A guarded run does not finish, and the phone has not restarted two minutes
+later
+|Neither guard could restart it, perhaps blocked by the stuck call, and no
+session deadline can act while the write holds the hotplug lock. At once,
+apply the row for neither Ubuntu Touch nor fastboot appearing.
+|`titan-kexec` refuses or the load fails
+|Record the output and go to the end step. Never run `kexec` by hand.
+|The USB device appears, but the network or the push never completes
+|Stage 0 restarts at its 600-second deadline, or at once after a refusal it
+reports on the status port. Keep the helper's output; wait for Ubuntu Touch,
+then Part 3 without retrying.
+|The push completes, then the phone restarts before SSH answers
+|NixOS crashed or refused a disk. Keep the helper's output; wait for Ubuntu
+Touch, then Part 3 without retrying.
+|SSH never answers, or stops answering during a session, outside a guarded
+run
+|The session deadline restarts the phone 20 minutes after each boot, or 40
+minutes after the extension (plus up to half a minute), and stage 0's helper
+75 minutes after each boot regardless; wait for Ubuntu Touch, then Part 3.
+|After either `systemctl kexec`, the image's USB device has not left within
+one minute
+|Userspace has not finished its shutdown: the gadget is detached before the
+kernel's own shutdown, where the driver's calls run. The hard-deadline helper
+may still run; wait for Ubuntu Touch until the 80-minute row, then Part 3.
+|After either `systemctl kexec`, the image's USB device returns but the push
+or SSH fails
+|The kexec'd stage 0 restarts at its 600-second deadline, and its NixOS at
+the 20-minute default; wait for Ubuntu Touch, then Part 3 without retrying.
+|After kexec A, neither the image's USB device, Ubuntu Touch nor fastboot
+appears within five minutes, or after kexec B within 15 minutes
+|The kernel stopped between the shutdown, which ends the hard-deadline
+helper, and the next stage 0, where no deadline runs; this includes a hang in
+the driver's calls during the old kernel's shutdown. Hold Power about ten
+seconds, but expect nothing; then unplug, let the battery run down, charge,
+start Ubuntu Touch normally and go to Part 3.
+|Ubuntu Touch starts without the USB device appearing
+|Read the boot reason from `/proc/cmdline`. Only `PowerKey` allows one retry
+of step 9. Any other reason may mean the bootloader refused the image or the
+kernel crashed: record it, then Part 3 without retrying.
+|A MediaTek boot ROM or preloader USB device (`0e8d:0003` or `0e8d:2000`)
+stays present
+|The phone is in the SoC's download mode. Do not interact with it or run any
+flashing tool. Hold Power about ten seconds; if it persists, stop and report.
+|The phone powers off
+|A critical temperature trip powers it off, since nothing throttles the CPUs.
+Let it cool, start Ubuntu Touch normally with Power, then Part 3.
+|The screen shows a bootloader error or a crash-dump screen
+|Photograph or note it, then apply the next row.
+|Neither Ubuntu Touch nor fastboot appears within 80 minutes of step 9 or of
+kexec A, or 90 minutes of kexec B, whose purgatory delays the next boot
+|Hold Power about ten seconds, but expect nothing: this kernel does not arm
+the PMIC long-press reset, so it works only if the bootloader left it armed,
+which is unverified. Then unplug, let the battery run down, charge, start
+Ubuntu Touch normally and go to Part 3.
+|===
+
+== Residual risks
+
+* The firmware call has run on this phone only from MediaTek's kernel. The
+  driver passes the numbers MediaTek's kernel passes, by MediaTek's own
+  device tree; the firmware's reading of them is seen for cpu1 and, in Part
+  0, for cpu4 only. A wrong core number would power down a different core,
+  and the WFI check cannot catch it, since idle cores also wait in WFI: a
+  running core would hang or reset the phone.
+* MediaTek's firmware waits for the power controller without a time limit.
+  A hang in a call during the CPU tests is covered by the guard only if the
+  firmware's system reset is not blocked by the stuck call, which is
+  unverified. Every kexec of this image, with `--nosmp` or not, makes the
+  driver's calls for cpu1 to cpu7 in the old kernel's shutdown, without any
+  guard, since userspace has ended; the wide test makes the same calls for
+  all but cpu3 first, while the guards can act.
+* The big cluster stays powered, with its PLL and regulators on, while all
+  its cores are off, unlike under MediaTek's kernel, which also switches both
+  clusters' PLLs to hardware mode at boot; the wide test and kexec A show
+  whether the firmware starts cores in such a cluster.
+* The SPM's WFI bits are used as MediaTek's register definitions name them;
+  MediaTek's kernel does not read them at run time. If they never set, the
+  driver leaves the core powered and the test fails safely; the 20 ms wait
+  keeps the call no sooner than MediaTek's kernel made it if they set early.
+* As in the kexec CPU trial: the tree-replacing `kexec_load` path has not run
+  anywhere, devices left in states the next kernel does not expect, a hang
+  from a shutdown until the next stage 0 without any deadline, and sessions
+  with no frequency scaling, throttling or charger driver.
+
+== What this can and cannot show
+
+Success gives the native kernel working CPU hotplug and kexec'd kernels with
+all eight CPUs, and the first run of the tree-replacing kexec, which together
+make kexec usable for trying new kernels and device trees without flashing. It
+does not show suspend, CPU idle states beyond the defaults, or MediaTek's
+cluster power-down.

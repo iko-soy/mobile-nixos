@@ -93,6 +93,12 @@ hardware works under NixOS.
   never reaching the kernel. The native kernel cannot restart a core it has
   turned off, with or without kexec, and the kernel's placement is not the
   cause; both kexecs were skipped, and the original recovery was restored.
+  MediaTek's kernel powers such a core down with a firmware call, which
+  Ubuntu Touch on the phone confirmed.
+* The link:native-cpu-power-trial.adoc[CPU power-down trial], proposed, not
+  run: the native kernel with a driver that makes the same call, testing CPU
+  restarts and a whole cluster under a guard, then kexecs with all eight
+  CPUs and the first tree-replacing kexec.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

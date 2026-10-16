@@ -1,0 +1,183 @@
+Subject: [PATCH] soc: mediatek: power down MT6771 cores after CPU hotplug
+
+MediaTek's BL31 for the MT6771 leaves a core powered after PSCI CPU_OFF
+until the kernel calls MTK_SIP_POWER_DOWN_CORE (SMC 0xC2000212) with the
+core, as MediaTek's kernel does from a CPU hotplug teardown callback once
+the CPU is dead; a later CPU_ON then returns success but never resets the
+core (native-kexec-trial.adoc). Make the same call at the same point on
+the Unihertz Titan, once PSCI AFFINITY_INFO reports the core off and the
+SPM reports it in WFI, no sooner than MediaTek's kernel was seen to, and
+log the core's SPM power state before and after.
+---
+--- a/drivers/soc/mediatek/Kconfig
++++ b/drivers/soc/mediatek/Kconfig
+@@ -89,4 +89,15 @@
+ 	  information about the SoC to the userspace including the
+ 	  manufacturer name, marketing name and soc name.
+ 
++config MTK_MT6771_CPU_POWER
++	bool "MediaTek MT6771 core power-down after CPU hotplug"
++	depends on ARM64 && HOTPLUG_CPU
++	select MFD_SYSCON
++	help
++	  MediaTek's firmware for the MT6771 leaves a core powered after PSCI
++	  CPU_OFF until the kernel asks it to power the core down. Without
++	  that call, a CPU taken offline, or left by kexec, does not start
++	  again. This makes the call once the core is in WFI. It acts only
++	  on the Unihertz Titan, whose firmware it was checked against.
++
+ endmenu
+--- a/drivers/soc/mediatek/Makefile
++++ b/drivers/soc/mediatek/Makefile
+@@ -9,3 +9,4 @@
+ obj-$(CONFIG_MTK_MMSYS) += mtk-mutex.o
+ obj-$(CONFIG_MTK_SVS) += mtk-svs.o
+ obj-$(CONFIG_MTK_SOCINFO) += mtk-socinfo.o
++obj-$(CONFIG_MTK_MT6771_CPU_POWER) += mt6771-cpu-power.o
+--- /dev/null
++++ b/drivers/soc/mediatek/mt6771-cpu-power.c
+@@ -0,0 +1,144 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Core power-down after CPU hotplug on the MediaTek MT6771
++ *
++ * MediaTek's BL31 for the MT6771 does not cut a core's power on PSCI CPU_OFF:
++ * the core waits in WFI until the kernel asks the firmware to power it down,
++ * as MediaTek's own kernel does once the CPU is dead. A core left powered is
++ * not reset by a later CPU_ON, which returns success while the core never
++ * starts. This makes the same firmware call at the same point of CPU hotplug,
++ * once PSCI reports the core off and the SPM reports it in WFI, and logs the
++ * core's power state around it.
++ */
++
++#define pr_fmt(fmt) "mt6771-cpu-power: " fmt
++
++#include <linux/arm-smccc.h>
++#include <linux/bits.h>
++#include <linux/cache.h>
++#include <linux/cpuhotplug.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++#include <linux/init.h>
++#include <linux/mfd/syscon.h>
++#include <linux/of.h>
++#include <linux/printk.h>
++#include <linux/psci.h>
++#include <linux/regmap.h>
++#include <linux/soc/mediatek/mtk_sip_svc.h>
++#include <uapi/linux/psci.h>
++#include <asm/cputype.h>
++#include <asm/smp.h>
++
++#define MT6771_SIP_POWER_DOWN_CORE	MTK_SIP_SMC_CMD(0x212)
++
++/* SPM registers in the scpsys block, named as in MediaTek's kernel. */
++#define SPM_CPU_IDLE_STA		0x174
++#define SPM_PWR_STATUS			0x180
++#define SPM_PWR_STATUS_2ND		0x184
++#define SPM_CPU_PWR_STATUS		0x188
++#define SPM_CPU_PWR_STATUS_2ND		0x18c
++#define SPM_MP0_CPU0_PWR_CON		0x208
++#define SPM_MP1_CPU0_PWR_CON		0x21c
++#define SPM_CORE_STANDBYWFI(core)	BIT(10 + (core))
++
++static struct regmap *spm __ro_after_init;
++static bool unsupported;
++
++static void mt6771_cpu_power_log(unsigned int cpu, unsigned int core,
++				 const char *when)
++{
++	unsigned int con = core < 4 ? SPM_MP0_CPU0_PWR_CON + 4 * core :
++				      SPM_MP1_CPU0_PWR_CON + 4 * (core - 4);
++	unsigned int idle = 0, status = 0, status_2nd = 0;
++	unsigned int cpu_status = 0, cpu_status_2nd = 0, power = 0;
++
++	regmap_read(spm, SPM_CPU_IDLE_STA, &idle);
++	regmap_read(spm, SPM_PWR_STATUS, &status);
++	regmap_read(spm, SPM_PWR_STATUS_2ND, &status_2nd);
++	regmap_read(spm, SPM_CPU_PWR_STATUS, &cpu_status);
++	regmap_read(spm, SPM_CPU_PWR_STATUS_2ND, &cpu_status_2nd);
++	regmap_read(spm, con, &power);
++	pr_info("CPU%u: core %u %s: idle %#x, status %#x/%#x, cpu status %#x/%#x, power control %#x\n",
++		cpu, core, when, idle, status, status_2nd, cpu_status,
++		cpu_status_2nd, power);
++}
++
++static int mt6771_cpu_power_dead(unsigned int cpu)
++{
++	u64 mpidr = cpu_logical_map(cpu);
++	unsigned int cluster = MPIDR_AFFINITY_LEVEL(mpidr, 1);
++	unsigned int core = MPIDR_AFFINITY_LEVEL(mpidr, 0);
++	struct arm_smccc_res res;
++	unsigned int idle;
++
++	if (unsupported)
++		return 0;
++	if (MPIDR_AFFINITY_LEVEL(mpidr, 3) || MPIDR_AFFINITY_LEVEL(mpidr, 2) ||
++	    cluster > 1 || core > 3) {
++		pr_warn("CPU%u: unexpected MPIDR %#llx; leaving it powered\n",
++			cpu, mpidr);
++		return 0;
++	}
++	/* MediaTek's kernel passes the core as cluster * 4 + core. */
++	core += cluster * 4;
++
++	mt6771_cpu_power_log(cpu, core, "before");
++	/* Teardown also runs when a bring-up fails; only a dead core qualifies. */
++	if (psci_ops.affinity_info(mpidr, 0) != PSCI_0_2_AFFINITY_LEVEL_OFF) {
++		pr_warn("CPU%u: core %u not off for PSCI; leaving it powered\n",
++			cpu, core);
++		return 0;
++	}
++	if (regmap_read_poll_timeout(spm, SPM_CPU_IDLE_STA, idle,
++				     idle & SPM_CORE_STANDBYWFI(core), 10, 100000)) {
++		pr_warn("CPU%u: core %u not in WFI; leaving it powered\n",
++			cpu, core);
++		return 0;
++	}
++	/* No sooner than MediaTek's kernel was seen to make the call. */
++	msleep(20);
++
++	arm_smccc_smc(MT6771_SIP_POWER_DOWN_CORE, core, 0, 0, 0, 0, 0, 0, &res);
++	pr_info("CPU%u: firmware power-down of core %u returned %#lx\n",
++		cpu, core, res.a0);
++	if (res.a0 == SMCCC_RET_NOT_SUPPORTED) {
++		pr_warn("firmware call not supported; no further calls\n");
++		unsupported = true;
++		return 0;
++	}
++	mt6771_cpu_power_log(cpu, core, "after");
++
++	return 0;
++}
++
++static int __init mt6771_cpu_power_init(void)
++{
++	int ret;
++
++	if (!of_machine_is_compatible("unihertz,titan"))
++		return 0;
++
++	if (arm_smccc_1_1_get_conduit() != SMCCC_CONDUIT_SMC ||
++	    !psci_ops.affinity_info) {
++		pr_warn("no SMC conduit or PSCI AFFINITY_INFO\n");
++		return -ENODEV;
++	}
++
++	spm = syscon_regmap_lookup_by_compatible("mediatek,mt8183-scpsys");
++	if (IS_ERR(spm)) {
++		pr_warn("no SPM registers: %pe\n", spm);
++		return PTR_ERR(spm);
++	}
++
++	/* Teardown runs on a surviving CPU once the dying CPU is dead. */
++	ret = cpuhp_setup_state_nocalls(CPUHP_BP_PREPARE_DYN,
++					"soc/mt6771-cpu-power:dead",
++					NULL, mt6771_cpu_power_dead);
++	if (ret < 0)
++		return ret;
++
++	pr_info("powering down cores after CPU hotplug\n");
++	return 0;
++}
++late_initcall(mt6771_cpu_power_init);

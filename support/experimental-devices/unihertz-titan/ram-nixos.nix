@@ -234,7 +234,13 @@ let
     if grep -qx CONFIG_BLK_DEV_NBD=y "$config"; then
       case " ${imageCmdline} " in *" nbd.nbds_max=0 "*) ;; *) echo "NBD needs nbd.nbds_max=0" >&2; exit 1 ;; esac
     fi
-    grep -E '^CONFIG_(BLK_DEV_LOOP|ZRAM|BLK_DEV_NBD|MMC_BLOCK)=' "$config" > "$out"
+    # Cores turned off for kexec or hotplug start again only after the
+    # firmware has powered them down (native-kexec-trial.adoc).
+    if ! grep -qx CONFIG_MTK_MT6771_CPU_POWER=y "$config" \
+      || ! grep -aq 'powering down cores after CPU hotplug' ${kernel}/Image; then
+      echo "The kernel lacks the MT6771 core power-down driver" >&2; exit 1
+    fi
+    grep -E '^CONFIG_(BLK_DEV_LOOP|ZRAM|BLK_DEV_NBD|MMC_BLOCK|MTK_MT6771_CPU_POWER)=' "$config" > "$out"
   '';
   # titan-dtb-check against synthetic trees: what it must accept and refuse.
   dtbCheckTests = pkgs.runCommand "titan-ram-dtb-check-tests" {

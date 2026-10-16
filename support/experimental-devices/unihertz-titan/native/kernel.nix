@@ -1,4 +1,4 @@
-{ pkgs, usbDebug ? true, kexec ? false }:
+{ pkgs, usbDebug ? true, kexec ? false, cpuPowerDown ? false }:
 
 # Build-only native-route kernel (../native-n0.adoc): Linux v7.3-rc3 with the
 # postmarketOS MT6771 patches, the T-PHY software role-switch patch from the
@@ -11,7 +11,10 @@
 # the kernel log and slowing USB networking (../native-ram-trial.adoc). With
 # kexec = true, CONFIG_KEXEC adds the kexec_load call, which takes a device
 # tree from userspace; the donor's kexec_file_load always reuses the
-# bootloader's tree.
+# bootloader's tree. With cpuPowerDown = true, patch 0005 adds a driver that
+# asks MediaTek's firmware to power down each core that CPU hotplug or kexec
+# has turned off, as MediaTek's kernel does; without it such a core never
+# starts again (../native-kexec-trial.adoc).
 let
   inherit (pkgs) lib fetchurl;
   cross = pkgs.pkgsCross.aarch64-multiplatform;
@@ -33,7 +36,7 @@ let
   ];
 in
 cross.stdenv.mkDerivation {
-  pname = "titan-native-kernel${lib.optionalString (!usbDebug) "-quiet-usb"}${lib.optionalString kexec "-kexec"}";
+  pname = "titan-native-kernel${lib.optionalString (!usbDebug) "-quiet-usb"}${lib.optionalString kexec "-kexec"}${lib.optionalString cpuPowerDown "-cpu-power"}";
   version = "7.3.0-rc3";
   src = fetchurl {
     url = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-7.3-rc3.tar.gz";
@@ -46,7 +49,8 @@ cross.stdenv.mkDerivation {
       "e11f14be74f56bce72f78799880ecff2bc284d95a3e06c51c9c189c383c0f9a3")
     ./patches/0003-phy-mediatek-tphy-add-software-role-switching.patch
     ./patches/0004-phy-mediatek-tphy-keep-the-forced-role-without-a-role-switch.patch
-  ];
+  ] ++ lib.optional cpuPowerDown
+    ./patches/0005-soc-mediatek-power-down-mt6771-cores-after-cpu-hotplug.patch;
   postPatch = ''
     patchShebangs scripts
     cp ${./dts/mt6771-unihertz-titan.dts} arch/arm64/boot/dts/mediatek/mt6771-unihertz-titan.dts
@@ -68,8 +72,9 @@ cross.stdenv.mkDerivation {
     scripts/config --file .config \
       --disable DEBUG_INFO_BTF --disable DEBUG_INFO_BTF_MODULES \
       --disable DEBUG_INFO_DWARF5 --disable DEBUG_INFO_COMPRESSED_ZSTD \
-      --disable DEBUG_INFO --enable DEBUG_INFO_NONE${lib.optionalString (!usbDebug) " --disable USB_MTU3_DEBUG"}${lib.optionalString kexec " --enable KEXEC"}
+      --disable DEBUG_INFO --enable DEBUG_INFO_NONE${lib.optionalString (!usbDebug) " --disable USB_MTU3_DEBUG"}${lib.optionalString kexec " --enable KEXEC"}${lib.optionalString cpuPowerDown " --enable MTK_MT6771_CPU_POWER"}
     make ${lib.escapeShellArgs makeFlags} olddefconfig
+    ${lib.optionalString cpuPowerDown "grep -qx CONFIG_MTK_MT6771_CPU_POWER=y .config"}
     runHook postConfigure
   '';
   buildPhase = ''

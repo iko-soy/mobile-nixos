@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
-This host helper writes only the `recovery` partition, and only one of ten
+This host helper writes only the `recovery` partition, and only one of eleven
 pinned full-partition images: the USB probe envelope, the same probe with the
 repository-built kernel, the native route's first modern-kernel image, its
 diagnostic image, its first RAM NixOS image, the RAM NixOS working environment,
-the same with a larger kernel log or with `titan-kexec --nosmp`, or the
-offline control-region acquisition envelope, each padded with zeros to the
-partition size, or the preserved original recovery image that restores it. It
+the same with a larger kernel log, with `titan-kexec --nosmp` or with the core
+power-down driver, or the offline control-region acquisition envelope, each
+padded with zeros to the partition size, or the preserved original recovery
+image that restores it. It
 first sends fixed read-only identity queries, including the recovery
 partition's size and type, from a verified read-only private copy that it
 measures again afterwards. It never writes another partition and never issues
@@ -93,12 +94,19 @@ PROFILES = {
         "source_sha256": "c818ff886df7ce9558ed559edf5c82dc4b98f30e0a476e1ca27293084c4bead6",
         "sha256": "1b586f60e6a0cfdc23e748d77a622614bdba6a0447bcbeb7cdda2b48019f505f",
     },
-    # The same with `titan-kexec --nosmp` (current nativeRamImage): the same
-    # kernel, trees and command line; stage 0 pins the new store.
+    # The same with `titan-kexec --nosmp`: the same kernel, trees and command
+    # line; stage 0 pins the new store.
     "ram-nixos-4": {
         "source_bytes": 16510976,
         "source_sha256": "584a3bc455a37e66052d50d52c1f4e9069343354e8552ccf95994e19ac5b0b5e",
         "sha256": "38fe2e1a3693189ecb65ec62d7f0308ea3d9fcceb150251f00106921916af59a",
+    },
+    # The same with the kernel's core power-down driver, patch 0005 (current
+    # nativeRamImage): the same trees, command line, stage 0 and store.
+    "ram-nixos-5": {
+        "source_bytes": 16513024,
+        "source_sha256": "40097d4eb20eb38956b83d58a60c717a5678161a8e133e87a791efcb0b177476",
+        "sha256": "13236a69e548cf4c84199e9d8d02bb236172c9d40239c6ad2c81c4172031bfe9",
     },
     # The offline control-region acquisition envelope (control/README.adoc),
     # which restarts into the bootloader after the transfer or at its deadline,

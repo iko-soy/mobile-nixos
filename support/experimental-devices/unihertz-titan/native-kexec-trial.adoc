@@ -121,17 +121,27 @@ From the vendor kernel that Ubuntu Touch runs on the Titan, at the revision
   CPU_ON with the power controller's result (`spmc: power on core 0.1
   successfully`). Reading it consumes it, and a blocking read holds the
   driver's lock until the firmware logs again; reads must be non-blocking.
-* *Inference.* MediaTek's firmware leaves a core powered after PSCI CPU_OFF
-  until the kernel calls `MTK_SIP_POWER_DOWN_CORE`, so a later CPU_ON finds
-  the core already powered, returns success and never resets it. Generic
-  PSCI marks a core off before its final WFI, so `killed (polled 0 ms)` says
-  nothing about its power. Mainline TF-A for the related MT8183 handles core
-  power without the kernel, which this firmware evidently does not.
+* *Verified on the phone.* With the owner's approval, cpu1 was taken
+  offline and back twice on Ubuntu Touch; both times it returned
+  (`CPU1: shutdown`, `psci: CPU1 killed.`, `CPU1: Booted secondary
+  processor` two seconds later). In the firmware log, the core's own PSCI
+  CPU_OFF (`plat_affinst_off`, `psci: core 0:1 OFF`) did not cut its power.
+  18 ms later the vendor kernel's call arrived from another core
+  (`mt_core_ops: cpu=1, mode=0`), and only then did the firmware power the
+  core down (`spmc: power off core 0.1 successfully`). CPU_ON then powered it
+  on again (`spmc: power on core 0.1 successfully`, `psci: core 0:1 ON`).
+* *Inference.* Without that call, CPU_ON finds the core still powered,
+  returns success and never resets it. Generic PSCI marks a core off before
+  its final WFI, so `killed (polled 0 ms)` says nothing about its power.
+  Mainline TF-A for the related MT8183 handles core power without the
+  kernel, which this firmware does not.
 
-A native-kernel driver that makes the same call at the same point would test
-this: take cpu1 and then cpu4 offline and back, then a kexec without `nosmp`.
-Whether the vendor kernel's own round trip works on this phone, and what the
-firmware logs for the call, can be seen on Ubuntu Touch first.
+The working environment's kernel now makes the same call at the same point
+(`cpuPowerDown` in `native/kernel.nix`, patch 0005): once the SPM reports the
+dead core in WFI, it calls `MTK_SIP_POWER_DOWN_CORE` and logs the core's SPM
+power state before and after. The link:native-cpu-power-trial.adoc[CPU
+power-down trial] proposes its test on the phone: cpu1, cpu4 and the whole big
+cluster offline and back under a guard, then kexec without `nosmp`.
 
 == Questions
 

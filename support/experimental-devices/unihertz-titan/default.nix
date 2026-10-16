@@ -21,8 +21,9 @@ let
   usbDiag = import ./usb-diag.nix { inherit pkgs transport; };
   nativeKernel = import ./native/kernel.nix { inherit pkgs; };
   # The working environment's kernel: the same without the USB driver's
-  # per-transfer debug log, and with kexec_load for replacing the device tree.
-  nativeKernelEnv = import ./native/kernel.nix { inherit pkgs; usbDebug = false; kexec = true; };
+  # per-transfer debug log, with kexec_load for replacing the device tree, and
+  # with the driver that powers down cores taken offline (patch 0005).
+  nativeKernelEnv = import ./native/kernel.nix { inherit pkgs; usbDebug = false; kexec = true; cpuPowerDown = true; };
   ramNixos = import ./ram-nixos.nix { inherit pkgs; kernel = nativeKernelEnv; };
   nativeProbeImage = import ./native/probe-image.nix {
     inherit pkgs sources;

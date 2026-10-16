@@ -19,9 +19,12 @@ link:../native-ram-env-trial.adoc[the trial record]). `nativeRamImage` now
 builds it with a 4 MiB kernel log, with which the
 link:../native-kexec-trial.adoc[kexec CPU trial] found the reason: the native
 kernel cannot restart a core it has turned off, with or without kexec. It
-now also has `titan-kexec --nosmp` (flash profile `ram-nixos-4`; image
-`584a3bc4...`, store squashfs `a0afd89c...`), which has not run on the
-phone. Building it does not authorize starting it.
+now also has `titan-kexec --nosmp`, and its kernel the driver that asks the
+firmware to power down each core turned off, as MediaTek's kernel does
+(patch 0005; flash profile `ram-nixos-5`; image `40097d4e...`, store
+squashfs `a0afd89c...`), for the link:../native-cpu-power-trial.adoc[CPU
+power-down trial]; neither has run on the phone. Building it does not
+authorize starting it.
 
 [source,sh]
 ----
