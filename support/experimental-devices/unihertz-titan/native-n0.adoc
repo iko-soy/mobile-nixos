@@ -178,6 +178,8 @@ turns on `CONFIG_KEXEC`, lets `titan-session` move a session's end within a
 hard limit, and adds `titan-kexec`, so that sessions can start other kernels
 and device trees without flashing. On 2026-10-16 its trial kexec'd into the
 same kernel and stage 0 on the phone, but the kexec'd kernel brought up only
-CPU 0; finding why, with the full kernel log of a kexec'd boot, comes before
-trying replaced trees, and is the link:native-kexec-trial.adoc[kexec CPU
-trial]'s purpose.
+CPU 0. The link:native-kexec-trial.adoc[kexec CPU trial] then found that
+taking a core offline and back fails the same way without any kexec: the
+native kernel cannot restart a core it has turned off, so kexec'd kernels run
+on CPU 0 until that is solved. MediaTek's kernel registers hotplug callbacks
+for its multi-core deep idle controller, which are the first lead.

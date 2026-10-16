@@ -82,7 +82,9 @@ bindings are in the private evidence directory. Found:
   oops; bringing them up again failed or timed out in the second. Finding the
   cause needs the complete kernel log of the kexec'd boot, which needs a
   larger log buffer, and possibly a test of taking one CPU offline and back
-  during a session.
+  during a session. The link:native-kexec-trial.adoc[kexec CPU trial] ran
+  that test: a core taken offline in a normal session does not come back
+  either.
 * The kernel log wraps during boot even without the USB debug log: the
   donor configuration's driver-core debug messages fill the 128 KiB buffer.
   The image's command line should set `log_buf_len`, as the diagnostic image

@@ -1,7 +1,9 @@
 = Kexec CPU trial
 
-Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-16: *run once with the owner's explicit approval; the CPU
+restart test answered the question, so both kexecs were skipped as the
+procedure requires. See <<result,the result>>.* Each repetition needs the
+owner's explicit approval of this exact procedure.
 
 The link:native-ram-env-trial.adoc[working-environment trial] ran the first
 kexec on the Titan: through `kexec_file_load`, reusing the bootloader's tree,
@@ -22,6 +24,75 @@ bootloader does (`0x40080000`, not 2 MiB aligned), so a kexec failure alone
 cannot tell a wrong address from a firmware that does not restart cores. The original
 recovery is then restored. Ubuntu Touch's boot and `dtbo` partitions are never
 written, and Linux never sees the phone's storage.
+
+[[result]]
+== Result (2026-10-16)
+
+The owner approved the procedure and ran the partition reads, the entries, the
+Volume Up start and the unlocks; watchers ran the fastboot steps, the push and
+the USB log, and the session ran over SSH from the Mac.
+
+* *Preconditions.* The baseline found the battery full and charging, no
+  update pending or running and empty recovery command directories; its one
+  failed unit, `console-setup`, had failed in both earlier baselines too.
+  Step 2 found boot, recovery and dtbo identical to their preserved copies,
+  and no control region changed since the latest copy.
+* *Part 1.* `fastboot flash recovery` reported `Writing 'recovery' OKAY`, and
+  step 7 read recovery back as `1b586f60...`, with boot and dtbo unchanged.
+* *Question 1, yes.* After the Volume Up start the boot ROM and preloader
+  passed through, and the image's USB device appeared 50 seconds after Ubuntu
+  Touch left. Stage 0 verified the pushed store, SSH answered by 48 seconds
+  of uptime, and `titan-session end-in 40` moved the end to 2448 seconds. The
+  kernel log was complete from `[    0.000000]` and reported `log buffer data
+  + meta data: 4194304 + 14680064 = 18874368 bytes`. The firmware reported
+  PSCI 1.0 and SMC Calling Convention 1.1, KASLR was off for lack of a seed,
+  and the kernel's code sat at `0x40080000`-`0x4211ffff`. All eight CPUs came
+  up within 10 ms: cpu0 to cpu3 are Cortex-A53, cpu4 to cpu7 Cortex-A73.
+  NixOS was `running` with no failed unit, at 35 °C, and the command line
+  carried every setting the records require. macOS re-enumerated the device
+  for two seconds at 54 seconds of uptime, with no reset on the phone; the
+  first attempt at the records failed on the missing link address and was
+  repeated.
+* *Question 2, no.* Writing `0` to cpu1's `online` took it offline, and the
+  kernel logged `psci: CPU1 killed (polled 0 ms)`: the firmware reported the
+  core off at once. Writing `1` failed after 5.3 seconds with `CPU1: failed to
+  come online` and `CPU1: failed in unknown state : 0x0`. No `psci: failed to
+  boot` line appeared, so the firmware's CPU_ON call returned success, but the
+  core never reached the kernel's entry code, not even far enough to record a
+  failure. This is the five-second timeout that the seven secondary CPUs met
+  after the working-environment trial's kexec, here with the kernel at the
+  bootloader's own address and no kexec. The system stayed `running` on seven
+  CPUs, at 35 °C, with no further kernel message. As the procedure requires,
+  cpu4 was not tried and neither kexec ran; the failed core also counts as
+  stuck, so this kernel would have refused any kexec.
+* *Questions 3 and 4.* Not run, as above.
+* *Question 5, yes.* `titan-session end-in 1` at 139 seconds of uptime moved
+  the restart to 199 seconds; the image's device left 77 seconds later, the
+  preloader passed through, and Ubuntu Touch booted (`bootreason=reboot`).
+  From Ubuntu Touch, `sudo /sbin/reboot bootloader` reached fastboot, the
+  preserved original was written (`Writing 'recovery' OKAY`) and Ubuntu Touch
+  returned. The read-back found recovery `4dd1c1f7...`, with boot and dtbo
+  unchanged throughout; of the control regions only `expdb` changed, as after
+  every boot.
+
+Afterwards, read-only over ADB: Ubuntu Touch kept all eight CPUs online
+through a 20-second sample, and its kernel registers CPU hotplug callbacks
+that the native kernel lacks: `hps/cpuhotplug`, `ppm/cpuhp` and two
+`mcdi_cb` states, one among the teardown states and one among the bring-up
+states. They belong to MediaTek's hotplug policy, performance and power
+manager and multi-core deep idle (MCDI) drivers; whether the MCDI callbacks
+are what lets a core restart is not shown.
+
+The session data and kernel logs are in the private evidence directory. This
+shows that on the Titan the native kernel cannot restart a secondary CPU it
+has turned off through PSCI, for a kexec or for CPU hotplug alike, and that
+the kernel's placement is not the cause. A kexec therefore leaves the next
+kernel with CPU 0 only, after a five-second wait for each other core, and
+that kernel refuses any further kexec, since it counts the cores as stuck.
+Next: read what the MCDI hotplug callbacks do in MediaTek's kernel source for
+the MT6771; and, for kexec in the meantime, consider letting `titan-kexec`
+start kernels with `nosmp`, so that they skip the cores, boot without the
+wait and can kexec again.
 
 == Questions
 

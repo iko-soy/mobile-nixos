@@ -16,9 +16,10 @@ another kernel without flashing. It ran on 2026-10-16 with the owner's
 approval: the session deadline restarted the phone by itself, and a kexec
 into the same kernel and stage 0 worked but brought up only one CPU (see
 link:../native-ram-env-trial.adoc[the trial record]). `nativeRamImage` now
-builds it with a 4 MiB kernel log, for the link:../native-kexec-trial.adoc[kexec
-CPU trial], which looks for the reason. Building it does not authorize
-starting it.
+builds it with a 4 MiB kernel log, with which the
+link:../native-kexec-trial.adoc[kexec CPU trial] found the reason: the native
+kernel cannot restart a core it has turned off, with or without kexec.
+Building it does not authorize starting it.
 
 [source,sh]
 ----

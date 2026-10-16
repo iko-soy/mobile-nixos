@@ -87,10 +87,12 @@ hardware works under NixOS.
   same kernel and stage 0 without the bootloader but brought up only one of
   the eight CPUs; the tree-replacing kexec was therefore skipped. The
   original recovery was restored.
-* The link:native-kexec-trial.adoc[kexec CPU trial], proposed, not run: the
-  same system with a 4 MiB kernel log, kexecing first through `kexec_load`
-  with a copy of the running tree and then through `kexec_file_load`, to find
-  out why the secondary CPUs did not come back.
+* The link:native-kexec-trial.adoc[kexec CPU trial], run on 2026-10-16 with
+  the owner's approval: taking cpu1 offline and back in a healthy session
+  failed the same way, with the firmware's CPU_ON call accepted but the core
+  never reaching the kernel. The native kernel cannot restart a core it has
+  turned off, with or without kexec, and the kernel's placement is not the
+  cause; both kexecs were skipped, and the original recovery was restored.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
