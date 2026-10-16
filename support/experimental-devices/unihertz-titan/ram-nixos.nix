@@ -8,27 +8,34 @@
 # x86_64 with virtio networking.
 let
   inherit (pkgs) lib;
-  nixosSystem = { system, interface, authorizedKey, deadline }:
+  nixosSystem = { system, interface, authorizedKey, defaultSeconds, hardDeadlineSeconds }:
     (import "${pkgs.path}/nixos/lib/eval-config.nix" {
       system = null;
       modules = [
-        (import ./ram-nixos/configuration.nix { inherit interface authorizedKey deadline; })
+        (import ./ram-nixos/configuration.nix { inherit interface authorizedKey defaultSeconds hardDeadlineSeconds; })
         { nixpkgs.hostPlatform = system; }
       ];
     }).config.system.build.toplevel;
   snakeOil = import "${pkgs.path}/nixos/tests/ssh-keys.nix" pkgs;
+  # Sessions end 20 minutes after boot unless titan-session moves the end,
+  # and at the latest at the hard deadline: 75 minutes until hardware has
+  # shown a checker-driven restart and the thermal behaviour of a longer run.
+  phoneHardDeadline = 4500;
   phoneSystem = nixosSystem {
     system = "aarch64-linux";
     interface = "usb0";
     authorizedKey = lib.fileContents ./ram-nixos/authorized_keys;
-    deadline = "20min";
+    defaultSeconds = 1200;
+    hardDeadlineSeconds = phoneHardDeadline;
   };
-  # Short enough for the VM case to observe the restart.
+  # Short enough for the VM cases to observe the restarts.
+  vmHardDeadline = 840;
   vmSystem = nixosSystem {
     system = "x86_64-linux";
     interface = "eth0";
     authorizedKey = snakeOil.snakeOilEd25519PublicKey;
-    deadline = "8min";
+    defaultSeconds = 480;
+    hardDeadlineSeconds = vmHardDeadline;
   };
   squashfs = name: toplevel: pkgs.callPackage "${pkgs.path}/nixos/lib/make-squashfs.nix" {
     fileName = name;
@@ -40,8 +47,10 @@ let
   vmSquashfs = squashfs "titan-ram-nixos-VM-TEST-ONLY" vmSystem;
   # The phone kernel builds NBD in with 16 devices by default; stage 0 and
   # NixOS accept only loop, RAM and zram devices, so none may be created.
-  # systemd reads its crash action here before any configuration.
-  imageCmdline = "nbd.nbds_max=0 systemd.crash_action=reboot";
+  # systemd reads its crash action here before any configuration. An oops,
+  # such as a CPU that fails to go offline for kexec, panics and so restarts
+  # after the panic timeout instead of hanging; kexec reuses this line.
+  imageCmdline = "nbd.nbds_max=0 systemd.crash_action=reboot panic_on_oops=1";
   mkDeadline = staticPkgs: name: staticPkgs.stdenv.mkDerivation {
     pname = name;
     version = "1";
@@ -82,8 +91,7 @@ let
     udc = "11201000.usb";
     dataInterface = "";
     deadlineSeconds = 600;
-    # Five minutes after the NixOS timer's clean restart.
-    hardDeadlineSeconds = 1500;
+    hardDeadlineSeconds = phoneHardDeadline;
   };
   vmStage0 = stage0 {
     name = "titan-ram-stage0-VM-TEST-ONLY";
@@ -92,11 +100,11 @@ let
     udc = "dummy_udc.0";
     dataInterface = "eth0";
     deadlineSeconds = 150;
-    hardDeadlineSeconds = 600;
+    hardDeadlineSeconds = vmHardDeadline;
   };
   applets = [
     "sh" "mount" "mkdir" "cat" "ln" "ip" "udhcpd" "nc" "head" "stat" "sha256sum"
-    "rm" "sleep" "reboot" "kill" "switch_root" "env" "timeout" "sync" "insmod"
+    "rm" "sleep" "reboot" "kill" "switch_root" "env" "timeout" "sync" "insmod" "ls" "tr"
   ];
   mkRamdisk = { name, busybox, deadline, init, machine, modules ? [ ] }:
     pkgs.runCommand name {
@@ -206,6 +214,14 @@ let
       --output "$NIX_BUILD_TOP/ram-results"
     cp -r "$NIX_BUILD_TOP/ram-results" "$out"
   '';
+  # What titan-kexec loads for a kexec into the same image: the uncompressed
+  # kernel (kexec_file_load takes no gzip) and stage 0's initramfs.
+  kexecPayload = pkgs.runCommand "titan-ram-kexec-payload" { } ''
+    mkdir -p "$out"
+    cp ${kernel}/Image "$out/Image"
+    cp ${ramdisk}/initramfs.cpio.gz "$out/initramfs.cpio.gz"
+    (cd "$out" && sha256sum Image initramfs.cpio.gz) > "$out/SHA256SUMS"
+  '';
   # Built-in block drivers that create devices at boot must stay within what
   # stage 0 accepts: loop and zram devices, and NBD only with none created.
   kernelCheck = pkgs.runCommand "titan-ram-kernel-block-check" { } ''
@@ -217,6 +233,53 @@ let
       case " ${imageCmdline} " in *" nbd.nbds_max=0 "*) ;; *) echo "NBD needs nbd.nbds_max=0" >&2; exit 1 ;; esac
     fi
     grep -E '^CONFIG_(BLK_DEV_LOOP|ZRAM|BLK_DEV_NBD|MMC_BLOCK)=' "$config" > "$out"
+  '';
+  # titan-dtb-check against synthetic trees: what it must accept and refuse.
+  dtbCheckTests = pkgs.runCommand "titan-ram-dtb-check-tests" {
+    nativeBuildInputs = [ pkgs.dtc ];
+  } ''
+    check=${pkgs.writeShellApplication {
+      name = "titan-dtb-check";
+      runtimeInputs = [ pkgs.coreutils pkgs.dtc ];
+      text = builtins.readFile ./ram-nixos/dtb-check.sh;
+    }}/bin/titan-dtb-check
+    cat > base.dts <<'DTS'
+    /dts-v1/;
+    / {
+      #address-cells = <2>;
+      #size-cells = <2>;
+      memory@40000000 { device_type = "memory"; reg = <0 0x40000000 1 0x80000000>; };
+      reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+        framebuffer@7e340000 { reg = <0 0x7e340000 0 0x1c80000>; no-map; };
+        cma { compatible = "shared-dma-pool"; reusable; size = <0 0x2000000>; alloc-ranges = <0 0x40000000 0 0x80000000>; };
+        empty { };
+      };
+      chosen { bootargs = "console=ttyS0"; };
+    };
+    DTS
+    variant() { sed "$2" base.dts > "$1.dts"; dtc -q -I dts -O dtb -o "$1.dtb" "$1.dts"; }
+    dtc -q -I dts -O dtb -o base.dtb base.dts
+    variant chosen 's/console=ttyS0/console=ttyS1/'
+    variant extra 's|empty { };|empty { }; extra@1 { reg = <0 0x1000 0 0x1000>; };|'
+    variant nomap 's/; no-map; };/; };/'
+    variant disabled 's/no-map; };/no-map; status = "disabled"; };/'
+    variant size 's/size = <0 0x2000000>/size = <0 0x1000000>/'
+    variant noempty 's/empty { };//'
+    variant memory 's/reg = <0 0x40000000 1 0x80000000>;/reg = <0 0x40000000 1 0x40000000>;/'
+    variant memory2 's|chosen {|memory@200000000 { device_type = "memory"; reg = <2 0 0 0x1000>; }; chosen {|'
+    variant cells 's/#size-cells = <2>;/#size-cells = <1>;/'
+    for accepted in base chosen extra; do
+      "$check" base.dtb "$accepted.dtb" || { echo "refused $accepted" >&2; exit 1; }
+    done
+    for refused in nomap disabled size noempty memory memory2 cells; do
+      if "$check" base.dtb "$refused.dtb" 2> "$refused.err"; then echo "accepted $refused" >&2; exit 1; fi
+    done
+    if "$check" missing.dtb base.dtb 2> missing.err; then echo "accepted a missing running tree" >&2; exit 1; fi
+    mkdir -p "$out"
+    cat *.err > "$out/refusals.txt"
   '';
   # The phone ramdisk as built: static AArch64 busybox with every applet stage
   # 0 uses, no VM modules, and stage 0's pinned values matching the system.
@@ -239,7 +302,7 @@ let
     grep -qx "UDC=11201000.usb" root/init
     grep -qx "DATA_INTERFACE=" root/init
     grep -qx "DEADLINE_SECONDS=600" root/init
-    grep -qx "HARD_DEADLINE_SECONDS=1500" root/init
+    grep -qx "HARD_DEADLINE_SECONDS=${toString phoneHardDeadline}" root/init
     # The phone's busybox, not the VM's, checks the pinned values.
     emulate() { ${pkgs.qemu-user}/bin/qemu-aarch64 root/bin/busybox "$@"; }
     test "$(emulate stat -c %s ${phoneSquashfs})" = "$(stat -c %s ${phoneSquashfs})"
@@ -257,5 +320,5 @@ let
   '';
 in {
   inherit phoneSystem vmSystem phoneSquashfs vmSquashfs phoneStage0 vmStage0 ramdisk vmRamdisk boardDtb
-    vmTests phoneChecks kernelCheck imageCmdline;
+    vmTests phoneChecks kernelCheck imageCmdline kexecPayload dtbCheckTests;
 }

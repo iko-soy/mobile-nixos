@@ -80,6 +80,10 @@ hardware works under NixOS.
   and accepted SSH, with Linux never seeing the phone's storage; a restart
   from the session booted Ubuntu Touch, and the original recovery was
   restored.
+* The link:native-ram-env-trial.adoc[RAM NixOS working environment], built
+  and checked in a VM, its trial proposed, not run: the same kernel without
+  the USB driver's per-transfer debug log, sessions that `titan-session` can
+  move within a hard limit, and inspection tools.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
@@ -1292,7 +1296,10 @@ restart the phone into Ubuntu Touch. The aarch64 system is assembled from the
 binary cache's packages; a VM runs the same stage 0 and configuration on
 x86_64. An independent review found that the kernel's built-in NBD devices
 would have made stage 0 refuse before USB came up, among other fixes. The
-owner approved and ran the link:native-ram-trial.adoc[trial] on 2026-10-16:
+owner approved and ran the link:native-ram-trial.adoc[trial] on 2026-10-16
+with the first version (commit `ffca3102`; `nativeRamImage` now builds the
+working-environment version, proposed in
+link:native-ram-env-trial.adoc[its own trial]):
 macOS accepted the USB network, the pinned store arrived and verified, NixOS
 26.11 reached `running` with no failed unit six seconds after the handover,
 SSH accepted the dedicated key, a restart from the session booted Ubuntu

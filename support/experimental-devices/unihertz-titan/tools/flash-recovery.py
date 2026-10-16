@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
-This host helper writes only the `recovery` partition, and only one of seven
+This host helper writes only the `recovery` partition, and only one of eight
 pinned full-partition images: the USB probe envelope, the same probe with the
 repository-built kernel, the native route's first modern-kernel image, its
-diagnostic image or its RAM NixOS image, or the offline control-region
-acquisition envelope, each padded with zeros to the partition size, or the
-preserved original recovery image that restores it. It
+diagnostic image, its first RAM NixOS image or the RAM NixOS working
+environment, or the offline control-region acquisition envelope, each padded
+with zeros to the partition size, or the preserved original recovery image
+that restores it. It
 first sends fixed read-only identity queries, including the recovery
 partition's size and type, from a verified read-only private copy that it
 measures again afterwards. It never writes another partition and never issues
 erase, boot, oem, flashing, set_active or any other command. Running it changes
 the phone's storage and needs the owner's explicit authorization of the
 procedure in recovery-route-trial.adoc, control-acquisition-trial.adoc,
-repo-kernel-trial.adoc, native-boot-trial.adoc, native-diag-trial.adoc or
-native-ram-trial.adoc.
+repo-kernel-trial.adoc, native-boot-trial.adoc, native-diag-trial.adoc,
+native-ram-trial.adoc or native-ram-env-trial.adoc.
 """
 
 import argparse
@@ -75,6 +76,14 @@ PROFILES = {
         "source_bytes": 16510976,
         "source_sha256": "aa1b6751f995c3a201bf2737a3a0ad656b4206d1986ba489e49a8da31c74222a",
         "sha256": "b05b933d10f17a927e6d8bd3e132d20a3d40cb12f24cc836a50a1397d2d8d240",
+    },
+    # The RAM NixOS working environment (ram-nixos/README.adoc, current
+    # nativeRamImage): the kernel without the USB debug log and with
+    # kexec_load, the same trees, and the stage 0 that pins its store.
+    "ram-nixos-2": {
+        "source_bytes": 16510976,
+        "source_sha256": "31a5f6d19d2df8cf3bd316a264d52e3d709fa25cba74d5de3df6e0a45fb046d8",
+        "sha256": "4cb637dff94093043249793f7d703b360a8a572817dd8eafdcf01b43a8d67f52",
     },
     # The offline control-region acquisition envelope (control/README.adoc),
     # which restarts into the bootloader after the transfer or at its deadline,

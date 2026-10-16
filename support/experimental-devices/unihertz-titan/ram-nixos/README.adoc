@@ -4,9 +4,15 @@ A NixOS system that runs on the Titan entirely from RAM, reachable from the
 Mac over USB networking and SSH, started from the recovery partition on the
 native route's modern kernel (link:../native-n0.adoc[N0 record]). It is the
 first NixOS userspace for the phone and turns later experiments into SSH
-sessions instead of flash-and-restore cycles. It ran once on the Titan on
-2026-10-16 with the owner's approval; see link:../native-ram-trial.adoc[the
-trial record]. Building it does not authorize starting it again.
+sessions instead of flash-and-restore cycles. Its first version ran once on
+the Titan on 2026-10-16 with the owner's approval; see
+link:../native-ram-trial.adoc[the trial record]. The current version is the
+working environment proposed in link:../native-ram-env-trial.adoc[its own
+trial]: the same kernel without the USB driver's per-transfer debug log,
+sessions that `titan-session` can move within a hard limit (75 minutes until
+hardware has shown a checker-driven restart and the thermal behaviour of a
+longer run), tools for inspection, and kexec, so that a session can start
+another kernel without flashing. Building it does not authorize starting it.
 
 [source,sh]
 ----
@@ -17,7 +23,9 @@ nix-build support/experimental-devices/unihertz-titan -A ramNixos.phoneSquashfs 
 
 The aarch64 system needs a builder that can run aarch64-linux, natively or
 under emulation (`boot.binfmt.emulatedSystems`); its packages come from the
-binary cache, and only the small assembly steps run there.
+binary cache, and only the small assembly steps run there. The image uses
+`nativeKernelEnv`, the native kernel with `CONFIG_USB_MTU3_DEBUG` off and
+`CONFIG_KEXEC` on; `nativeKernel` and the earlier images are unchanged.
 
 == Why two stages
 
@@ -31,7 +39,7 @@ USB. Everything stays in RAM; nothing is written to the phone.
 
 . It mounts the kernel's virtual filesystems, starts a small static helper,
   `deadline.c`, that restarts the phone with `reboot(2)` at a fixed uptime
-  (25 minutes) and keeps running into NixOS, and arms its own 600-second
+  (75 minutes) and keeps running into NixOS, and arms its own 600-second
   deadline.
 . It binds a USB gadget (`1209:0005`, "Titan rescue experiment" / "Titan RAM
   NixOS") with a CDC NCM network function and an ACM port for status lines.
@@ -57,7 +65,8 @@ Any failed step restarts the phone, which then boots Ubuntu Touch.
 
 `configuration.nix` is a minimal NixOS without kernel, initrd or boot loader:
 
-* root on tmpfs and journald in memory, with no swap or nix daemon;
+* root on tmpfs and journald in memory, with no swap, nix daemon or trim
+  timer;
 * `systemd-networkd` with the same address and a one-address DHCP server;
 * OpenSSH with root login by the one key in `authorized_keys` only, and no
   passwords;
@@ -66,13 +75,39 @@ Any failed step restarts the phone, which then boots Ubuntu Touch.
   masked, and emergency mode off, since no console is reachable;
 * a crash of the service manager restarts instead of freezing
   (`systemd.crash_action=reboot` on the command line and in `system.conf`),
+  an oops panics and so restarts (`panic_on_oops=1`),
   and the hardware watchdog stays untouched, including systemd's default
   arming at reboot, since how the bootloader treats a watchdog reset is
   unknown;
-* a deadline timer, armed in early boot and kept across isolation, that
-  restarts the phone cleanly 20 minutes after the kernel started; stage 0's
-  helper restarts it at 25 minutes regardless. Keeping a session longer means
-  stopping both, deliberately.
+* a session deadline, checked every 30 seconds from early boot and kept
+  across isolation, that restarts the phone cleanly 20 minutes after the
+  kernel started unless `titan-session end-in MINUTES` moves it, at most to
+  five minutes before stage 0's hard deadline, which restarts the phone
+  regardless; any value in the deadline file is held to that cap.
+  `titan-session status` shows the deadline, whether its check is active and
+  whether the hard-deadline helper runs, and `titan-session end` ends the
+  session;
+* kexec: `titan-kexec [--dtb DTB DTB_SHA256] KERNEL KERNEL_SHA256 INITRD
+  INITRD_SHA256 [APPEND]` loads a kernel and initramfs only when both match
+  their SHA-256, with the running command line plus APPEND, and `systemctl
+  kexec` then starts them after a clean shutdown. Without `--dtb` it uses
+  `kexec_file_load` (`CONFIG_KEXEC_FILE`), which reuses the device tree the
+  bootloader passed, with its reserved memory and boot data, and updates only
+  `/chosen`. With `--dtb` it forces `kexec_load` (`CONFIG_KEXEC`; kexec-tools
+  would otherwise try `kexec_file_load` first, which ignores the tree) with
+  the given tree, which must match its SHA-256 and pass `titan-dtb-check`
+  (`dtb-check.sh`): every reserved region and memory node of the running tree
+  present with identical properties, the same cell sizes, and no extra
+  memory. APPEND takes only `titan_` markers, so it cannot override the
+  command line's safety settings, and a unit detaches the USB gadget before
+  each kexec, since the USB controller has no shutdown hook.
+  `ramNixos.kexecPayload` holds the uncompressed kernel and stage 0's
+  initramfs for a kexec into the same image;
+* inspection tools: `dtc`, `file`, `less`, `strace`, `htop`, `tmux`,
+  `ethtool`, `iperf3`, `lsof` and `pv`, and nothing that drives GPIOs or
+  writes device registers. debugfs is mounted, as on any NixOS; sessions
+  neither write it nor read its register dumps (a PMIC read can clear
+  interrupt status), and write nothing in sysfs or configfs.
 
 The private half of the key stays in the owner's private evidence directory.
 
@@ -94,13 +129,24 @@ QEMU's restricted user network in place of the USB data path:
   the pinned squashfs accepted; NixOS boots to `running` with no failed unit,
   root on tmpfs and the store on the overlay; SSH accepts the test key; only
   loop and zram devices exist; the address, storage rule, crash action and
-  untouched watchdog are as configured; the deadline timer is armed and kept
-  on isolation; and the guest then restarts by itself at that deadline;
-* with the timer stopped over SSH, the hard deadline helper, still running in
-  NixOS, restarts the guest at its own deadline;
+  untouched watchdog are as configured; the session deadline is the default
+  and its check armed and kept on isolation; the tools are present and no trim
+  timer exists; `titan-session end-in 1` then moves the end, and the guest
+  restarts by itself at that new deadline;
+* with the deadline check stopped over SSH, the hard deadline helper, still
+  running in NixOS, restarts the guest at its own deadline;
+* `titan-kexec` refuses a kernel with the wrong hash, then loads the pinned
+  kernel and initramfs, and `systemctl kexec` starts them: stage 0 runs
+  again, takes a second push, NixOS boots with the appended marker on its
+  command line, and the session deadline restarts the guest;
 * with a blank disk attached, stage 0 reports the refusal on its status port
   and restarts before networking, leaving the disk unchanged;
 * with nothing pushed, stage 0 restarts at its own deadline.
+
+`ramNixos.dtbCheckTests` runs `titan-dtb-check` against synthetic trees it
+must accept (the same tree, a changed `/chosen`, an extra reserved region)
+and refuse (a reserved region changed or missing, a memory node changed or
+added, other cell sizes, an unreadable running tree).
 
 The phone build is checked for static AArch64 binaries, a busybox with every
 applet stage 0 uses, and the pinned values in its stage 0; the phone's own

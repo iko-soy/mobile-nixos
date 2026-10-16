@@ -191,6 +191,8 @@ def main(argv=None):
         print("SSH is up. Log in with:")
         print(f"  ssh -i {args.key} -o IdentitiesOnly=yes -o BindAddress={args.source} "
               f"-o UserKnownHostsFile={output / 'known_hosts'} -o StrictHostKeyChecking=accept-new root@{args.host}")
+        print("The session restarts the phone at its deadline; in it, `titan-session status`, "
+              "`titan-session end-in MINUTES` or `titan-session end`.")
         return 0
     except (PushError, OSError, ValueError) as error:
         print(f"RAM NixOS push stopped: {error}", file=sys.stderr)

@@ -171,5 +171,9 @@ The link:ram-nixos/README.adoc[RAM NixOS image] (`nativeRamImage`) runs
 NixOS from RAM on this kernel, its store pushed from the Mac over USB
 networking; on 2026-10-16 the link:native-ram-trial.adoc[RAM NixOS trial]
 booted NixOS 26.11 on the Titan and reached it over SSH, so such work can
-proceed in SSH sessions. The kernel build should also turn off
-`CONFIG_USB_MTU3_DEBUG`, which logs every USB transfer.
+proceed in SSH sessions. Its working-environment version, proposed in
+link:native-ram-env-trial.adoc[its own trial], uses `nativeKernelEnv`,
+which turns off `CONFIG_USB_MTU3_DEBUG` (it logs every USB transfer) and
+turns on `CONFIG_KEXEC`, lets `titan-session` move a session's end within a
+hard limit, and adds `titan-kexec`, so that sessions can start other kernels
+and device trees without flashing.

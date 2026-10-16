@@ -1,0 +1,253 @@
+= RAM NixOS working environment trial
+
+Status on 2026-10-16: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-ram-trial.adoc[RAM NixOS trial] booted the first NixOS on the
+Titan and reached it over SSH. This trial runs the working-environment version
+of the link:ram-nixos/README.adoc[RAM NixOS image] for a longer, still
+read-only session. The kernel is the same build except that the USB driver's
+per-transfer debug log is off, sessions can be moved with `titan-session`
+within a hard limit, and the system carries inspection tools and kexec. Near
+the end the session kexecs into the identical kernel and stage 0, the first
+step towards trying new kernels without flashing. The original recovery is
+then restored. Ubuntu Touch's boot and `dtbo` partitions
+are never written, and Linux never sees the phone's storage during the run.
+
+== Questions
+
+. Does the image start with the working-environment kernel and accept the
+  pinned store,
+  faster than the first run's 8.5 MB/s?
+. Does NixOS boot as before, with the tools present and the session deadline
+  at its 20-minute default?
+. Does a 45-minute session work: `titan-session end-in 45`, read-only
+  inspection, a USB throughput measurement and temperature samples, with the
+  phone staying reachable?
+. Does kexec work on this phone, first reusing the bootloader's device tree
+  and then with the tree replaced: does `titan-kexec` load the pinned kernel
+  and stage 0, and does `systemctl kexec` start them, with stage 0 taking
+  another push and NixOS answering over SSH again each time?
+. Does the session deadline restart the phone by itself on hardware:
+  `titan-session end-in 1` at the end, with the restart into Ubuntu Touch
+  within about two minutes? And does the restore work as before?
+
+== Basis
+
+* *Kernel.* `nativeKernelEnv`: the native kernel with `CONFIG_USB_MTU3_DEBUG`
+  turned off and `CONFIG_KEXEC` turned on, the call that takes a device tree
+  from userspace; `Image.gz` 15587110 bytes, SHA-256
+  `dcbd8458e2683beccc0b85ebae10c654149b006267d083607471791bd7342727`.
+* *Board tree and overlay.* As in the RAM NixOS trial: the eMMC host disabled,
+  DTB table `b41fe0d006af9c795e809115c53807a37a13eee0812d2ce1d5199e3e8bfcfb32`,
+  and the unchanged recovery-DTBO table
+  `ce413006e02df0edc36abfb780a6f0365b3687654531d79503b3517e1304a38f`.
+* *Stage 0.* As before, with `ls` and `tr` added so its block-device status
+  line is filled, and the hard deadline at 75 minutes; ramdisk 864753
+  bytes, SHA-256 `bed09e1231ccc558fdb863517c3762c0394904613b1bdc0a3b00e447fa660170`.
+* *NixOS.* As before, plus the session deadline and `titan-session`, the
+  inspection tools, `kexec-tools` and `titan-kexec`, and no trim timer: store
+  squashfs 112340992 bytes, SHA-256 `e1ecc06da2b3ee6162a6f6002eb2bd1901326af47817cc4e9c43efa598cc6794`, pinned in stage 0.
+* *Kexec payload.* `ramNixos.kexecPayload`: the same kernel uncompressed
+  (the kexec calls take no gzip), `Image` 40613896 bytes, SHA-256
+  `2c9b192d0fa107bb58a2fa31f33bc84d8b81aac833e9a1611d183944307a616c`, and stage 0's initramfs as in the image. Without
+  a tree, `titan-kexec` uses `kexec_file_load`, which reuses the device tree
+  the bootloader passed, with its reserved memory and boot data, and updates
+  only `/chosen`. With `--dtb`, it forces `kexec_load` (kexec-tools would
+  otherwise try `kexec_file_load` first, which ignores the tree) with the
+  given tree, which must match its SHA-256 and pass `titan-dtb-check`: every
+  reserved region and memory node of the running tree present with identical
+  properties, the same cell sizes, and no extra memory. This trial replaces
+  the tree
+  only with a copy of the running system's own `/sys/firmware/fdt`, which
+  proves the mechanism with identical contents; trying modified trees needs
+  a tool that carries the bootloader's additions into them, and its own
+  approval.
+* *Command line.* As in the RAM NixOS trial, plus `panic_on_oops=1`: an oops,
+  such as a CPU that fails to go offline for kexec, then restarts the phone
+  after the panic timeout instead of hanging; kexec carries the line over.
+* *Image.* 16510976 bytes, SHA-256 `31a5f6d19d2df8cf3bd316a264d52e3d709fa25cba74d5de3df6e0a45fb046d8`; padded to 33554432
+  bytes, `4cb637dff94093043249793f7d703b360a8a572817dd8eafdcf01b43a8d67f52` (`tools/flash-recovery.py --profile ram-nixos-2`).
+* *Checks.* The VM build passes the valid, hard-deadline, storage, deadline
+  and kexec cases: the session deadline, `titan-session` refusing bad times
+  and holding long ones to the cap, a restart at a moved deadline, the tools,
+  the filled block-device line, and `titan-kexec` refusing a wrong kernel or
+  tree hash and an APPEND that is not a `titan_` marker before a kexec into
+  the same kernel and stage 0 with a second push. `titan-dtb-check` accepts
+  and refuses synthetic trees as it should, and accepts the tree the phone
+  passed in the diagnostic trial while refusing changed copies of it. The
+  phone build's binaries, busybox and pinned values are checked. Two
+  independent reviews' findings are fixed; the second found that the tree
+  check refused the phone's own tree and that kexec-tools' default would
+  have ignored the replacement tree.
+
+== Preconditions
+
+As in the link:native-ram-trial.adoc[RAM NixOS trial]: the owner present, a
+direct cable, battery at least 80% for the longer session, no update pending,
+no recovery command file, both private copies of the original recovery
+(`4dd1c1f7...`) verified, and a normal-mode control-region copy right before
+the trial with `para` matching the latest copies. From step 5 until step 13
+passes: no system update, factory reset, `reboot recovery` or Volume Up start
+other than step 9 and the rows below.
+
+== Procedure
+
+*Part 1: write the image.* Steps 1 to 7 of the
+link:repo-kernel-trial.adoc[repository-kernel trial], with `--profile
+ram-nixos-2` and the image
+`native-ram-image-v3/UNTESTED-UNSIGNED-native-ram.img`; step 7
+must read recovery back as `4cb637df...`, with boot and dtbo unchanged.
+
+*Part 2: run the session.*
+
+[start=8]
+. *Listen:* start `tools/ram-nixos.py` with the private copy of the store
+  squashfs, its pinned size and SHA-256, a new private output directory and
+  the dedicated key; and the ADB/fastboot watcher of the earlier trials.
+. *Start, owner-run:* keep the cable connected, power the phone off from
+  Ubuntu Touch, hold Volume Up and press Power, and release both once the
+  unlocked-state warning appears; allow the accessory if macOS asks.
+. *Expected:* as in the RAM NixOS trial, with the push faster.
+. *Session:* over SSH, first and only once `titan-session end-in 45`, then
+  read-only inspection, saved privately: the system state and failed units,
+  `titan-session status`, the kernel log and journal, mounts, block devices,
+  network, processors, memory, the live device tree read with `dtc` from
+  `/proc/device-tree`, the bound drivers, a throughput measurement of a
+  stream from the Mac discarded on the phone, and the CPU temperature every
+  five minutes. Nothing is written in sysfs, debugfs or configfs, and
+  debugfs register dumps are not read. The kexec steps start no later than
+  30 minutes into the session, well before the 45-minute deadline, which
+  keeps being checked during a shutdown.
+. *Kexec, reusing the bootloader's tree:* copy the payload's `Image` and
+  `initramfs.cpio.gz` from the private copy into `/run/kexec` on the phone
+  over SSH; run `strace -f -e trace=kexec_load,kexec_file_load titan-kexec
+  /run/kexec/Image <its SHA-256> /run/kexec/initramfs.cpio.gz <its SHA-256>
+  titan_kexec=1`, which records the call used; then `systemctl kexec`. Once
+  the image's USB device has left, start `tools/ram-nixos.py` again with a
+  new output directory. Expected: the device returns within about a minute,
+  stage 0 takes the second push, SSH answers, and `/proc/cmdline` carries
+  `titan_kexec=1` with the uptime restarted. Then a short read-only
+  inspection of the kexec'd system. The next step runs only if this boot
+  shows all eight CPUs online, the same `OF: reserved mem` lines as the
+  first boot, and no failure to offline or start a CPU; otherwise go to the
+  end.
+. *Kexec, replacing the tree:* copy the payload into `/run/kexec` again and
+  the running tree with `cp /sys/firmware/fdt /run/kexec/fdt.dtb`; run
+  `titan-kexec --dtb /run/kexec/fdt.dtb <its SHA-256> /run/kexec/Image <its
+  SHA-256> /run/kexec/initramfs.cpio.gz <its SHA-256> titan_dtb=1` under the
+  same `strace`, which must show `kexec_load`; then `systemctl kexec`, and
+  once the device has left, `tools/ram-nixos.py` again. Expected as before,
+  with `titan_dtb=1` on the command line and the same reserved memory in the
+  kernel log.
+. *End:* `titan-session end-in 1`; the session deadline must restart the
+  phone into Ubuntu Touch within about two minutes. Only if it has not after
+  three minutes, `titan-session end`.
+
+*Part 3: restore.* From Ubuntu Touch, `sudo /sbin/reboot bootloader`
+(owner-run); then, as in the earlier trials, write the preserved original
+with the `original-recovery` profile, return, and read recovery back as
+`4dd1c1f7...`, with boot and dtbo unchanged.
+
+*Part 4: compare.* A normal-mode control-region copy after Part 3, compared
+with the one from step 2 (`expdb` changes on every boot).
+
+== Stop conditions
+
+The repository-kernel trial's general stop conditions apply. This table
+replaces the RAM NixOS trial's:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The session ends with the restart at the moved deadline, and Ubuntu Touch
+starts
+|The expected outcome. Go to Part 3.
+|The restart at the moved deadline does not come within three minutes
+|Record it, end with `titan-session end`, wait for Ubuntu Touch, then Part 3.
+|The CPU temperature passes 60 °C during the session
+|End with `titan-session end-in 1` at once, wait for Ubuntu Touch, then
+Part 3.
+|The USB device appears, but the network or the push never completes
+|Stage 0 restarts at its 600-second deadline, or at once after a refusal it
+reports on the status port. Keep the helper's output; wait for Ubuntu Touch,
+then Part 3 without retrying.
+|The push completes, then the phone restarts before SSH answers
+|NixOS crashed or refused a disk. Keep the helper's output; wait for Ubuntu
+Touch, then Part 3 without retrying.
+|SSH never answers, or stops answering during the session
+|The session deadline restarts the phone 20 minutes after boot, or 45 minutes
+after the extension (plus up to half a minute), and stage 0's helper 75
+minutes after boot regardless; wait for Ubuntu Touch, then Part 3.
+|`titan-kexec` refuses or the load fails
+|Record the output and go to the end step. Never run `kexec` by hand.
+|After either `systemctl kexec`, the image's USB device has not left within
+one minute
+|The old kernel stopped during its shutdown; the USB controller has no
+shutdown hook, so a stopped kernel may stay enumerated. Apply the row for a
+kernel that stopped before stage 0.
+|After either `systemctl kexec`, the image's USB device returns but the push
+or SSH fails
+|The kexec'd stage 0 restarts at its 600-second deadline, and its NixOS at
+the 20-minute default; wait for Ubuntu Touch, then Part 3 without retrying.
+|After either `systemctl kexec`, neither the image's USB device, Ubuntu Touch
+nor fastboot appears within five minutes
+|The kernel stopped between the shutdown, which ends the hard-deadline
+helper, and the next stage 0, where no deadline runs. Hold Power about ten
+seconds, but expect nothing; then unplug, let the battery run down, charge,
+start Ubuntu Touch normally and go to Part 3.
+|Ubuntu Touch starts without the USB device appearing
+|Read the boot reason from `/proc/cmdline`. Only `PowerKey` allows one retry
+of step 9. Any other reason may mean the bootloader refused the image or the
+kernel crashed: record it, then Part 3 without retrying.
+|A MediaTek boot ROM or preloader USB device (`0e8d:0003` or `0e8d:2000`)
+stays present
+|The phone is in the SoC's download mode. Do not interact with it or run any
+flashing tool. Hold Power about ten seconds; if it persists, stop and report.
+|The phone powers off
+|A critical temperature trip powers it off, since nothing throttles the CPUs.
+Let it cool, start Ubuntu Touch normally with Power, then Part 3.
+|The screen shows a bootloader error or a crash-dump screen
+|Photograph or note it, then apply the next row.
+|Neither Ubuntu Touch nor fastboot appears within 80 minutes of step 9, or
+of the last `systemctl kexec`
+|Hold Power about ten seconds, but expect nothing: this kernel does not arm
+the PMIC long-press reset, so it works only if the bootloader left it armed,
+which is unverified. Then unplug, let the battery run down, charge, start
+Ubuntu Touch normally and go to Part 3.
+|===
+
+== Residual risks
+
+* The kernel differs from the one that ran only in one debug option; this
+  build has not run on the phone.
+* The session lasts about 50 minutes with the CPUs at the bootloader's
+  clocks, no frequency scaling, no thermal throttling and no charger driver;
+  the battery level cannot be read from NixOS, and the temperature is
+  watched. If the session deadline's check failed and SSH were lost, the
+  phone would run unwatched until stage 0's helper restarts it 75 minutes
+  after boot; only the device tree's critical trips (115 °C for the CPUs)
+  would act earlier.
+* The session deadline's restart has run only in the VM; this trial checks it
+  on hardware at the end.
+* Kexec has not run on this phone. Taking the other CPUs offline through the
+  firmware (PSCI) has never run here either; a CPU that fails to go offline
+  oopses, which `panic_on_oops=1` turns into a restart. The shutdown quiesces
+  most devices, but the display engine, GPU or DMA may be left in states the
+  next kernel does not expect. The USB controller has no shutdown hook, so a
+  unit detaches the USB gadget before each kexec. Each kexec'd kernel starts
+  without the bootloader, with the bootloader's tree and, from the first
+  kexec on, KASLR. The tree-replacing path verifies its segments' SHA-256
+  with the MMU off, which is slow. A hang from the shutdown, which ends the
+  hard-deadline helper, until the next stage 0 has no deadline and, as in a
+  first boot, ends only when the battery runs down. The VM runs the kexec
+  that reuses the tree on x86_64; the tree-replacing path itself has run only
+  here.
+* Everything else is as in the RAM NixOS trial: the first boot's residual
+  risks, the macOS network service, and the hang worst case.
+
+== What this can and cannot show
+
+Success gives a NixOS working environment on the Titan for longer read-only
+sessions over SSH. It does not show NixOS on storage, the display, input,
+charging, audio, radios or a boot without the Mac.

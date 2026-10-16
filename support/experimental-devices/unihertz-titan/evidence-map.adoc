@@ -118,6 +118,20 @@ checks
 the phone (not reached), behavior beyond one run; see
 link:native-ram-trial.adoc[the trial record]
 
+|RAM NixOS working environment
+|Linux 6.18.38 VM cases (5): the session deadline at its default, moved by
+`titan-session` and held to its cap, bad times refused, a restart at the
+moved deadline and at the hard deadline, and a kexec into the same kernel and
+stage 0 after a wrong kernel or tree hash was refused; `titan-dtb-check`
+against synthetic trees and the tree the phone passed in the diagnostic
+trial; phone build checks; the kernel's configuration differing only in
+`CONFIG_USB_MTU3_DEBUG` and `CONFIG_KEXEC`
+|Builder runs on 2026-10-16
+|Any run on the Titan, including this kernel, kexec and replacing the tree,
+a restart by
+the session deadline and a longer session's temperatures; see
+link:native-ram-env-trial.adoc[the proposal]
+
 |Second copy of the rollback set
 |The owner's remote copy of the six cataloged sets and the offline region
 copy, all 57 files matching a SHA-256 list made on the Mac

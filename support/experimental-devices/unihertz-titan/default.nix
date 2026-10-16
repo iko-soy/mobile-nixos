@@ -20,7 +20,10 @@ let
   usbControl = import ./usb-control.nix { inherit pkgs transport; };
   usbDiag = import ./usb-diag.nix { inherit pkgs transport; };
   nativeKernel = import ./native/kernel.nix { inherit pkgs; };
-  ramNixos = import ./ram-nixos.nix { inherit pkgs; kernel = nativeKernel; };
+  # The working environment's kernel: the same without the USB driver's
+  # per-transfer debug log, and with kexec_load for replacing the device tree.
+  nativeKernelEnv = import ./native/kernel.nix { inherit pkgs; usbDebug = false; kexec = true; };
+  ramNixos = import ./ram-nixos.nix { inherit pkgs; kernel = nativeKernelEnv; };
   nativeProbeImage = import ./native/probe-image.nix {
     inherit pkgs sources;
     kernel = nativeKernel;
@@ -41,7 +44,7 @@ let
   };
   nativeRamImage = import ./native/probe-image.nix {
     inherit pkgs sources;
-    kernel = nativeKernel;
+    kernel = nativeKernelEnv;
     ramdisk = ramNixos.ramdisk;
     boardDtb = "${ramNixos.boardDtb}/mt6771-unihertz-titan-ram.dtb";
     name = "titan-native-ram-recovery-image";
@@ -89,7 +92,8 @@ let
   };
 in
 {
-  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition usb mountPolicy usbAcquisition usbProbe usbControl usbDiag ramNixos nativeKernel nativeProbeImage nativeDiagImage nativeRamImage;
+  inherit sources toolchains kernel referenceBootImage rescue transport producer storage acquisition usb mountPolicy usbAcquisition usbProbe usbControl usbDiag ramNixos nativeKernel nativeKernelEnv nativeProbeImage
+    nativeDiagImage nativeRamImage;
 
   tests = pkgs.runCommand "titan-tools-and-boot-packaging-tests" {
     nativeBuildInputs = [ testPython ];

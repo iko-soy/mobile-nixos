@@ -1,4 +1,4 @@
-{ pkgs }:
+{ pkgs, usbDebug ? true, kexec ? false }:
 
 # Build-only native-route kernel (../native-n0.adoc): Linux v7.3-rc3 with the
 # postmarketOS MT6771 patches, the T-PHY software role-switch patch from the
@@ -6,7 +6,12 @@
 # patch downloads are not byte-stable) with a local hardening follow-up (0004),
 # and the postmarketOS configuration with debug info and BTF switched off.
 # Plus the Titan board tree and its minimal bootloader overlay (dts/). No
-# hardware boot is implied by a build.
+# hardware boot is implied by a build. With usbDebug = false, the donor's
+# CONFIG_USB_MTU3_DEBUG is turned off: it logs every USB transfer, flooding
+# the kernel log and slowing USB networking (../native-ram-trial.adoc). With
+# kexec = true, CONFIG_KEXEC adds the kexec_load call, which takes a device
+# tree from userspace; the donor's kexec_file_load always reuses the
+# bootloader's tree.
 let
   inherit (pkgs) lib fetchurl;
   cross = pkgs.pkgsCross.aarch64-multiplatform;
@@ -28,7 +33,7 @@ let
   ];
 in
 cross.stdenv.mkDerivation {
-  pname = "titan-native-kernel";
+  pname = "titan-native-kernel${lib.optionalString (!usbDebug) "-quiet-usb"}${lib.optionalString kexec "-kexec"}";
   version = "7.3.0-rc3";
   src = fetchurl {
     url = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-7.3-rc3.tar.gz";
@@ -63,7 +68,7 @@ cross.stdenv.mkDerivation {
     scripts/config --file .config \
       --disable DEBUG_INFO_BTF --disable DEBUG_INFO_BTF_MODULES \
       --disable DEBUG_INFO_DWARF5 --disable DEBUG_INFO_COMPRESSED_ZSTD \
-      --disable DEBUG_INFO --enable DEBUG_INFO_NONE
+      --disable DEBUG_INFO --enable DEBUG_INFO_NONE${lib.optionalString (!usbDebug) " --disable USB_MTU3_DEBUG"}${lib.optionalString kexec " --enable KEXEC"}
     make ${lib.escapeShellArgs makeFlags} olddefconfig
     runHook postConfigure
   '';

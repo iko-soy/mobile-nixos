@@ -7,10 +7,19 @@ Each case boots the VM build of stage 0 with QEMU's restricted user network
 * valid: a short push and a same-size push with one changed byte are
   rejected, the pinned squashfs is accepted, NixOS boots to "running" with no
   failed unit, root on tmpfs and the store on an overlay, SSH accepts the test
-  key, only loop and zram devices exist, the deadline timer is armed and kept
-  on isolation, and NixOS then restarts by itself at that deadline;
-* hard: with that timer stopped over SSH, stage 0's hard deadline process,
-  still running in NixOS, restarts the guest at its own deadline;
+  key, only loop and zram devices exist, the session deadline is the default
+  and its check armed and kept on isolation, the tools are present and no
+  trim timer exists; titan-session refuses malformed or out-of-range times,
+  holds a long one to the cap, then moves the end to a minute from now, and
+  NixOS restarts by itself at that new deadline;
+* hard: with the deadline check stopped over SSH, stage 0's hard deadline
+  process, still running in NixOS, restarts the guest at its own deadline;
+* kexec: titan-kexec refuses a kernel or a replacement tree with the wrong
+  hash, loads the pinned kernel and initramfs, and `systemctl kexec` starts
+  them (the tree-replacing path itself needs a device tree, so only the
+  phone exercises it); stage 0 runs again,
+  takes a second push, NixOS boots with the appended marker on its command
+  line, and the session deadline then restarts the guest;
 * storage: with a blank disk attached, stage 0 reports the refusal on its
   status port, restarts before networking and leaves the disk unchanged;
 * deadline: with nothing pushed, stage 0 restarts at its own deadline.
@@ -30,10 +39,15 @@ import sys
 import time
 
 LOG_LIMIT = 16 * 1024 * 1024
+# Kernel log timestamps and the boot-time clock the deadlines use can differ
+# by a few milliseconds; whole seconds are compared with this allowance.
+CLOCK_SLACK = 2
 STAGE0_DEADLINE = 150
-NIXOS_DEADLINE = 480
-HARD_DEADLINE = 600
-CMDLINE = "console=ttyS0,115200 rdinit=/init panic=5 loglevel=4 nbd.nbds_max=0 systemd.crash_action=reboot titan_ram_vm=1"
+NIXOS_DEFAULT = 480
+HARD_DEADLINE = 840
+SESSION_CAP = HARD_DEADLINE - 300
+CMDLINE = ("console=ttyS0,115200 rdinit=/init panic=5 loglevel=4 nbd.nbds_max=0 systemd.crash_action=reboot "
+           "panic_on_oops=1 titan_ram_vm=1")
 
 
 def free_port():
@@ -96,6 +110,16 @@ class Guest:
                 break
         raise RuntimeError(f"Timed out waiting for {pattern!r}.")
 
+    def wait_for_count(self, pattern, count, timeout):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.pump()
+            if sum(1 for line in self.lines() if re.search(pattern, line)) >= count:
+                return
+            if self.process.poll() is not None and not self.selector.get_map():
+                break
+        raise RuntimeError(f"Timed out waiting for {count} of {pattern!r}.")
+
     def wait_exit(self, timeout):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -141,11 +165,29 @@ def push(port, source=None, data=None, attempts=60):
     raise RuntimeError("Stage 0 never accepted the stream.")
 
 
-def ssh(args, port, command, timeout=120):
-    return subprocess.run([args.ssh, "-F", "/dev/null", "-i", args.key_file, "-p", str(port),
-                           "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-                           "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
-                           "root@127.0.0.1", command], capture_output=True, timeout=timeout)
+def ssh_argv(args, port, command):
+    return [args.ssh, "-F", "/dev/null", "-i", args.key_file, "-p", str(port),
+            "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR",
+            "root@127.0.0.1", command]
+
+
+def ssh(args, port, command, timeout=120, stdin=None):
+    return subprocess.run(ssh_argv(args, port, command), capture_output=True, timeout=timeout, stdin=stdin)
+
+
+def wait_ssh(args, guest, timeout=600):
+    deadline = time.monotonic() + timeout
+    while True:
+        guest.pump()
+        try:
+            if ssh(args, guest.ssh_port, "true", timeout=60).returncode == 0:
+                return
+        except subprocess.TimeoutExpired:
+            pass
+        if time.monotonic() > deadline or guest.process.poll() is not None:
+            raise RuntimeError("SSH never accepted the test key.")
+        time.sleep(5)
 
 
 CHECKS = r"""
@@ -158,6 +200,9 @@ echo "sshd=$(systemctl is-active sshd)"
 echo "networkd=$(systemctl is-active systemd-networkd)"
 echo "timer=$(systemctl is-active titan-deadline.timer)"
 echo "isolate=$(systemctl show -p IgnoreOnIsolate --value titan-deadline.timer)"
+echo "session=$(titan-session status)"
+echo "fstrim=$(systemctl list-timers --all --no-legend | grep -c fstrim)"
+echo "tools=$(for t in dtc file less strace htop tmux ethtool iperf3 lsof pv; do command -v $t >/dev/null && echo $t; done | wc -l)"
 echo "failed=$(systemctl --failed --no-legend --plain | awk '{print $1}' | tr '\n' ' ')"
 echo "cmdline=$(cat /proc/cmdline)"
 echo "storage_rule=$(grep -c 'SUBSYSTEM=="block".*systemctl --no-block reboot' /etc/udev/rules.d/99-local.rules)"
@@ -189,17 +234,8 @@ def boot_nixos(args, guest, directory, corrupt):
     push(guest.push_port, source=args.system)
     guest.wait_for(r"TITAN_RAM system-verified", 300)
     guest.wait_for(r"TITAN_RAM starting-nixos", 120)
-    deadline = time.monotonic() + 600
-    while True:
-        guest.pump()
-        try:
-            if ssh(args, guest.ssh_port, "true", timeout=60).returncode == 0:
-                return attempt
-        except subprocess.TimeoutExpired:
-            pass
-        if time.monotonic() > deadline or guest.process.poll() is not None:
-            raise RuntimeError("SSH never accepted the test key.")
-        time.sleep(5)
+    wait_ssh(args, guest)
+    return attempt
 
 
 def restart_second(guest):
@@ -217,19 +253,41 @@ def case_valid(args, directory, result):
         expected = {"running": "running", "failed": "", "root": "tmpfs", "store": "overlay",
                     "address": "172.16.42.1/24", "sshd": "active", "networkd": "active", "timer": "active",
                     "isolate": "yes", "storage_rule": "1", "hard_deadline": "1", "watchdog_open": "0",
+                    "fstrim": "0", "tools": "10",
                     "manager": "CrashAction=reboot RebootWatchdogSec=off RuntimeWatchdogSec=off "}
         wrong = {k: values.get(k) for k, v in expected.items() if values.get(k) != v}
         if any(not name.startswith(("loop", "zram")) for name in values.get("block", "").split()):
             wrong["block"] = values.get("block")
         if "titan_ram_vm=1" not in values.get("cmdline", ""):
             wrong["cmdline"] = values.get("cmdline")
+        if f"restart at {NIXOS_DEFAULT}s of uptime" not in values.get("session", ""):
+            wrong["session"] = values.get("session")
+        if not any(line.startswith("TITAN_RAM storage-none block=") and "zram0" in line for line in guest.lines()):
+            wrong["stage0_block_line"] = "missing"
         if wrong:
             raise RuntimeError(f"Unexpected guest state: {wrong}")
-        # Leave the session alone: NixOS must restart by itself at its deadline.
-        elapsed = guest.wait_exit(NIXOS_DEADLINE + 300)
+        refused = ssh(args, guest.ssh_port, "for m in 0 241 abc 0010 1234; do titan-session end-in $m >/dev/null 2>&1; "
+                      "echo -n \"$? \"; done; titan-session status", timeout=60).stdout.decode()
+        result["refused"] = refused
+        if not refused.startswith("2 2 2 2 2 ") or f"restart at {NIXOS_DEFAULT}s" not in refused:
+            raise RuntimeError(f"titan-session accepted a bad time or changed the deadline: {refused!r}")
+        capped = ssh(args, guest.ssh_port, "titan-session end-in 240", timeout=60).stdout.decode()
+        if f"restart at {SESSION_CAP}s of uptime" not in capped:
+            raise RuntimeError(f"titan-session did not hold a long time to the cap: {capped!r}")
+        moved = ssh(args, guest.ssh_port, "titan-session end-in 1", timeout=60).stdout.decode()
+        match = re.search(r"restart at (\d+)s of uptime", moved)
+        if match is None:
+            raise RuntimeError(f"titan-session did not set a deadline: {moved!r}")
+        deadline = int(match.group(1))
+        result["moved_deadline"] = deadline
+        # The moved restart must be distinguishable from the default one.
+        if deadline + 90 >= NIXOS_DEFAULT:
+            raise RuntimeError(f"The moved deadline {deadline}s is too close to the default to tell apart.")
+        # Leave the session alone: NixOS must restart by itself at that deadline.
+        elapsed = guest.wait_exit(deadline + 300)
         second = restart_second(guest)
-        if second is None or not NIXOS_DEADLINE - 5 <= second <= NIXOS_DEADLINE + 60:
-            raise RuntimeError("NixOS did not restart at its deadline.")
+        if second is None or not deadline - CLOCK_SLACK <= second <= deadline + 90:
+            raise RuntimeError("NixOS did not restart at the moved deadline.")
         result.update({"passed": True, "restart_seconds": second, "elapsed_seconds": round(elapsed)})
     finally:
         guest.stop()
@@ -248,9 +306,72 @@ def case_hard(args, directory, result):
             raise RuntimeError(f"Unexpected state after stopping the timer: {result['after_stop']}")
         guest.wait_exit(HARD_DEADLINE + 300)
         second = restart_second(guest)
-        if second is None or not HARD_DEADLINE <= second <= HARD_DEADLINE + 30:
+        if second is None or not HARD_DEADLINE - CLOCK_SLACK <= second <= HARD_DEADLINE + 30:
             raise RuntimeError("The hard deadline did not restart the guest.")
         result.update({"passed": True, "restart_seconds": second})
+    finally:
+        guest.stop()
+        private_write(directory / "console.log", bytes(guest.console))
+
+
+def case_kexec(args, directory, result):
+    guest = Guest(args, directory)
+    try:
+        boot_nixos(args, guest, directory, corrupt=False)
+        kernel_sha256, initrd_sha256 = digest(args.kernel), digest(args.initrd)
+        for local, remote in ((args.kernel, "/run/kexec/kernel"), (args.initrd, "/run/kexec/initrd")):
+            with open(local, "rb") as stream:
+                copied = ssh(args, guest.ssh_port, f"mkdir -p /run/kexec && cat > {remote}", timeout=300, stdin=stream)
+            if copied.returncode != 0:
+                raise RuntimeError(f"Copying {remote} failed.")
+        refused = ssh(args, guest.ssh_port, f"titan-kexec /run/kexec/kernel {'0' * 64} /run/kexec/initrd "
+                      f"{initrd_sha256} titan_kexec=1; echo \"exit=$? loaded=$(cat /sys/kernel/kexec_loaded)\"",
+                      timeout=120).stdout.decode()
+        if "exit=1" not in refused or "FAILED" not in refused or "loaded=0" not in refused:
+            raise RuntimeError(f"titan-kexec did not refuse a kernel with the wrong hash: {refused!r}")
+        refused_dtb = ssh(args, guest.ssh_port, f"titan-kexec --dtb /run/kexec/initrd {'0' * 64} /run/kexec/kernel "
+                          f"{kernel_sha256} /run/kexec/initrd {initrd_sha256} titan_kexec=1; "
+                          f"echo \"exit=$? loaded=$(cat /sys/kernel/kexec_loaded)\"", timeout=120).stdout.decode()
+        if "exit=1" not in refused_dtb or "FAILED" not in refused_dtb or "loaded=0" not in refused_dtb:
+            raise RuntimeError(f"titan-kexec did not refuse a tree with the wrong hash: {refused_dtb!r}")
+        marker = ssh(args, guest.ssh_port, f"titan-kexec /run/kexec/kernel {kernel_sha256} /run/kexec/initrd "
+                     f"{initrd_sha256} panic=0; echo \"exit=$? loaded=$(cat /sys/kernel/kexec_loaded)\"",
+                     timeout=120).stdout.decode()
+        if "exit=2" not in marker or "loaded=0" not in marker:
+            raise RuntimeError(f"titan-kexec accepted an APPEND that is not a titan_ marker: {marker!r}")
+        loaded = ssh(args, guest.ssh_port, f"titan-kexec /run/kexec/kernel {kernel_sha256} /run/kexec/initrd "
+                     f"{initrd_sha256} titan_kexec=1 && cat /sys/kernel/kexec_loaded", timeout=300).stdout.decode()
+        result["loaded"] = loaded.split()
+        if "loaded; systemctl kexec starts it" not in loaded or loaded.split()[-1:] != ["1"]:
+            raise RuntimeError(f"titan-kexec did not load the pinned payload: {loaded!r}")
+        try:
+            ssh(args, guest.ssh_port, "systemctl kexec", timeout=30)
+        except subprocess.TimeoutExpired:
+            pass
+        guest.wait_for_count(r"TITAN_RAM stage0 start", 2, 300)
+        guest.wait_for_count(r"TITAN_RAM waiting-for-system .*attempt=1", 2, 180)
+        time.sleep(2)
+        push(guest.push_port, source=args.system)
+        guest.wait_for_count(r"TITAN_RAM starting-nixos", 2, 300)
+        wait_ssh(args, guest)
+        after = ssh(args, guest.ssh_port, "cat /proc/cmdline; cut -d. -f1 /proc/uptime; "
+                    "grep -lx titan-deadline /proc/[0-9]*/comm | wc -l", timeout=60).stdout.decode().split()
+        result["after_kexec"] = after[-2:]
+        result["gadget_detached_before_kexec"] = any("Detach the USB gadget before kexec" in line for line in guest.lines())
+        if "titan_kexec=1" not in after or "titan_ram_vm=1" not in after or "panic_on_oops=1" not in after:
+            raise RuntimeError(f"The kexec'd kernel lacks the expected command line: {after!r}")
+        if not after[-2].isdigit() or int(after[-2]) > 600 or after[-1] != "1":
+            raise RuntimeError(f"The kexec'd system did not restart its uptime or hard deadline: {after[-2:]}")
+        moved = ssh(args, guest.ssh_port, "titan-session end-in 1", timeout=60).stdout.decode()
+        match = re.search(r"restart at (\d+)s of uptime", moved)
+        if match is None:
+            raise RuntimeError(f"titan-session did not set a deadline: {moved!r}")
+        deadline = int(match.group(1))
+        guest.wait_exit(deadline + 300)
+        second = restart_second(guest)
+        if second is None or not deadline - CLOCK_SLACK <= second <= deadline + 90:
+            raise RuntimeError("The kexec'd NixOS did not restart at its session deadline.")
+        result.update({"passed": True, "restart_seconds": second, "moved_deadline": deadline})
     finally:
         guest.stop()
         private_write(directory / "console.log", bytes(guest.console))
@@ -283,7 +404,7 @@ def case_deadline(args, directory, result):
         guest.wait_for(r"TITAN_RAM deadline", STAGE0_DEADLINE + 120)
         guest.wait_exit(60)
         restart = re.search(r"\[\s*(\d+)\.\d+\] reboot: Restarting system", "\n".join(guest.lines()))
-        if restart is None or int(restart.group(1)) < STAGE0_DEADLINE:
+        if restart is None or int(restart.group(1)) < STAGE0_DEADLINE - CLOCK_SLACK:
             raise RuntimeError("Stage 0 restarted before its deadline.")
         result.update({"passed": True, "restart_seconds": int(restart.group(1))})
     finally:
@@ -304,7 +425,7 @@ def main(argv=None):
         private_write(args.key_file, Path(args.key).read_bytes())
         cases = []
         for name, function in (("storage", case_storage), ("deadline", case_deadline), ("valid", case_valid),
-                               ("hard", case_hard)):
+                               ("hard", case_hard), ("kexec", case_kexec)):
             directory = output / name
             directory.mkdir(mode=0o700)
             result = {"case": name, "passed": False}
