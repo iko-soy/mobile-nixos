@@ -128,8 +128,8 @@ class RecoveryFlashTests(unittest.TestCase):
         self.assertEqual(set(real.PROFILES), {"rescue-probe", "repo-kernel-probe", "native-probe", "native-diag",
                                               "ram-nixos", "ram-nixos-2", "ram-nixos-3", "ram-nixos-4",
                                               "ram-nixos-5", "ram-nixos-6", "ram-nixos-7", "ram-nixos-8",
-                                              "ram-nixos-9", "ram-nixos-10", "control-acquisition",
-                                              "original-recovery"})
+                                              "ram-nixos-9", "ram-nixos-10", "ram-nixos-11",
+                                              "control-acquisition", "original-recovery"})
         self.assertEqual(real.PARTITION_BYTES, 33554432)
         self.assertEqual(real.PARTITION, "recovery")
         # The probe is the second version, not the first-version envelope that
@@ -205,6 +205,10 @@ class RecoveryFlashTests(unittest.TestCase):
         self.assertEqual((ram10["source_bytes"], ram10["source_sha256"], ram10["sha256"]),
                          (16513024, "f37e21370424327d271c57ad1e4ace1bbbbea2f934b606ee26aa953c816fc437",
                           "f79e3eb42614c25f5fe32d66d636f4c1a6c32ba33642dafa00f38330c62ea57e"))
+        ram11 = real.PROFILES["ram-nixos-11"]
+        self.assertEqual((ram11["source_bytes"], ram11["source_sha256"], ram11["sha256"]),
+                         (16515072, "345ae64d7ebf4d6bdffc1fe1ca0e8acb4af118ca23e76488691b40a3ead23645",
+                          "28680707bda77023bed84df1a332f0e335dccadc7b2c27e4cd967f2194af16dd"))
         control = real.PROFILES["control-acquisition"]
         self.assertEqual((control["source_bytes"], control["source_sha256"], control["sha256"]),
                          (13475840, "41fd9c6bfb7f34f2351678eb52337ac6320672739d3109b0e8e0334b89d87b65",

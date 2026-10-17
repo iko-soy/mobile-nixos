@@ -1,0 +1,169 @@
+= Keyboard bus channel trial
+
+Status on 2026-10-17: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+In the link:native-i2c-input-scan-trial.adoc[touch and keyboard bus scan
+trial] the I2C controller at `0x11008000`, the vendor's bus 4, completed no
+transfer: every address stalled for its two-second timeout without an
+interrupt. That controller is shared with the camera control unit, and
+MediaTek's kernel drives it differently from mainline: it resets it through
+channel 0, then drives it through the channel at `0x100`, whose own copy of
+the registers below `0x100` it programs before each transfer, and on that
+channel it clears the multi-channel FIFO address, takes a missing
+acknowledgement from the status when the transfer completes, and routes the
+channel's interrupt to the CPU. Mainline drove channel 0 as a whole
+controller and did none of this. Kernel patch 0006 adds MediaTek's handling
+to mainline's driver for a node with the property `mediatek,channel-offset`.
+This trial enables bus 4 alone with that property set to `0x100` and scans
+it once with reads only.
+
+== Questions
+
+. Does the kexec with bus 4 enabled through its channel pass its checks and
+  boot with all eight CPUs and the same reserved memory, and does exactly
+  one adapter appear, `i2c-4` for the controller at `11008000`?
+. Are GPIO105 and GPIO106 in function 1 with both lines high?
+. Does the scan now give a real result: finished in under two seconds, with
+  the controller's interrupt count risen by exactly 112, one per address?
+  Which addresses answer?
+. Are both lines released after the scan?
+. Does `titan-session end-in 1` restart the phone into Ubuntu Touch, and does
+  the restore work as before?
+
+== Basis
+
+* *MediaTek's driver.* MediaTek's MT6771 kernel, as published in vendor
+  trees for other MT6771 phones (`drivers/i2c/busses/i2c-mtk.c`; a revision
+  that differs from the Titan's in details, such as the name of its camera
+  channel property), takes `ch_offset_default = <0x100>` for bus 4 from the
+  vendor's base tree and adds it to every controller register it touches
+  while transferring; its reset at probe and after a timeout goes to
+  channel 0, with that channel's interrupts masked. Before each transfer it
+  writes the channel's clock divider, control, timing, address, lengths and
+  interrupt mask; on a channel it writes `0x5` rather than `0x1` to the FIFO
+  address clear, leaves the acknowledgement-error interrupts masked, sets
+  the channel's MCU interrupt enable before the start, returns from a
+  completed transfer that was not acknowledged without a reset, and after a
+  timeout or an incomplete transfer resets and writes "resume arbitration"
+  to channel 0. Its DMA channel for bus 4 is `0x11000100`, the one the
+  native node already names.
+* *Patch 0006.* `native/patches/0006-i2c-mt65xx-drive-a-channel-of-a-shared-controller.patch`.
+  With `mediatek,channel-offset` of `0x100` or `0x200` on a controller with
+  the MT8183 register layout, the driver addresses the registers below
+  `0x100` at that offset, keeping the controller's own registers above it,
+  so no access leaves the node's register block, and logs that it drives the
+  controller through that channel. Its reset runs on channel 0, with that
+  channel's interrupts masked first, and its configuration is then written
+  to channel 0 and to the channel; each transfer clears the multi-channel
+  FIFO address, masks the acknowledgement-error interrupts and enables the
+  channel's MCU interrupt; a completed transfer that was not acknowledged
+  returns without a reset; a timeout or an incomplete transfer resets
+  through channel 0 and resumes arbitration, and a timeout also logs a
+  warning with the channel's start and status. The patch reads and writes
+  the channel through its own accessors, so its interrupt handler never sees
+  channel 0. It differs from MediaTek's driver in writing mainline's whole
+  configuration, once, rather than the vendor's before each transfer; in
+  moving one byte by DMA, where the vendor uses the FIFO for eight bytes or
+  fewer; and in relying on the firmware's multi-channel setup, which the
+  vendor renews after a suspend, which does not occur here. Without the
+  property nothing changes: buses 0 and 1, and the first boot, which enables
+  no controller, are unaffected.
+* *What the scan should show.* On the channel a missing answer should
+  raise only the completion interrupt, as an answer does, with the
+  acknowledgement error left in the status, as MediaTek's driver assumes;
+  then a working bus raises exactly 112 for the scan. The keyboard
+  controller was held in reset in the last trial (GPIO169 low) and the
+  cameras are unpowered, so an empty table is the expected answer from a
+  working bus; the second AW9523, at `0x5a`, may answer if its reset is free.
+  The patterns that are no result:
+** About two seconds per address: the channel completes no transfer, or
+   gives no completion after a missing answer.
+** Fast, 112 interrupts and every address answering: the acknowledgement
+   error is not kept in the status, rather than a line held low, since both
+   lines read high.
+** Fast and stalled transfers alternating, about 56 interrupts: arbitration
+   is not resumed after an error.
++
+Each points at this implementation, not at the channel as such.
+* *Checks.* The kernel check finds the patch in the kernel. The session's
+  tree check passes a tree with the status and a 32-bit `0x100` set by
+  `fdtput`, and refuses `0x200`, two cells, a string or an extra change; the
+  scan verdict refuses the last trial's bus 4 scan and counts of 113 and
+  224, and accepts 112 in 0.2 seconds. An independent review of the patch,
+  the scripts and this procedure found no blocker; its findings are fixed.
+* *Image.* The identification repeat trial's with the kernel rebuilt with
+  patch 0006: kernel `Image.gz`
+  `e1f5c70c2332323166e1f955199a51f55987f9bd38451db87e111c4c7ce73f5f`, the
+  uncompressed kernel for kexec
+  `1d25af63b5a712b49938270ee0cc369c488aa0c7281d74a8d62f128deac7ae85`; stage
+  0's ramdisk `2bac8e9e...` and the store squashfs `5f47da88...` are
+  unchanged. The image is 16515072 bytes, SHA-256
+  `345ae64d7ebf4d6bdffc1fe1ca0e8acb4af118ca23e76488691b40a3ead23645`; padded
+  to 33554432 bytes,
+  `28680707bda77023bed84df1a332f0e335dccadc7b2c27e4cd967f2194af16dd`
+  (`tools/flash-recovery.py --profile ram-nixos-11`). The kernel check finds
+  the patch in the kernel; the VM cases and the phone checks pass.
+* *Everything else.* The pins, the bus's devices and the checks of the
+  touch and keyboard bus scan trial.
+
+== Preconditions
+
+As in the touch and keyboard bus scan trial, with the latest control-region
+copy now the one from its Part 4.
+
+== Procedure
+
+As in the link:native-i2c-input-scan-trial.adoc[touch and keyboard bus scan
+trial], with flash profile `ram-nixos-11` and the image
+`native-ram-image-v15/UNTESTED-UNSIGNED-native-ram.img`, whose step 7
+read-back must show `28680707...`, with the kexec payload's kernel
+`1d25af63...`, and with these changes:
+
+* *Step 11:* set `status` to `okay` on `/soc/i2c@11008000` and add
+  `mediatek,channel-offset = <0x100>` to it, each checked with `fdtget`
+  before and after. The tree check requires the modified tree to differ from
+  the running one in exactly those two properties, in the `dtc` sources and
+  property by property, with the same reserve map. The marker is
+  `titan_kexec=i2c4ch`. The records must show the node reading `okay` and a
+  tree that differs from the one handed over only in `/chosen`.
+* *Step 12, adapter:* `ls /sys/bus/i2c/devices` must show exactly `i2c-4`,
+  and `readlink -f` must end in `/11008000.i2c/i2c-4`; the kernel log must
+  show the controller driven through channel `0x100`.
+* *Step 12, pins:* save the lines for GPIO2, GPIO105, GPIO106 and GPIO169.
+  The scan runs only if GPIO105 and GPIO106 are in function 1, by MediaTek's
+  rule, and read input level 1, read again just before it.
+* *Step 12, scan:* save the controller's line of `/proc/interrupts`, run
+  `timeout 300 i2cdetect -y -r 4` once, then save the interrupt line, the
+  pin lines and the kernel log. A real result finishes with status 0 in
+  under two seconds, with the interrupt count risen by exactly 112, at most
+  eight answers and no I2C error logged, and both lines must read 1
+  afterwards. No other I2C command.
+* *Part 4:* as in that trial, the owner checks that the touch screen, the
+  keyboard and its backlight work.
+
+== Stop conditions
+
+The touch and keyboard bus scan trial's table applies, read for bus 4 alone,
+with its tree rows for the node's status and channel offset, and with its
+scan row for this trial's real result: status 0, under two seconds, an
+interrupt rise of exactly 112, at most eight answers and no I2C error or
+timeout warning logged. A scan that is not a real result ends the I2C part;
+the patterns above say what each kind of failure points at.
+
+== Residual risks
+
+As in the touch and keyboard bus scan trial. The patch changes how the
+driver addresses this controller: the channel at `0x100` receives the whole
+configuration and status clears, the FIFO address clear, the interrupt mask
+and the MCU interrupt enable, and channel 0 receives the reset, its interrupt
+mask cleared and, after a timeout or an incomplete transfer, "resume
+arbitration", as MediaTek's kernel does on the same hardware; the camera
+control unit does not run here. A stalled transfer costs two seconds before
+that reset.
+
+== What this can and cannot show
+
+Success shows the native kernel driving the keyboard's bus, the start for the
+keyboard controller once its reset is released, which needs its own trial.
+It does not show the keyboard, the cameras or the touch panel working.

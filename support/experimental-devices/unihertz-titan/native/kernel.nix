@@ -1,4 +1,4 @@
-{ pkgs, usbDebug ? true, kexec ? false, cpuPowerDown ? false }:
+{ pkgs, usbDebug ? true, kexec ? false, cpuPowerDown ? false, i2cChannels ? false }:
 
 # Build-only native-route kernel (../native-n0.adoc): Linux v7.3-rc3 with the
 # postmarketOS MT6771 patches, the T-PHY software role-switch patch from the
@@ -14,7 +14,11 @@
 # bootloader's tree. With cpuPowerDown = true, patch 0005 adds a driver that
 # asks MediaTek's firmware to power down each core that CPU hotplug or kexec
 # has turned off, as MediaTek's kernel does; without it such a core never
-# starts again (../native-kexec-trial.adoc).
+# starts again (../native-kexec-trial.adoc). With i2cChannels = true, patch
+# 0006 lets an I2C controller shared with a coprocessor be driven through
+# one of its channels, as MediaTek's kernel does, for a node with
+# mediatek,channel-offset; without that property nothing changes
+# (../native-i2c-input-scan-trial.adoc).
 let
   inherit (pkgs) lib fetchurl;
   cross = pkgs.pkgsCross.aarch64-multiplatform;
@@ -36,7 +40,7 @@ let
   ];
 in
 cross.stdenv.mkDerivation {
-  pname = "titan-native-kernel${lib.optionalString (!usbDebug) "-quiet-usb"}${lib.optionalString kexec "-kexec"}${lib.optionalString cpuPowerDown "-cpu-power"}";
+  pname = "titan-native-kernel${lib.optionalString (!usbDebug) "-quiet-usb"}${lib.optionalString kexec "-kexec"}${lib.optionalString cpuPowerDown "-cpu-power"}${lib.optionalString i2cChannels "-i2c-channel"}";
   version = "7.3.0-rc3";
   src = fetchurl {
     url = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-7.3-rc3.tar.gz";
@@ -50,7 +54,9 @@ cross.stdenv.mkDerivation {
     ./patches/0003-phy-mediatek-tphy-add-software-role-switching.patch
     ./patches/0004-phy-mediatek-tphy-keep-the-forced-role-without-a-role-switch.patch
   ] ++ lib.optional cpuPowerDown
-    ./patches/0005-soc-mediatek-power-down-mt6771-cores-after-cpu-hotplug.patch;
+    ./patches/0005-soc-mediatek-power-down-mt6771-cores-after-cpu-hotplug.patch
+  ++ lib.optional i2cChannels
+    ./patches/0006-i2c-mt65xx-drive-a-channel-of-a-shared-controller.patch;
   postPatch = ''
     patchShebangs scripts
     cp ${./dts/mt6771-unihertz-titan.dts} arch/arm64/boot/dts/mediatek/mt6771-unihertz-titan.dts

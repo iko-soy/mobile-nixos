@@ -37,9 +37,12 @@ link:../native-i2c-id-trial.adoc[I2C device identification trial] (flash
 profile `ram-nixos-9`); it now makes four, into buffers filled with `0xa5`
 (flash profile `ram-nixos-10`; image `f37e2137...`, store squashfs
 `5f47da88...`, 112361472 bytes), which ran in the
-link:../native-i2c-id-repeat-trial.adoc[I2C identification repeat trial];
-`--nosmp` has not run on the phone. Building it does not authorize starting
-it.
+link:../native-i2c-id-repeat-trial.adoc[I2C identification repeat trial] and
+the link:../native-i2c-input-scan-trial.adoc[touch and keyboard bus scan
+trial]. The kernel now also has patch 0006, for the shared I2C controller's
+channel (flash profile `ram-nixos-11`; image `345ae64d...`; stage 0 and store
+unchanged), which has not run on the phone, nor has `--nosmp`. Building it
+does not authorize starting it.
 
 [source,sh]
 ----

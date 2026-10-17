@@ -22,8 +22,9 @@ let
   nativeKernel = import ./native/kernel.nix { inherit pkgs; };
   # The working environment's kernel: the same without the USB driver's
   # per-transfer debug log, with kexec_load for replacing the device tree, and
-  # with the driver that powers down cores taken offline (patch 0005).
-  nativeKernelEnv = import ./native/kernel.nix { inherit pkgs; usbDebug = false; kexec = true; cpuPowerDown = true; };
+  # with the driver that powers down cores taken offline (patch 0005), and
+  # with the I2C channel handling for the shared controller (patch 0006).
+  nativeKernelEnv = import ./native/kernel.nix { inherit pkgs; usbDebug = false; kexec = true; cpuPowerDown = true; i2cChannels = true; };
   ramNixos = import ./ram-nixos.nix { inherit pkgs; kernel = nativeKernelEnv; };
   nativeProbeImage = import ./native/probe-image.nix {
     inherit pkgs sources;

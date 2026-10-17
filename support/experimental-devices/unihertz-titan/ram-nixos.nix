@@ -243,6 +243,11 @@ let
       || ! grep -aq 'powering down cores after CPU hotplug' ${kernel}/Image; then
       echo "The kernel lacks the MT6771 core power-down driver" >&2; exit 1
     fi
+    # The shared I2C controller is reached through its channel
+    # (native-i2c-input-scan-trial.adoc).
+    if ! grep -aq 'mediatek,channel-offset' ${kernel}/Image; then
+      echo "The kernel lacks the I2C channel patch" >&2; exit 1
+    fi
     grep -E '^CONFIG_(BLK_DEV_LOOP|ZRAM|BLK_DEV_NBD|MMC_BLOCK|MTK_MT6771_CPU_POWER)=' "$config" > "$out"
   '';
   # titan-dtb-check against synthetic trees: what it must accept and refuse.
