@@ -36,8 +36,10 @@ which ran in the link:../native-i2c-scan-trial.adoc[I2C bus scan trial].
 link:../native-i2c-id-trial.adoc[I2C device identification trial] (flash
 profile `ram-nixos-9`); it now makes four, into buffers filled with `0xa5`
 (flash profile `ram-nixos-10`; image `f37e2137...`, store squashfs
-`5f47da88...`, 112361472 bytes), which has not run on the phone, nor has
-`--nosmp`. Building it does not authorize starting it.
+`5f47da88...`, 112361472 bytes), which ran in the
+link:../native-i2c-id-repeat-trial.adoc[I2C identification repeat trial];
+`--nosmp` has not run on the phone. Building it does not authorize starting
+it.
 
 [source,sh]
 ----
