@@ -24,8 +24,10 @@ unchanged.
   (`SDA0`, `SCL0`) for bus 0, GPIO105 and GPIO106 (`SCL4`, `SDA4`) for bus 4?
 . Which addresses answer one read-only scan of each bus, compared with the
   overlay's `0x5d` on bus 0 and `0x58`, `0x5a`, `0x10`, `0x35`, `0x36`,
-  `0x72`, `0x51` and `0x54` on bus 4, and do timing and interrupt count make
-  each a real result?
+  `0x72`, `0x51` and `0x54` on bus 4, and is each a real result: finished in
+  under two seconds, with the controller's interrupt count risen by exactly
+  224 less the number of answers, two for each missing answer and one for
+  each answer?
 . Are both lines of each bus released after its scan?
 . Does `titan-session end-in 1` restart the phone into Ubuntu Touch, and does
   the restore work as before?
@@ -42,11 +44,16 @@ unchanged.
   Neither node sets `clock-frequency`, so the driver runs each bus at
   100 kHz; the overlay asks for 400 kHz.
 * *Bus 4's channels.* The vendor's driver reaches bus 4's registers at an
-  offset of `0x100`, because the camera control unit shares the controller
-  at `0x200`, behind an arbiter whose clock the native node enables. Mainline
-  has no channel offsets and uses offset 0, as mainline's MT8183 boards do
-  with this controller: Jacuzzi's display bridge at `0x58` and Kakadu's
-  EEPROM at `0x50` sit on it. The camera control unit does not run here.
+  offset of `0x100` and gives the camera control unit `0x200`, behind an
+  arbiter whose clock the native node enables; why it avoids offset 0 is not
+  documented. Mainline has no channel offsets and uses offset 0, as
+  mainline's MT8183 boards do with this controller: Jacuzzi's display bridge
+  at `0x58` and the EEPROMs at `0x50` of Kakadu, Krane and Kodama sit on it.
+  That channel 0's interrupt and DMA handshake reach the main CPU is shown on
+  MT8183, not on MT6771; if they do not, each transfer stalls for two
+  seconds, which the scan check catches. The driver writes only its own
+  channel's registers and its own DMA channel, at probe and after each
+  missing answer, and the camera control unit does not run here.
 * *Pins.* Mainline's MT8183 pin table gives `SDA0` and `SCL0` to GPIO82 and
   GPIO83 and `SCL4` and `SDA4` to GPIO105 and GPIO106, all in function 1, and
   no other pins for these buses. Ubuntu Touch's GPIO table, read on
@@ -81,8 +88,12 @@ in use and are not expected to answer.
   differ from the running one in exactly the two nodes' `status`, from
   `disabled` to `okay`, both in the `dtc` sources and property by property,
   with the same reserve map. It passes a tree changed that way with
-  `fdtput` and refuses one with a third change; the pin and scan checks were
-  tried on recorded and constructed readouts.
+  `fdtput` and refuses one with a third change. The scan check accepts the
+  recorded scans of bus 1 and refuses a constructed scan with one stall, or
+  with an interrupt miscounted; the scan step refuses to run before the
+  adapter check, twice on a bus, or on bus 4 before bus 0 is settled. An
+  independent review of this procedure and its scripts found no blocker;
+  its findings are fixed.
 
 == Preconditions
 
@@ -108,11 +119,19 @@ read-back must show `f79e3eb4...`, and with these changes:
   GPIO105, GPIO106 and GPIO169 from the pinctrl debugfs file. A bus may be
   scanned only if both its pins are in function 1, by MediaTek's rule, and
   read input level 1.
-* *Step 12, scans:* bus 0 first, then bus 4, each only if its pins passed:
-  save the controller's line of `/proc/interrupts`, run `timeout 300
-  i2cdetect -y -r 0` or `-r 4` once, then save the interrupt line, the eight
-  pin lines and the kernel log. The scanned bus's lines must read 1
-  afterwards. No other I2C command.
+* *Step 12, scans:* bus 0 first, then bus 4. Just before each scan its
+  bus's pins are read again and must pass; bus 4 is scanned only if bus 0
+  was refused by its gate or gave a real result with all four lines high
+  afterwards. Save the controller's line of `/proc/interrupts`, run `timeout
+  300 i2cdetect -y -r 0` or `-r 4` once, then save the interrupt line, the
+  eight pin lines and the kernel log. A real result finishes with status 0
+  in under two seconds, with the interrupt count risen by exactly 224 less
+  the number of answers, at most eight answers and no I2C error logged, and
+  the bus's lines must read 1 afterwards. No other I2C command.
+* *Part 4:* after the control-region copy, the owner checks in Ubuntu Touch
+  that the touch screen, the keyboard and its backlight work. If one does
+  not, the phone is powered fully off once, which resets the devices on
+  these buses, and checked again; either way it is recorded.
 
 == Stop conditions
 
@@ -124,16 +143,30 @@ scan rows:
 |Observation |Action
 |The adapters are not exactly `i2c-0` and `i2c-4` for these controllers
 |Record the kernel log and go to the end step without a scan.
+|The tree differs by more than the two status lines, `titan-kexec` refuses
+or the load fails, or a segment fails the placement check
+|Record the output and go to the end step. Never run `kexec` by hand.
+|The kexec'd kernel's tree does not read `okay` for both nodes, or differs
+from the tree handed over outside `/chosen`
+|Record it and go to the end step without a scan.
 |One bus's pins are not in function 1, or one of its lines reads 0
 |Record the pin lines and skip that bus's scan; the other bus may be scanned.
-|After a scan, a line of that bus reads 0
+|After a scan, a line of either bus reads 0
 |A device holds the bus. Record the lines, run no further I2C command, go to
 the end step, and after Part 3 power the phone fully off once.
-|A scan shows more than eight addresses, or has not finished after five
-minutes
-|Record it, run no further I2C command and go to the end step; after five
-minutes, end with `titan-session end-in 1` if SSH answers.
+|A scan is not a real result: it failed, took two seconds or more, counted
+other than 224 less the number of answers, showed more than eight addresses
+or logged an I2C error
+|Record it, run no further I2C command and go to the end step.
+|A scan has not finished after five minutes
+|End with `titan-session end-in 1` if SSH answers; otherwise the session
+deadlines restart the phone. Then Part 3.
 |===
+
+An empty table from bus 4 while GPIO169 reads high would point at the
+controller's channel 0 rather than a missing keyboard controller. On bus 4,
+more than eight answers with both lines high could also be powered camera
+parts; the table is recorded as it stands, and the trial still stops there.
 
 == Residual risks
 
