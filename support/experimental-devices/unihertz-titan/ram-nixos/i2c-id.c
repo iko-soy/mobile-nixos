@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 /*
- * titan-i2c-id: read one identification register from each of the two
- * devices that answered on the Titan's I2C bus at 0x11011000 (adapter
- * i2c-1; native-i2c-scan-trial.adoc). Each read is one combined transfer
- * that writes only the register's address and then reads; the table below
- * is everything the tool can do. It refuses unless i2c-1 is that
- * controller.
+ * titan-i2c-id: read identification registers of the two devices that
+ * answered on the Titan's I2C bus at 0x11011000 (adapter i2c-1;
+ * native-i2c-scan-trial.adoc). Each read is one combined transfer that
+ * writes only the register's address and then reads; the table below is
+ * everything the tool can do. It refuses unless i2c-1 is that controller.
+ * Every read buffer starts filled with SENTINEL, so a read whose data never
+ * reached memory prints SENTINEL rather than zeros (native-i2c-id-trial.adoc).
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -20,6 +21,8 @@
 #include <sys/sysmacros.h>
 #include <unistd.h>
 
+#define SENTINEL 0xa5
+
 struct id_read {
 	unsigned short address;
 	unsigned char reg;
@@ -28,8 +31,10 @@ struct id_read {
 };
 
 static const struct id_read reads[] = {
-	{ 0x2c, 0x00, 1, "chip ID of QST's QMC6308 family, which reads 80" },
-	{ 0x60, 0x0c, 2, "ID word, low byte first, of the vcnl4000 driver's CM36686 and VCNL4040 family, low byte 86" },
+	{ 0x2c, 0x00, 1, "chip ID of QST's QMC6308 family, 80; axis data on QMC6983 and QMC7983" },
+	{ 0x2c, 0x0d, 1, "chip ID of QST's QMC6983, ff, and QMC7983, 31" },
+	{ 0x60, 0x0c, 2, "ID word, low byte first, of CM36686 and VCNL4040, low byte 86; white data on VCNL4035" },
+	{ 0x60, 0x0e, 2, "ID word, low byte first, of VCNL4035, low byte 80" },
 };
 
 int main(void)
@@ -68,8 +73,9 @@ int main(void)
 		close(fd);
 		return 2;
 	}
+	printf("each read buffer starts as %02x\n", SENTINEL);
 	for (i = 0; i < sizeof(reads) / sizeof(reads[0]); i++) {
-		unsigned char reg = reads[i].reg, data[2] = { 0, 0 };
+		unsigned char reg = reads[i].reg, data[2] = { SENTINEL, SENTINEL };
 		struct i2c_msg messages[2] = {
 			{ .addr = reads[i].address, .flags = 0, .len = 1, .buf = &reg },
 			{ .addr = reads[i].address, .flags = I2C_M_RD, .len = reads[i].length, .buf = data },
@@ -84,6 +90,8 @@ int main(void)
 			return 2;
 		}
 		printf("0x%02x register 0x%02x: ", reads[i].address, reads[i].reg);
+		/* Keep the record of which read was under way if it hangs. */
+		fflush(stdout);
 		ret = ioctl(fd, I2C_RDWR, &transfer);
 		if (ret != 2) {
 			int error = ret < 0 ? errno : 0;

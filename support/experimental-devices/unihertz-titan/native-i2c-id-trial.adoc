@@ -69,7 +69,8 @@ The zeros do not identify the devices, for two reasons:
 
 A repeat that fills the buffer with a value such as `0xa5` before each read
 would settle the second point, and reads of the other parts' identification
-registers the first; each is its own trial. The session data and kernel logs
+registers the first: the link:native-i2c-id-repeat-trial.adoc[I2C
+identification repeat trial] proposes both. The session data and kernel logs
 are in the private evidence directory.
 
 == Questions
@@ -104,8 +105,9 @@ are in the private evidence directory.
   start, the address with write, the register byte, a repeated start, the
   address with read, the data, stop; there is no stop between, so no SMBus
   command made of a single byte completes. Both transfers are byte for byte
-  the first identification reads of mainline's `qmc6308` and `vcnl4000`
-  drivers, and neither register clears anything when read on those parts.
+  identification reads of mainline's drivers: the first that `qmc6308`
+  makes, and the second that `vcnl4000` makes, after register `0x0e`; neither
+  register clears anything when read on those parts.
   This is the first combined write-read, and the first transmit through the
   controller's DMA channel, on this controller; the scan only read.
 * *Image.* As in the scan trial, with `titan-i2c-id` added: stage 0's

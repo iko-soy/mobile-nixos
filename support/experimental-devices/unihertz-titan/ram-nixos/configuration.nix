@@ -70,10 +70,10 @@ let
       runHook postInstall
     '';
   };
-  # Two fixed identification reads on the I2C bus at 0x11011000 (i2c-id.c):
-  # each writes only the register's address and then reads, the tool refuses
-  # unless i2c-1 is that controller, and it stops at any error but a missing
-  # answer.
+  # Four fixed identification reads on the I2C bus at 0x11011000 (i2c-id.c):
+  # each writes only the register's address and then reads into a buffer
+  # filled with a sentinel, the tool refuses unless i2c-1 is that controller,
+  # and it stops at any error but a missing answer.
   i2cId = pkgs.pkgsStatic.stdenv.mkDerivation {
     name = "titan-i2c-id";
     src = ./i2c-id.c;

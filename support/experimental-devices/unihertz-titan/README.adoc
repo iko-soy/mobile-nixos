@@ -126,6 +126,10 @@ hardware works under NixOS.
   identifies neither: other parts at those addresses read zero there, and so
   would a read whose data never arrived. The original recovery was
   restored.
+* The link:native-i2c-id-repeat-trial.adoc[I2C identification repeat trial],
+  proposed, not run: the same with every read buffer filled with `0xa5`, so
+  a read that delivers nothing shows, and with the identification registers
+  of the other parts at those addresses.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

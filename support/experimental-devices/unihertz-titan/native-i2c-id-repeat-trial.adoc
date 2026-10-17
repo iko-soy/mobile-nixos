@@ -1,0 +1,139 @@
+= I2C identification repeat trial
+
+Status on 2026-10-17: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-i2c-id-trial.adoc[I2C device identification trial] read `00`
+from register `0x00` of `0x2c` and `00 00` from register `0x0c` of `0x60`.
+That identified neither device: other parts at those addresses keep
+measurement data in those registers, and a read whose data never reached
+memory would have printed the same zeros. This trial repeats it with
+`titan-i2c-id` changed in two ways. Every read buffer now starts filled with
+`0xa5`, so a read that delivers nothing prints `a5`. And two reads are added,
+of the identification registers of those other parts: register `0x0d` of
+`0x2c` and register `0x0e` of `0x60`. Everything else is unchanged.
+
+== Questions
+
+. As in the identification trial: do the kexec, the adapter and the pins
+  repeat, and does the scan again show exactly `0x2c` and `0x60`?
+. Does the controller's receive path deliver data, that is, do the reads
+  print anything other than `a5`?
+. If it does, which candidates do the four reads name?
+** At `0x2c`: QST's QMC6308 family, whose register `0x00` reads `0x80`
+   (mainline `qmc6308.c`), or QST's older QMC6983 or QMC7983, which keep
+   axis data at `0x00` and whose register `0x0d` reads `0xff` or `0x31`
+   (MediaTek's `qmcX983` driver, which looks for them at `0x2c`).
+** At `0x60`: the CM36686 and VCNL4040 family, whose ID word at `0x0c` has
+   low byte `0x86` (mainline `vcnl4000.c`), or Vishay's VCNL4035, which keeps
+   white-light data at `0x0c` and whose ID word at `0x0e` has low byte `0x80`
+   (mainline `vcnl4035.c`).
+. Are both bus lines released afterwards?
+. Does `titan-session end-in 1` restart the phone into Ubuntu Touch, and does
+  the restore work as before?
+
+== Basis
+
+* *The tool.* `ram-nixos/i2c-id.c` as in the identification trial, with four
+  entries in its fixed table, in this order: register `0x00` of `0x2c`, one
+  byte; register `0x0d` of `0x2c`, one byte; register `0x0c` of `0x60`, two
+  bytes; register `0x0e` of `0x60`, two bytes. It still refuses unless
+  `i2c-1` is the controller at `11011000` and `/dev/i2c-1` is device 89:1,
+  stops at any error but a missing answer, and exits 0, 1 or 2 as before.
+* *The sentinel.* Each read buffer starts as `a5 a5`. i2c-dev copies it into
+  a kernel buffer marked safe for DMA, so i2c-mt65xx does not substitute a
+  zeroed one. The controller is not cache-coherent and the buffer is too
+  small to map in place, so the DMA layer bounces it through its pool at
+  `0xfa000000` to `0xfe000000` (kernel log), copying the `a5` bytes in when
+  it maps the buffer and back when it unmaps it. Bytes a transfer never
+  delivers therefore come back as `a5`; after a failed transfer nothing is
+  copied back and the tool prints the failure (7.3-rc3: `i2c-dev.c`,
+  `i2c_get_dma_safe_msg_buf()`, `swiotlb.c`).
+* *What the sentinel cannot show.* The received bytes land in that pool,
+  below 4 GiB, so this does not test receiving into memory above 4 GiB, as
+  longer reads by drivers may. The register byte is sent from where i2c-dev
+  put it, probably above 4 GiB, and the sentinel cannot show that the right
+  register address arrived; only a value that matches a candidate's
+  identification shows that.
+* *On the bus.* As in the identification trial: each transfer is one
+  combined write-read with a repeated start. The new reads are those of the
+  drivers named above: `vcnl4035.c` reads register `0x0e` as a 16-bit word,
+  and the `qmcX983` driver reads one byte from `0x0d` by the same write and
+  read. Mainline's `vcnl4000` driver also reads `0x0e`, before `0x0c`, on
+  every probe of a CM36686, VCNL4040 or CM36672P, looking for the VCNL4200's
+  low byte `0x58`. A Capella or Vishay register is one 16-bit word, so the
+  two-byte reads at `0x60` reach neither part's read-to-clear interrupt
+  flags; on the parts named, reading these registers changes at most the
+  data-ready flag that reading axis data clears on QST's older parts.
+* *Reading the result,* each read on its own:
+** Every byte `a5`: that read delivered nothing. If no read delivers, the
+   receive path delivers nothing, the identification trial's zeros say
+   nothing about the devices, and the data path needs investigating before
+   any driver is tried.
+** One byte of a two-byte read `a5` and the other not: a partial delivery,
+   which also calls for investigating the data path and identifies nothing.
+   A single `a5` from a one-byte register that holds data may be real, one
+   time in 256.
+** Other values show only that the receive DMA wrote. A value that matches
+   a candidate's identification also shows that the register address
+   arrived, and names the part: `80` at `0x00` of `0x2c` the QMC6308 family,
+   on which `0x0d` is a control register; otherwise `31` at `0x0d` of `0x2c`
+   the QMC7983; low byte `86` at `0x0c` of `0x60` the CM36686 and VCNL4040
+   family; low byte `80` at `0x0e` of `0x60` the VCNL4035, and `58` there the
+   VCNL4200.
+** `ff` at `0x0d` of `0x2c` fits the QMC6983, but equally QST's QMC5883L,
+   which has the same register layout (mainline `qmc5883l.c`), and a register
+   nothing drives; on its own it identifies nothing.
+** Zeros again where the identification trial read them, with other reads
+   delivered: those registers really read zero. Any value that matches no
+   candidate identifies nothing.
+* *Image.* As in the identification trial, with the changed
+  `titan-i2c-id`: stage 0's ramdisk
+  `2bac8e9ec0322da4ab4846f7f0d9b301efc4046b08ee5f0581591b8162d7bf2b`, which
+  pins the store squashfs, 112361472 bytes,
+  `5f47da8846429d7b86ed8d45b4532d4ef41822a94cd27aedce6b9207c8490944`; the
+  kexec payload pairs the unchanged kernel with this ramdisk. The image is
+  16513024 bytes, SHA-256
+  `f37e21370424327d271c57ad1e4ace1bbbbea2f934b606ee26aa953c816fc437`; padded
+  to 33554432 bytes,
+  `f79e3eb42614c25f5fe32d66d636f4c1a6c32ba33642dafa00f38330c62ea57e`
+  (`tools/flash-recovery.py --profile ram-nixos-10`). All five VM cases and
+  the phone checks pass, including that the phone's own `titan-i2c-id`
+  refuses without the adapter. An independent review of the tool and this
+  procedure found no blocker; its findings are fixed.
+* *Everything else.* The kernel, the tree change, the checks and the bus map
+  of the link:native-i2c-scan-trial.adoc[I2C bus scan trial].
+
+== Preconditions
+
+As in the identification trial, with the latest control-region copy now the
+one from its Part 4.
+
+== Procedure
+
+As in the link:native-i2c-id-trial.adoc[I2C device identification trial],
+with flash profile `ram-nixos-10` and the image
+`native-ram-image-v13/UNTESTED-UNSIGNED-native-ram.img`, whose step 7
+read-back must show `f79e3eb4...`. After `titan-i2c-id` the interrupt line
+should have risen by 4, one per transfer, plus one for each missing answer.
+
+== Stop conditions
+
+The identification trial's table applies; its timeout row also covers any
+failure of `titan-i2c-id` other than a missing answer (`ENXIO`), and an exit
+status of 124 from `timeout`.
+
+== Residual risks
+
+As in the identification trial, with two more one-byte register-address
+writes: `0x0d` to `0x2c` and `0x0e` to `0x60`. On the CM36686 and VCNL4040
+family, reading `0x0e` is what its own mainline driver does first. Among the
+other parts that answer at those addresses, none is known to have a reset,
+one-time-programmable or power command at either register, and no data byte
+follows the address.
+
+== What this can and cannot show
+
+Success shows whether the controller's receive path delivers data and, if it
+does, may name one or both devices among the candidates. It does not show a
+driver, the other buses, the touch panel, the keyboard or the display.

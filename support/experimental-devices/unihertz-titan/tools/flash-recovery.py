@@ -2,13 +2,14 @@
 """Write one pinned image to the Titan's recovery partition with `fastboot flash`.
 
 This host helper writes only the `recovery` partition, and only one of
-fifteen pinned full-partition images: the USB probe envelope, the same probe
+sixteen pinned full-partition images: the USB probe envelope, the same probe
 with the repository-built kernel, the native route's first modern-kernel image,
 its diagnostic image, its first RAM NixOS image, the RAM NixOS working
 environment, the same with a larger kernel log, with `titan-kexec --nosmp`,
 with the core power-down driver, with the fixed tree check, with the tree
-check comparing reserve maps, with the read-only I2C scanner or with the I2C
-identification reads, or the offline control-region acquisition envelope,
+check comparing reserve maps, with the read-only I2C scanner, with the I2C
+identification reads or with their repeat's reads, or the offline
+control-region acquisition envelope,
 each padded with zeros to the partition size, or the preserved original
 recovery image that restores it. It
 first sends fixed read-only identity queries, including the recovery
@@ -134,12 +135,18 @@ PROFILES = {
         "sha256": "07070c4d5bf2bd2bb7867ecdfd8313b20c67c57f2126eb107608fcb2fe54ec1d",
     },
     # The same with titan-i2c-id's two identification reads, as it ran in
-    # native-i2c-id-trial.adoc (current nativeRamImage); stage 0 pins the new
-    # store.
+    # native-i2c-id-trial.adoc; stage 0 pins the new store.
     "ram-nixos-9": {
         "source_bytes": 16513024,
         "source_sha256": "a4b76fcfb55e6b25eb14ceba5da39c8d00f74002440bb1f9645a1a6fb04ec8d5",
         "sha256": "7bca74ec3a4348744487060fea451062648e5d3fe815a3864dc9da96d8481dab",
+    },
+    # The same with titan-i2c-id's four reads into buffers filled with a
+    # sentinel (current nativeRamImage); stage 0 pins the new store.
+    "ram-nixos-10": {
+        "source_bytes": 16513024,
+        "source_sha256": "f37e21370424327d271c57ad1e4ace1bbbbea2f934b606ee26aa953c816fc437",
+        "sha256": "f79e3eb42614c25f5fe32d66d636f4c1a6c32ba33642dafa00f38330c62ea57e",
     },
     # The offline control-region acquisition envelope (control/README.adoc),
     # which restarts into the bootloader after the transfer or at its deadline,
