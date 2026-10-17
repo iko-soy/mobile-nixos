@@ -140,6 +140,9 @@ hardware works under NixOS.
   (Ubuntu Touch drives it with `synaptics_dsx`); bus 4 completed no transfer,
   every address stalling, and the trial stopped there. The original recovery
   was restored, and touch and keyboard work.
+* The link:native-i2c-channel-trial.adoc[keyboard bus channel trial],
+  proposed, not run: bus 4 alone, driven through its channel at `0x100` as
+  MediaTek's kernel does (kernel patch 0006), scanned once with reads only.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].
