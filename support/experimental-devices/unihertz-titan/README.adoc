@@ -133,6 +133,10 @@ hardware works under NixOS.
   delivered data; `0x2c` read `32` from its chip-ID register `0x0d` and is
   most likely QST's QMC7983 magnetometer, while `0x60` matched no candidate.
   The original recovery was restored.
+* The link:native-i2c-input-scan-trial.adoc[touch and keyboard bus scan
+  trial], proposed, not run: the same kexec with the controllers at
+  `0x11007000` and `0x11008000` enabled, the touch panel's and the keyboard's
+  buses, each scanned once with reads only.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

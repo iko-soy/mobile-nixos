@@ -1,0 +1,151 @@
+= Touch and keyboard bus scan trial
+
+Status on 2026-10-17: *proposed; not run.* Running it needs the owner's
+explicit approval of this exact procedure, and that approval covers one run.
+
+The link:native-i2c-scan-trial.adoc[I2C bus scan trial] and the
+identification trials that followed enabled the sensors' I2C controller at
+`0x11011000` through a kexec'd tree and scanned it. This trial does the same
+for two other controllers at once: `0x11007000`, the vendor's bus 0, where the
+overlay places the touch panel, and `0x11008000`, the vendor's bus 4, where it
+places the keyboard's controller and the cameras. Each bus is scanned once with
+reads only. No device node is added, so no device driver binds and nothing is
+written to any device. The image is the one of the
+link:native-i2c-id-repeat-trial.adoc[I2C identification repeat trial],
+unchanged.
+
+== Questions
+
+. Does the kexec with both controllers enabled pass its checks and boot with
+  all eight CPUs and the same reserved memory, and do exactly two adapters
+  appear, `i2c-0` for the controller at `11007000` and `i2c-4` for the one at
+  `11008000`?
+. Are each bus's pins in function 1 with both lines high: GPIO82 and GPIO83
+  (`SDA0`, `SCL0`) for bus 0, GPIO105 and GPIO106 (`SCL4`, `SDA4`) for bus 4?
+. Which addresses answer one read-only scan of each bus, compared with the
+  overlay's `0x5d` on bus 0 and `0x58`, `0x5a`, `0x10`, `0x35`, `0x36`,
+  `0x72`, `0x51` and `0x54` on bus 4, and do timing and interrupt count make
+  each a real result?
+. Are both lines of each bus released after its scan?
+. Does `titan-session end-in 1` restart the phone into Ubuntu Touch, and does
+  the restore work as before?
+
+== Basis
+
+* *Controllers.* The native tree's nodes match the vendor's for both: the
+  same register block, the same DMA channel (`0x11000080` for bus 0,
+  `0x11000100` for bus 4) and the same interrupt (81 and 82). The native
+  clocks are those of mainline's `mt8183.dtsi`: `CLK_INFRA_I2C0` and
+  `CLK_INFRA_AP_DMA` for bus 0, and `CLK_INFRA_I2C1`, `CLK_INFRA_AP_DMA` and
+  `CLK_INFRA_I2C1_ARBITER` for bus 4; the vendor's clock numbers are one
+  higher throughout, as for bus 1. The aliases name them `i2c0` and `i2c4`.
+  Neither node sets `clock-frequency`, so the driver runs each bus at
+  100 kHz; the overlay asks for 400 kHz.
+* *Bus 4's channels.* The vendor's driver reaches bus 4's registers at an
+  offset of `0x100`, because the camera control unit shares the controller
+  at `0x200`, behind an arbiter whose clock the native node enables. Mainline
+  has no channel offsets and uses offset 0, as mainline's MT8183 boards do
+  with this controller: Jacuzzi's display bridge at `0x58` and Kakadu's
+  EEPROM at `0x50` sit on it. The camera control unit does not run here.
+* *Pins.* Mainline's MT8183 pin table gives `SDA0` and `SCL0` to GPIO82 and
+  GPIO83 and `SCL4` and `SDA4` to GPIO105 and GPIO106, all in function 1, and
+  no other pins for these buses. Ubuntu Touch's GPIO table, read on
+  2026-10-16, shows all four in mode 1, as inputs reading high.
+* *Devices in the vendor overlay.*
+** Bus 0: the touch panel at `0x5d` (`mediatek,cap_touch`), with its
+   interrupt on GPIO1 and its reset on GPIO18; Ubuntu Touch drives GPIO18
+   high, out of reset.
+** Bus 4: the keyboard's controller, an Awinic AW9523 at `0x58`, with its
+   reset on GPIO169 and its interrupt on GPIO2; a second AW9523 at `0x5a`,
+   for LEDs; the cameras at `0x10` and `0x35`, the first camera's focus motor
+   at `0x72`, the cameras' EEPROMs at `0x51` and `0x54`, and a node of the
+   camera control unit at `0x36`. Ubuntu Touch drives GPIO169 high, out of
+   reset.
++
+Whether the touch panel and the AW9523s answer depends on their supplies and
+reset lines in the kexec'd kernel, which no driver sets; the session reads
+GPIO1, GPIO2, GPIO18 and GPIO169 to tell. The cameras are powered only while
+in use and are not expected to answer.
+* *What a scan does.* As in the scan trial, `i2cdetect -y -r` reads one byte
+  from each address from `0x08` to `0x77` and writes nothing; this controller
+  cannot send a write without data. A device that answers returns a byte from
+  its current register, usually the first one after reset. On the AW9523
+  that is input port 0, which mainline's `pinctrl-aw9523` driver reads in its
+  interrupt handler to clear the chip's interrupt; the scan's read may do
+  the same. Its chip ID, `0x23` at register `0x10`, is for a later trial.
+* *Image.* The repeat trial's, unchanged: flash profile `ram-nixos-10`, image
+  `f37e2137...`, padded `f79e3eb4...`, with the same kernel, stage 0, store
+  and kexec payload. It has the static `i2cdetect`; `titan-i2c-id` refuses
+  without the controller at `11011000` and is not run.
+* *Checks.* The session's tree check now requires the modified tree to
+  differ from the running one in exactly the two nodes' `status`, from
+  `disabled` to `okay`, both in the `dtc` sources and property by property,
+  with the same reserve map. It passes a tree changed that way with
+  `fdtput` and refuses one with a third change; the pin and scan checks were
+  tried on recorded and constructed readouts.
+
+== Preconditions
+
+As in the identification repeat trial, with the latest control-region copy now
+the one from its Part 4.
+
+== Procedure
+
+As in the link:native-i2c-scan-trial.adoc[I2C bus scan trial], with flash
+profile `ram-nixos-10` and the image
+`native-ram-image-v13/UNTESTED-UNSIGNED-native-ram.img`, whose step 7
+read-back must show `f79e3eb4...`, and with these changes:
+
+* *Step 11:* set `status` to `okay` on `/soc/i2c@11007000` and
+  `/soc/i2c@11008000`, each checked with `fdtget` before and after, and pass
+  the tree check above; the marker is `titan_kexec=i2c04`. The records must
+  show both nodes reading `okay` and a tree that differs from the one handed
+  over only in `/chosen`.
+* *Step 12, adapters:* `ls /sys/bus/i2c/devices` must show exactly `i2c-0`
+  and `i2c-4`, and `readlink -f` must end in `/11007000.i2c/i2c-0` and
+  `/11008000.i2c/i2c-4`.
+* *Step 12, pins:* save the lines for GPIO1, GPIO2, GPIO18, GPIO82, GPIO83,
+  GPIO105, GPIO106 and GPIO169 from the pinctrl debugfs file. A bus may be
+  scanned only if both its pins are in function 1, by MediaTek's rule, and
+  read input level 1.
+* *Step 12, scans:* bus 0 first, then bus 4, each only if its pins passed:
+  save the controller's line of `/proc/interrupts`, run `timeout 300
+  i2cdetect -y -r 0` or `-r 4` once, then save the interrupt line, the eight
+  pin lines and the kernel log. The scanned bus's lines must read 1
+  afterwards. No other I2C command.
+
+== Stop conditions
+
+The scan trial's table applies, with these rows replacing its adapter, pin and
+scan rows:
+
+[cols="2,3",options="header"]
+|===
+|Observation |Action
+|The adapters are not exactly `i2c-0` and `i2c-4` for these controllers
+|Record the kernel log and go to the end step without a scan.
+|One bus's pins are not in function 1, or one of its lines reads 0
+|Record the pin lines and skip that bus's scan; the other bus may be scanned.
+|After a scan, a line of that bus reads 0
+|A device holds the bus. Record the lines, run no further I2C command, go to
+the end step, and after Part 3 power the phone fully off once.
+|A scan shows more than eight addresses, or has not finished after five
+minutes
+|Record it, run no further I2C command and go to the end step; after five
+minutes, end with `titan-session end-in 1` if SSH answers.
+|===
+
+== Residual risks
+
+As in the scan trial, now on two buses. The keyboard controller's pending
+input interrupt may be cleared by the scan's read. A device without power can
+load a bus's lines; the pin check before each scan catches lines held low. A
+read that times out ends without a stop condition and the driver has no bus
+recovery; the line check after each scan shows whether that left a device
+holding the bus, and stops further scans.
+
+== What this can and cannot show
+
+Success shows which devices answer on the touch panel's and the keyboard's
+buses in the native kernel, the start for their drivers. It does not show a
+driver, the touch panel or the keyboard working, or the display.
