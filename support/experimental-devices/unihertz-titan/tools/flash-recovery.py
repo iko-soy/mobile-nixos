@@ -133,8 +133,9 @@ PROFILES = {
         "source_sha256": "16dd05a5a0cfc0c0436f121a7d13967fb87f24799334225c4ad9e5a4ec31f3d7",
         "sha256": "07070c4d5bf2bd2bb7867ecdfd8313b20c67c57f2126eb107608fcb2fe54ec1d",
     },
-    # The same with titan-i2c-id's two identification reads (current
-    # nativeRamImage); stage 0 pins the new store.
+    # The same with titan-i2c-id's two identification reads, as it ran in
+    # native-i2c-id-trial.adoc (current nativeRamImage); stage 0 pins the new
+    # store.
     "ram-nixos-9": {
         "source_bytes": 16513024,
         "source_sha256": "a4b76fcfb55e6b25eb14ceba5da39c8d00f74002440bb1f9645a1a6fb04ec8d5",

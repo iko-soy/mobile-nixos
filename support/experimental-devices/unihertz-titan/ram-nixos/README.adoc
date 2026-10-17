@@ -33,8 +33,9 @@ also compares the trees' reserve maps, and the system has a static
 `i2cdetect` with no I2C writer in the store (flash profile `ram-nixos-8`),
 which ran in the link:../native-i2c-scan-trial.adoc[I2C bus scan trial]. It
 now also has `titan-i2c-id` (flash profile `ram-nixos-9`; image
-`a4b76fcf...`, store squashfs `bb9f518d...`, 112373760 bytes), which has not
-run on the phone, nor has `--nosmp`. Building it does not authorize starting it.
+`a4b76fcf...`, store squashfs `bb9f518d...`, 112373760 bytes), which ran in
+the link:../native-i2c-id-trial.adoc[I2C device identification trial];
+`--nosmp` has not run on the phone. Building it does not authorize starting it.
 
 [source,sh]
 ----
