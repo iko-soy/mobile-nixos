@@ -134,9 +134,12 @@ hardware works under NixOS.
   most likely QST's QMC7983 magnetometer, while `0x60` matched no candidate.
   The original recovery was restored.
 * The link:native-i2c-input-scan-trial.adoc[touch and keyboard bus scan
-  trial], proposed, not run: the same kexec with the controllers at
-  `0x11007000` and `0x11008000` enabled, the touch panel's and the keyboard's
-  buses, each scanned once with reads only.
+  trial], run once on 2026-10-17: the same kexec with the controllers at
+  `0x11007000` and `0x11008000` enabled, each bus scanned once with reads
+  only. Bus 0 answered at `0x67`, most likely its Synaptics touch controller
+  (Ubuntu Touch drives it with `synaptics_dsx`); bus 4 completed no transfer,
+  every address stalling, and the trial stopped there. The original recovery
+  was restored, and touch and keyboard work.
 * The link:consistent-preservation.adoc[remaining consistent preservation
   requirements] and the link:userspace-feasibility.adoc[kernel/userspace
   feasibility record].

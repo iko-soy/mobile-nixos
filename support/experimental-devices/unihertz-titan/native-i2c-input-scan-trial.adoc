@@ -1,7 +1,9 @@
 = Touch and keyboard bus scan trial
 
-Status on 2026-10-17: *proposed; not run.* Running it needs the owner's
-explicit approval of this exact procedure, and that approval covers one run.
+Status on 2026-10-17: *run once with the owner's explicit approval. Bus 0
+answered at `0x67`, most likely its Synaptics touch controller; bus 4's scan
+stalled on every address and is no result. See <<result,the result>>.* Each
+repetition needs the owner's explicit approval of this exact procedure.
 
 The link:native-i2c-scan-trial.adoc[I2C bus scan trial] and the
 identification trials that followed enabled the sensors' I2C controller at
@@ -13,6 +15,73 @@ reads only. No device node is added, so no device driver binds and nothing is
 written to any device. The image is the one of the
 link:native-i2c-id-repeat-trial.adoc[I2C identification repeat trial],
 unchanged.
+
+[[result]]
+== Result (2026-10-17)
+
+The owner approved the procedure while its independent review was still
+running; the read-only steps ran, the review found no blocker, and its
+findings, all making the procedure stricter, were fixed before the first
+write, after which the owner continued. The owner ran the step 2 copies, the
+entries, the Volume Up start, the unlocks and the Part 4 check; watchers ran
+the fastboot steps, the push and the USB log, and the session ran over SSH
+from the Mac. A first fastboot watcher timed out before the entry, with
+nothing written; a second caught it.
+
+* *Preconditions and Part 1.* The baseline found the battery full and
+  charging, no update pending and empty recovery command directories; the
+  step 2 copies found boot, recovery and dtbo identical to their preserved
+  copies and no control region changed since the repeat trial's Part 4 copy.
+  `Writing 'recovery' OKAY`, and step 7 read recovery back as `f79e3eb4...`.
+* *Question 1, yes.* The tree check found exactly the two nodes' `status`
+  changed, in the `dtc` sources and property by property; `kexec_load`
+  placed the kernel at `0x42400000` and the rest just above, and the
+  placement check passed. The next kernel brought up all eight CPUs with the
+  first boot's reserved memory and a tree that read `okay` for both nodes
+  and differed from the one handed over only in `/chosen`. Exactly two
+  adapters existed, `i2c-0` for the controller at `11007000` and `i2c-4` for
+  the one at `11008000`, both probed without error.
+* *Question 2, yes.* GPIO82, GPIO83, GPIO105 and GPIO106 read mode 9,
+  function 1, as inputs reading high with pull-ups on. Of the pins recorded
+  only, GPIO18, the touch panel's reset, was an output driven high, and
+  GPIO1, its interrupt, an input reading low; GPIO169, the keyboard
+  controller's reset, was an output driven low, holding it in reset, and
+  GPIO2, its interrupt, an input reading high.
+* *Question 3: bus 0, `0x67`; bus 4, no result.*
+** Bus 0 gave a real result: one address answered, `0x67`, in 0.11
+   seconds, while the interrupt count rose from 0 to 223, 224 less one
+   answer, with no I2C error logged. Nothing answered at the overlay's
+   `0x5d`. Under Ubuntu Touch, read afterwards, the overlay's node at `0x5d`
+   is bound to the `synaptics_dsx` driver: the touch controller is a
+   Synaptics part, and `0x67`, the bus's only answer with the controller's
+   reset released, is most likely its address, which that driver sets
+   rather than the node; this is not otherwise confirmed.
+** Bus 4 gave no result: the scan took 226 seconds and the interrupt count
+   stayed 0, so every transfer stalled for its two-second timeout and the
+   controller completed none; the kernel logged nothing. As the table
+   requires, no further I2C command ran. The keyboard controller was held in
+   reset and could not have answered, but a controller that completes no
+   transfer at all fits the risk named in the basis: channel 0's interrupt
+   or DMA handshake not reaching the main CPU on MT6771. The cause is not
+   established.
+* *Question 4, yes.* After both scans all four bus lines read high.
+* *Question 5, yes.* `titan-session end-in 1` at 357 seconds of uptime; the
+  phone restarted and Ubuntu Touch booted (`bootreason=reboot`). From Ubuntu
+  Touch, `sudo /sbin/reboot bootloader` reached fastboot, the preserved
+  original was written (`Writing 'recovery' OKAY`) and Ubuntu Touch
+  returned. The read-back found recovery `4dd1c1f7...`, with boot and dtbo
+  unchanged throughout; of the control regions only `expdb` changed, as
+  after every boot. In Part 4 the owner found the touch screen, the keyboard
+  and its backlight working.
+
+The touch controller answers on the native kernel's bus 0 with nothing but
+the bootloader's state: its reset released and, it appears, its supply on.
+Mainline drives Synaptics touch controllers with its RMI4 driver
+(`syna,rmi4-i2c`), which reads and writes the controller's registers and so
+needs its own design and trial. Bus 4 needs its channel question settled
+first, for instance by reaching the controller where the vendor's driver
+does, and its keyboard controller needs its reset released. The session data
+and kernel logs are in the private evidence directory.
 
 == Questions
 
